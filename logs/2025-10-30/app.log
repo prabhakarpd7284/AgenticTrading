@@ -1,0 +1,148 @@
+[E 251030 14:24:34 smartConnect:221] Error occurred while making a POST request to https://apiconnect.angelone.in/rest/auth/angelbroking/user/v1/loginByPassword. Headers: {'Content-type': 'application/json', 'X-ClientLocalIP': '127.0.0.1', 'X-ClientPublicIP': '106.193.147.98', 'X-MACAddress': '3d:61:01:d1:ee:aa', 'Accept': 'application/json', 'X-PrivateKey': 'xbNanBzM', 'X-UserType': 'USER', 'X-SourceID': 'WEB'}, Request: {'clientcode': 'G192004', 'password': '7284', 'totp': '444694'}, Response: HTTPSConnectionPool(host='apiconnect.angelone.in', port=443): Max retries exceeded with url: /rest/auth/angelbroking/user/v1/loginByPassword (Caused by ConnectTimeoutError(<urllib3.connection.HTTPSConnection object at 0x121e21cd0>, 'Connection to apiconnect.angelone.in timed out. (connect timeout=7)'))
+[E 251030 14:27:16 smartConnect:221] Error occurred while making a POST request to https://apiconnect.angelone.in/rest/auth/angelbroking/user/v1/loginByPassword. Headers: {'Content-type': 'application/json', 'X-ClientLocalIP': '127.0.0.1', 'X-ClientPublicIP': '106.193.147.98', 'X-MACAddress': '3d:61:01:d1:ee:aa', 'Accept': 'application/json', 'X-PrivateKey': 'xbNanBzM', 'X-UserType': 'USER', 'X-SourceID': 'WEB'}, Request: {'clientcode': 'G192004', 'password': '7284', 'totp': '651022'}, Response: HTTPSConnectionPool(host='apiconnect.angelone.in', port=443): Max retries exceeded with url: /rest/auth/angelbroking/user/v1/loginByPassword (Caused by NameResolutionError("<urllib3.connection.HTTPSConnection object at 0x121e9b5f0>: Failed to resolve 'apiconnect.angelone.in' ([Errno 8] nodename nor servname provided, or not known)"))
+[E 251031 05:54:05 smartConnect:246] Error occurred while making a POST request to https://apiconnect.angelone.in/rest/secure/angelbroking/historical/v1/getCandleData. Error: Invalid Token. URL: https://apiconnect.angelone.in/rest/secure/angelbroking/historical/v1/getCandleData, Headers: {'Content-type': 'application/json', 'X-ClientLocalIP': '127.0.0.1', 'X-ClientPublicIP': '106.193.147.98', 'X-MACAddress': '3d:61:01:d1:ee:aa', 'Accept': 'application/json', 'X-PrivateKey': 'xbNanBzM', 'X-UserType': 'USER', 'X-SourceID': 'WEB'}, Request: {'exchange': 'NSE', 'symboltoken': 11536, 'interval': 'FIVE_MINUTE', 'fromdate': '2025-10-30 00:00', 'todate': '2025-10-31 00:00'}, Response: {'success': False, 'message': 'Invalid Token', 'errorCode': 'AG8001', 'data': ''}
+[E 251031 06:14:47 smartConnect:221] Error occurred while making a POST request to https://apiconnect.angelone.in/rest/secure/angelbroking/historical/v1/getCandleData. Headers: {'Content-type': 'application/json', 'X-ClientLocalIP': '127.0.0.1', 'X-ClientPublicIP': '106.193.147.98', 'X-MACAddress': '3d:61:01:d1:ee:aa', 'Accept': 'application/json', 'X-PrivateKey': 'xbNanBzM', 'X-UserType': 'USER', 'X-SourceID': 'WEB', 'Authorization': 'Bearer eyJhbGciOiJIUzUxMiJ9.eyJ1c2VybmFtZSI6IkcxOTIwMDQiLCJyb2xlcyI6MCwidXNlcnR5cGUiOiJVU0VSIiwidG9rZW4iOiJleUpoYkdjaU9pSlNVekkxTmlJc0luUjVjQ0k2SWtwWFZDSjkuZXlKMWMyVnlYM1I1Y0dVaU9pSmpiR2xsYm5RaUxDSjBiMnRsYmw5MGVYQmxJam9pZEhKaFpHVmZZV05qWlhOelgzUnZhMlZ1SWl3aVoyMWZhV1FpT2pFeExDSnpiM1Z5WTJVaU9pSXpJaXdpWkdWMmFXTmxYMmxrSWpvaU5HTTBNMkptWmpRdE1tWmxNaTB6TUdZNUxUazRNRE10TmpZMk5ESmpOREk1WVRZeUlpd2lhMmxrSWpvaWRISmhaR1ZmYTJWNVgzWXlJaXdpYjIxdVpXMWhibUZuWlhKcFpDSTZNVEVzSW5CeWIyUjFZM1J6SWpwN0ltUmxiV0YwSWpwN0luTjBZWFIxY3lJNkltRmpkR2wyWlNKOUxDSnRaaUk2ZXlKemRHRjBkWE1pT2lKaFkzUnBkbVVpZlgwc0ltbHpjeUk2SW5SeVlXUmxYMnh2WjJsdVgzTmxjblpwWTJVaUxDSnpkV0lpT2lKSE1Ua3lNREEwSWl3aVpYaHdJam94TnpZeE9UVTJOalE0TENKdVltWWlPakUzTmpFNE56QXdOamdzSW1saGRDSTZNVGMyTVRnM01EQTJPQ3dpYW5ScElqb2lORGMzWW1ObVlURXRPVGhrT0MwME5HVmlMVGczTURjdFpUTTNOemRrT0RBM1lUazBJaXdpVkc5clpXNGlPaUlpZlEuU2k2N1JxTGZNbnBFRTJFanJpdWpjVlQyUzE3SVVXclV5dUlxZGhhWUNIY24tM3JlVGJVdzJObFRPeEpubHRVZXRxX2d6ejA0ZG5ObWptVXhvQ3FhOVRKSWN3a2NnNVZCYU1jX3BLNV9ralF6NlF6T3Y4UGQySVpkQzJPTnc5dVNpTkZ1QlQybGxUZGJyZmVKSTdMUkpBZkRyWmVyQTNXakhNdzd3dmlUcUprIiwiQVBJLUtFWSI6InhiTmFuQnpNIiwiWC1PTEQtQVBJLUtFWSI6dHJ1ZSwiaWF0IjoxNzYxODcwMjQ4LCJleHAiOjE3NjE5MzU0MDB9.Rd1SAi6ctRNi_U2mn5djJl1khu4Oz2CB9f4bR_srO8swiWDjCRutSI4WMtii29pXf1YK586tkwx_n1ZkieeBFQ'}, Request: {'exchange': 'NSE', 'symboltoken': 17438, 'interval': 'FIVE_MINUTE', 'fromdate': datetime.datetime(2025, 10, 30, 0, 0), 'todate': Timestamp('2025-11-01 00:00:00')}, Response: Object of type datetime is not JSON serializable
+[E 251031 06:14:47 3190781178:40] Historic Api failed: Object of type datetime is not JSON serializable
+    Traceback (most recent call last):
+      File "/var/folders/9h/qck898y12_526qs_2yp6rspm0000gn/T/ipykernel_6507/3190781178.py", line 35, in fetch_hdata_from
+        d = smartApi.getCandleData(historicParam)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+      File "/Users/praprsa/Github/AgenticTrading/.venv/lib/python3.12/site-packages/SmartApi/smartConnect.py", line 465, in getCandleData
+        getCandleDataResponse=self._postRequest("api.candle.data",historicDataParams)
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+      File "/Users/praprsa/Github/AgenticTrading/.venv/lib/python3.12/site-packages/SmartApi/smartConnect.py", line 263, in _postRequest
+        return self._request(route, "POST", params)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+      File "/Users/praprsa/Github/AgenticTrading/.venv/lib/python3.12/site-packages/SmartApi/smartConnect.py", line 222, in _request
+        raise e
+      File "/Users/praprsa/Github/AgenticTrading/.venv/lib/python3.12/site-packages/SmartApi/smartConnect.py", line 212, in _request
+        data=json.dumps(params) if method in ["POST", "PUT"] else None,
+             ^^^^^^^^^^^^^^^^^^
+      File "/Users/praprsa/.local/share/uv/python/cpython-3.12.12-macos-aarch64-none/lib/python3.12/json/__init__.py", line 231, in dumps
+        return _default_encoder.encode(obj)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+      File "/Users/praprsa/.local/share/uv/python/cpython-3.12.12-macos-aarch64-none/lib/python3.12/json/encoder.py", line 200, in encode
+        chunks = self.iterencode(o, _one_shot=True)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+      File "/Users/praprsa/.local/share/uv/python/cpython-3.12.12-macos-aarch64-none/lib/python3.12/json/encoder.py", line 258, in iterencode
+        return _iterencode(o, 0)
+               ^^^^^^^^^^^^^^^^^
+      File "/Users/praprsa/.local/share/uv/python/cpython-3.12.12-macos-aarch64-none/lib/python3.12/json/encoder.py", line 180, in default
+        raise TypeError(f'Object of type {o.__class__.__name__} '
+    TypeError: Object of type datetime is not JSON serializable
+[E 251031 06:15:30 smartConnect:221] Error occurred while making a POST request to https://apiconnect.angelone.in/rest/secure/angelbroking/historical/v1/getCandleData. Headers: {'Content-type': 'application/json', 'X-ClientLocalIP': '127.0.0.1', 'X-ClientPublicIP': '106.193.147.98', 'X-MACAddress': '3d:61:01:d1:ee:aa', 'Accept': 'application/json', 'X-PrivateKey': 'xbNanBzM', 'X-UserType': 'USER', 'X-SourceID': 'WEB', 'Authorization': 'Bearer eyJhbGciOiJIUzUxMiJ9.eyJ1c2VybmFtZSI6IkcxOTIwMDQiLCJyb2xlcyI6MCwidXNlcnR5cGUiOiJVU0VSIiwidG9rZW4iOiJleUpoYkdjaU9pSlNVekkxTmlJc0luUjVjQ0k2SWtwWFZDSjkuZXlKMWMyVnlYM1I1Y0dVaU9pSmpiR2xsYm5RaUxDSjBiMnRsYmw5MGVYQmxJam9pZEhKaFpHVmZZV05qWlhOelgzUnZhMlZ1SWl3aVoyMWZhV1FpT2pFeExDSnpiM1Z5WTJVaU9pSXpJaXdpWkdWMmFXTmxYMmxrSWpvaU5HTTBNMkptWmpRdE1tWmxNaTB6TUdZNUxUazRNRE10TmpZMk5ESmpOREk1WVRZeUlpd2lhMmxrSWpvaWRISmhaR1ZmYTJWNVgzWXlJaXdpYjIxdVpXMWhibUZuWlhKcFpDSTZNVEVzSW5CeWIyUjFZM1J6SWpwN0ltUmxiV0YwSWpwN0luTjBZWFIxY3lJNkltRmpkR2wyWlNKOUxDSnRaaUk2ZXlKemRHRjBkWE1pT2lKaFkzUnBkbVVpZlgwc0ltbHpjeUk2SW5SeVlXUmxYMnh2WjJsdVgzTmxjblpwWTJVaUxDSnpkV0lpT2lKSE1Ua3lNREEwSWl3aVpYaHdJam94TnpZeE9UVTJOalE0TENKdVltWWlPakUzTmpFNE56QXdOamdzSW1saGRDSTZNVGMyTVRnM01EQTJPQ3dpYW5ScElqb2lORGMzWW1ObVlURXRPVGhrT0MwME5HVmlMVGczTURjdFpUTTNOemRrT0RBM1lUazBJaXdpVkc5clpXNGlPaUlpZlEuU2k2N1JxTGZNbnBFRTJFanJpdWpjVlQyUzE3SVVXclV5dUlxZGhhWUNIY24tM3JlVGJVdzJObFRPeEpubHRVZXRxX2d6ejA0ZG5ObWptVXhvQ3FhOVRKSWN3a2NnNVZCYU1jX3BLNV9ralF6NlF6T3Y4UGQySVpkQzJPTnc5dVNpTkZ1QlQybGxUZGJyZmVKSTdMUkpBZkRyWmVyQTNXakhNdzd3dmlUcUprIiwiQVBJLUtFWSI6InhiTmFuQnpNIiwiWC1PTEQtQVBJLUtFWSI6dHJ1ZSwiaWF0IjoxNzYxODcwMjQ4LCJleHAiOjE3NjE5MzU0MDB9.Rd1SAi6ctRNi_U2mn5djJl1khu4Oz2CB9f4bR_srO8swiWDjCRutSI4WMtii29pXf1YK586tkwx_n1ZkieeBFQ'}, Request: {'exchange': 'NSE', 'symboltoken': 1594, 'interval': 'FIVE_MINUTE', 'fromdate': datetime.datetime(2025, 10, 30, 0, 0), 'todate': Timestamp('2025-11-01 00:00:00')}, Response: Object of type datetime is not JSON serializable
+[E 251031 06:15:30 3190781178:40] Historic Api failed: Object of type datetime is not JSON serializable
+    Traceback (most recent call last):
+      File "/var/folders/9h/qck898y12_526qs_2yp6rspm0000gn/T/ipykernel_6507/3190781178.py", line 35, in fetch_hdata_from
+        d = smartApi.getCandleData(historicParam)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+      File "/Users/praprsa/Github/AgenticTrading/.venv/lib/python3.12/site-packages/SmartApi/smartConnect.py", line 465, in getCandleData
+        getCandleDataResponse=self._postRequest("api.candle.data",historicDataParams)
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+      File "/Users/praprsa/Github/AgenticTrading/.venv/lib/python3.12/site-packages/SmartApi/smartConnect.py", line 263, in _postRequest
+        return self._request(route, "POST", params)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+      File "/Users/praprsa/Github/AgenticTrading/.venv/lib/python3.12/site-packages/SmartApi/smartConnect.py", line 222, in _request
+        raise e
+      File "/Users/praprsa/Github/AgenticTrading/.venv/lib/python3.12/site-packages/SmartApi/smartConnect.py", line 212, in _request
+        data=json.dumps(params) if method in ["POST", "PUT"] else None,
+             ^^^^^^^^^^^^^^^^^^
+      File "/Users/praprsa/.local/share/uv/python/cpython-3.12.12-macos-aarch64-none/lib/python3.12/json/__init__.py", line 231, in dumps
+        return _default_encoder.encode(obj)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+      File "/Users/praprsa/.local/share/uv/python/cpython-3.12.12-macos-aarch64-none/lib/python3.12/json/encoder.py", line 200, in encode
+        chunks = self.iterencode(o, _one_shot=True)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+      File "/Users/praprsa/.local/share/uv/python/cpython-3.12.12-macos-aarch64-none/lib/python3.12/json/encoder.py", line 258, in iterencode
+        return _iterencode(o, 0)
+               ^^^^^^^^^^^^^^^^^
+      File "/Users/praprsa/.local/share/uv/python/cpython-3.12.12-macos-aarch64-none/lib/python3.12/json/encoder.py", line 180, in default
+        raise TypeError(f'Object of type {o.__class__.__name__} '
+    TypeError: Object of type datetime is not JSON serializable
+[E 251031 06:16:08 smartConnect:221] Error occurred while making a POST request to https://apiconnect.angelone.in/rest/secure/angelbroking/historical/v1/getCandleData. Headers: {'Content-type': 'application/json', 'X-ClientLocalIP': '127.0.0.1', 'X-ClientPublicIP': '106.193.147.98', 'X-MACAddress': '3d:61:01:d1:ee:aa', 'Accept': 'application/json', 'X-PrivateKey': 'xbNanBzM', 'X-UserType': 'USER', 'X-SourceID': 'WEB', 'Authorization': 'Bearer eyJhbGciOiJIUzUxMiJ9.eyJ1c2VybmFtZSI6IkcxOTIwMDQiLCJyb2xlcyI6MCwidXNlcnR5cGUiOiJVU0VSIiwidG9rZW4iOiJleUpoYkdjaU9pSlNVekkxTmlJc0luUjVjQ0k2SWtwWFZDSjkuZXlKMWMyVnlYM1I1Y0dVaU9pSmpiR2xsYm5RaUxDSjBiMnRsYmw5MGVYQmxJam9pZEhKaFpHVmZZV05qWlhOelgzUnZhMlZ1SWl3aVoyMWZhV1FpT2pFeExDSnpiM1Z5WTJVaU9pSXpJaXdpWkdWMmFXTmxYMmxrSWpvaU5HTTBNMkptWmpRdE1tWmxNaTB6TUdZNUxUazRNRE10TmpZMk5ESmpOREk1WVRZeUlpd2lhMmxrSWpvaWRISmhaR1ZmYTJWNVgzWXlJaXdpYjIxdVpXMWhibUZuWlhKcFpDSTZNVEVzSW5CeWIyUjFZM1J6SWpwN0ltUmxiV0YwSWpwN0luTjBZWFIxY3lJNkltRmpkR2wyWlNKOUxDSnRaaUk2ZXlKemRHRjBkWE1pT2lKaFkzUnBkbVVpZlgwc0ltbHpjeUk2SW5SeVlXUmxYMnh2WjJsdVgzTmxjblpwWTJVaUxDSnpkV0lpT2lKSE1Ua3lNREEwSWl3aVpYaHdJam94TnpZeE9UVTJOalE0TENKdVltWWlPakUzTmpFNE56QXdOamdzSW1saGRDSTZNVGMyTVRnM01EQTJPQ3dpYW5ScElqb2lORGMzWW1ObVlURXRPVGhrT0MwME5HVmlMVGczTURjdFpUTTNOemRrT0RBM1lUazBJaXdpVkc5clpXNGlPaUlpZlEuU2k2N1JxTGZNbnBFRTJFanJpdWpjVlQyUzE3SVVXclV5dUlxZGhhWUNIY24tM3JlVGJVdzJObFRPeEpubHRVZXRxX2d6ejA0ZG5ObWptVXhvQ3FhOVRKSWN3a2NnNVZCYU1jX3BLNV9ralF6NlF6T3Y4UGQySVpkQzJPTnc5dVNpTkZ1QlQybGxUZGJyZmVKSTdMUkpBZkRyWmVyQTNXakhNdzd3dmlUcUprIiwiQVBJLUtFWSI6InhiTmFuQnpNIiwiWC1PTEQtQVBJLUtFWSI6dHJ1ZSwiaWF0IjoxNzYxODcwMjQ4LCJleHAiOjE3NjE5MzU0MDB9.Rd1SAi6ctRNi_U2mn5djJl1khu4Oz2CB9f4bR_srO8swiWDjCRutSI4WMtii29pXf1YK586tkwx_n1ZkieeBFQ'}, Request: {'exchange': 'NSE', 'symboltoken': 1594, 'interval': 'FIVE_MINUTE', 'fromdate': datetime.datetime(2025, 10, 29, 0, 0), 'todate': Timestamp('2025-11-01 00:00:00')}, Response: Object of type datetime is not JSON serializable
+[E 251031 06:16:08 3190781178:40] Historic Api failed: Object of type datetime is not JSON serializable
+    Traceback (most recent call last):
+      File "/var/folders/9h/qck898y12_526qs_2yp6rspm0000gn/T/ipykernel_6507/3190781178.py", line 35, in fetch_hdata_from
+        d = smartApi.getCandleData(historicParam)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+      File "/Users/praprsa/Github/AgenticTrading/.venv/lib/python3.12/site-packages/SmartApi/smartConnect.py", line 465, in getCandleData
+        getCandleDataResponse=self._postRequest("api.candle.data",historicDataParams)
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+      File "/Users/praprsa/Github/AgenticTrading/.venv/lib/python3.12/site-packages/SmartApi/smartConnect.py", line 263, in _postRequest
+        return self._request(route, "POST", params)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+      File "/Users/praprsa/Github/AgenticTrading/.venv/lib/python3.12/site-packages/SmartApi/smartConnect.py", line 222, in _request
+        raise e
+      File "/Users/praprsa/Github/AgenticTrading/.venv/lib/python3.12/site-packages/SmartApi/smartConnect.py", line 212, in _request
+        data=json.dumps(params) if method in ["POST", "PUT"] else None,
+             ^^^^^^^^^^^^^^^^^^
+      File "/Users/praprsa/.local/share/uv/python/cpython-3.12.12-macos-aarch64-none/lib/python3.12/json/__init__.py", line 231, in dumps
+        return _default_encoder.encode(obj)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+      File "/Users/praprsa/.local/share/uv/python/cpython-3.12.12-macos-aarch64-none/lib/python3.12/json/encoder.py", line 200, in encode
+        chunks = self.iterencode(o, _one_shot=True)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+      File "/Users/praprsa/.local/share/uv/python/cpython-3.12.12-macos-aarch64-none/lib/python3.12/json/encoder.py", line 258, in iterencode
+        return _iterencode(o, 0)
+               ^^^^^^^^^^^^^^^^^
+      File "/Users/praprsa/.local/share/uv/python/cpython-3.12.12-macos-aarch64-none/lib/python3.12/json/encoder.py", line 180, in default
+        raise TypeError(f'Object of type {o.__class__.__name__} '
+    TypeError: Object of type datetime is not JSON serializable
+[E 251031 06:16:21 smartConnect:221] Error occurred while making a POST request to https://apiconnect.angelone.in/rest/secure/angelbroking/historical/v1/getCandleData. Headers: {'Content-type': 'application/json', 'X-ClientLocalIP': '127.0.0.1', 'X-ClientPublicIP': '106.193.147.98', 'X-MACAddress': '3d:61:01:d1:ee:aa', 'Accept': 'application/json', 'X-PrivateKey': 'xbNanBzM', 'X-UserType': 'USER', 'X-SourceID': 'WEB', 'Authorization': 'Bearer eyJhbGciOiJIUzUxMiJ9.eyJ1c2VybmFtZSI6IkcxOTIwMDQiLCJyb2xlcyI6MCwidXNlcnR5cGUiOiJVU0VSIiwidG9rZW4iOiJleUpoYkdjaU9pSlNVekkxTmlJc0luUjVjQ0k2SWtwWFZDSjkuZXlKMWMyVnlYM1I1Y0dVaU9pSmpiR2xsYm5RaUxDSjBiMnRsYmw5MGVYQmxJam9pZEhKaFpHVmZZV05qWlhOelgzUnZhMlZ1SWl3aVoyMWZhV1FpT2pFeExDSnpiM1Z5WTJVaU9pSXpJaXdpWkdWMmFXTmxYMmxrSWpvaU5HTTBNMkptWmpRdE1tWmxNaTB6TUdZNUxUazRNRE10TmpZMk5ESmpOREk1WVRZeUlpd2lhMmxrSWpvaWRISmhaR1ZmYTJWNVgzWXlJaXdpYjIxdVpXMWhibUZuWlhKcFpDSTZNVEVzSW5CeWIyUjFZM1J6SWpwN0ltUmxiV0YwSWpwN0luTjBZWFIxY3lJNkltRmpkR2wyWlNKOUxDSnRaaUk2ZXlKemRHRjBkWE1pT2lKaFkzUnBkbVVpZlgwc0ltbHpjeUk2SW5SeVlXUmxYMnh2WjJsdVgzTmxjblpwWTJVaUxDSnpkV0lpT2lKSE1Ua3lNREEwSWl3aVpYaHdJam94TnpZeE9UVTJOalE0TENKdVltWWlPakUzTmpFNE56QXdOamdzSW1saGRDSTZNVGMyTVRnM01EQTJPQ3dpYW5ScElqb2lORGMzWW1ObVlURXRPVGhrT0MwME5HVmlMVGczTURjdFpUTTNOemRrT0RBM1lUazBJaXdpVkc5clpXNGlPaUlpZlEuU2k2N1JxTGZNbnBFRTJFanJpdWpjVlQyUzE3SVVXclV5dUlxZGhhWUNIY24tM3JlVGJVdzJObFRPeEpubHRVZXRxX2d6ejA0ZG5ObWptVXhvQ3FhOVRKSWN3a2NnNVZCYU1jX3BLNV9ralF6NlF6T3Y4UGQySVpkQzJPTnc5dVNpTkZ1QlQybGxUZGJyZmVKSTdMUkpBZkRyWmVyQTNXakhNdzd3dmlUcUprIiwiQVBJLUtFWSI6InhiTmFuQnpNIiwiWC1PTEQtQVBJLUtFWSI6dHJ1ZSwiaWF0IjoxNzYxODcwMjQ4LCJleHAiOjE3NjE5MzU0MDB9.Rd1SAi6ctRNi_U2mn5djJl1khu4Oz2CB9f4bR_srO8swiWDjCRutSI4WMtii29pXf1YK586tkwx_n1ZkieeBFQ'}, Request: {'exchange': 'NSE', 'symboltoken': 1594, 'interval': 'FIVE_MINUTE', 'fromdate': datetime.datetime(2025, 10, 29, 0, 0), 'todate': Timestamp('2025-10-30 00:00:00')}, Response: Object of type datetime is not JSON serializable
+[E 251031 06:16:21 3190781178:40] Historic Api failed: Object of type datetime is not JSON serializable
+    Traceback (most recent call last):
+      File "/var/folders/9h/qck898y12_526qs_2yp6rspm0000gn/T/ipykernel_6507/3190781178.py", line 35, in fetch_hdata_from
+        d = smartApi.getCandleData(historicParam)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+      File "/Users/praprsa/Github/AgenticTrading/.venv/lib/python3.12/site-packages/SmartApi/smartConnect.py", line 465, in getCandleData
+        getCandleDataResponse=self._postRequest("api.candle.data",historicDataParams)
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+      File "/Users/praprsa/Github/AgenticTrading/.venv/lib/python3.12/site-packages/SmartApi/smartConnect.py", line 263, in _postRequest
+        return self._request(route, "POST", params)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+      File "/Users/praprsa/Github/AgenticTrading/.venv/lib/python3.12/site-packages/SmartApi/smartConnect.py", line 222, in _request
+        raise e
+      File "/Users/praprsa/Github/AgenticTrading/.venv/lib/python3.12/site-packages/SmartApi/smartConnect.py", line 212, in _request
+        data=json.dumps(params) if method in ["POST", "PUT"] else None,
+             ^^^^^^^^^^^^^^^^^^
+      File "/Users/praprsa/.local/share/uv/python/cpython-3.12.12-macos-aarch64-none/lib/python3.12/json/__init__.py", line 231, in dumps
+        return _default_encoder.encode(obj)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+      File "/Users/praprsa/.local/share/uv/python/cpython-3.12.12-macos-aarch64-none/lib/python3.12/json/encoder.py", line 200, in encode
+        chunks = self.iterencode(o, _one_shot=True)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+      File "/Users/praprsa/.local/share/uv/python/cpython-3.12.12-macos-aarch64-none/lib/python3.12/json/encoder.py", line 258, in iterencode
+        return _iterencode(o, 0)
+               ^^^^^^^^^^^^^^^^^
+      File "/Users/praprsa/.local/share/uv/python/cpython-3.12.12-macos-aarch64-none/lib/python3.12/json/encoder.py", line 180, in default
+        raise TypeError(f'Object of type {o.__class__.__name__} '
+    TypeError: Object of type datetime is not JSON serializable
+[E 251031 06:16:58 smartConnect:221] Error occurred while making a POST request to https://apiconnect.angelone.in/rest/secure/angelbroking/historical/v1/getCandleData. Headers: {'Content-type': 'application/json', 'X-ClientLocalIP': '127.0.0.1', 'X-ClientPublicIP': '106.193.147.98', 'X-MACAddress': '3d:61:01:d1:ee:aa', 'Accept': 'application/json', 'X-PrivateKey': 'xbNanBzM', 'X-UserType': 'USER', 'X-SourceID': 'WEB', 'Authorization': 'Bearer eyJhbGciOiJIUzUxMiJ9.eyJ1c2VybmFtZSI6IkcxOTIwMDQiLCJyb2xlcyI6MCwidXNlcnR5cGUiOiJVU0VSIiwidG9rZW4iOiJleUpoYkdjaU9pSlNVekkxTmlJc0luUjVjQ0k2SWtwWFZDSjkuZXlKMWMyVnlYM1I1Y0dVaU9pSmpiR2xsYm5RaUxDSjBiMnRsYmw5MGVYQmxJam9pZEhKaFpHVmZZV05qWlhOelgzUnZhMlZ1SWl3aVoyMWZhV1FpT2pFeExDSnpiM1Z5WTJVaU9pSXpJaXdpWkdWMmFXTmxYMmxrSWpvaU5HTTBNMkptWmpRdE1tWmxNaTB6TUdZNUxUazRNRE10TmpZMk5ESmpOREk1WVRZeUlpd2lhMmxrSWpvaWRISmhaR1ZmYTJWNVgzWXlJaXdpYjIxdVpXMWhibUZuWlhKcFpDSTZNVEVzSW5CeWIyUjFZM1J6SWpwN0ltUmxiV0YwSWpwN0luTjBZWFIxY3lJNkltRmpkR2wyWlNKOUxDSnRaaUk2ZXlKemRHRjBkWE1pT2lKaFkzUnBkbVVpZlgwc0ltbHpjeUk2SW5SeVlXUmxYMnh2WjJsdVgzTmxjblpwWTJVaUxDSnpkV0lpT2lKSE1Ua3lNREEwSWl3aVpYaHdJam94TnpZeE9UVTRNREUyTENKdVltWWlPakUzTmpFNE56RTBNellzSW1saGRDSTZNVGMyTVRnM01UUXpOaXdpYW5ScElqb2lPVE5tWWpJNU16a3ROMlUxTnkwME4yWTNMV0kyWkRFdE9UVTROamhqTm1JME16UTBJaXdpVkc5clpXNGlPaUlpZlEuQkRXY0RrbjhZeFp1ODRKd3U1QVJLZ05pSm5UdGU2SWx6Mm1LdHExVGdmUkM4bURrUEZhV2YtT3huVlZRSTNzWWJ1THltNnl4TUZrU0tXajVidzFLcFZOMVlGY1M0ZC1JeGNyU3JrSUQ2QjVSZUdFRFZVVGUwV3Z1VWFZS0Y2bkJhV0JHMWZuUDdSZGdXRExzYXJvUGlHTnNvbUQxWGU3Vk9oTUUzQ0FYeV9zIiwiQVBJLUtFWSI6InhiTmFuQnpNIiwiWC1PTEQtQVBJLUtFWSI6dHJ1ZSwiaWF0IjoxNzYxODcxNjE2LCJleHAiOjE3NjE5MzU0MDB9.XEQ8Rw6R_7Y_WL976OKe4sPSYlBg8WWYMjzSrxOprXG5arGUHCeMcE5bECIwUpv-undmgZ1uJpp4NoeSbA66uw'}, Request: {'exchange': 'NSE', 'symboltoken': 1594, 'interval': 'FIVE_MINUTE', 'fromdate': datetime.datetime(2025, 10, 29, 0, 0), 'todate': Timestamp('2025-10-30 00:00:00')}, Response: Object of type datetime is not JSON serializable
+[E 251031 06:16:58 3190781178:40] Historic Api failed: Object of type datetime is not JSON serializable
+    Traceback (most recent call last):
+      File "/var/folders/9h/qck898y12_526qs_2yp6rspm0000gn/T/ipykernel_6507/3190781178.py", line 35, in fetch_hdata_from
+        d = smartApi.getCandleData(historicParam)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+      File "/Users/praprsa/Github/AgenticTrading/.venv/lib/python3.12/site-packages/SmartApi/smartConnect.py", line 465, in getCandleData
+        getCandleDataResponse=self._postRequest("api.candle.data",historicDataParams)
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+      File "/Users/praprsa/Github/AgenticTrading/.venv/lib/python3.12/site-packages/SmartApi/smartConnect.py", line 263, in _postRequest
+        return self._request(route, "POST", params)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+      File "/Users/praprsa/Github/AgenticTrading/.venv/lib/python3.12/site-packages/SmartApi/smartConnect.py", line 222, in _request
+        raise e
+      File "/Users/praprsa/Github/AgenticTrading/.venv/lib/python3.12/site-packages/SmartApi/smartConnect.py", line 212, in _request
+        data=json.dumps(params) if method in ["POST", "PUT"] else None,
+             ^^^^^^^^^^^^^^^^^^
+      File "/Users/praprsa/.local/share/uv/python/cpython-3.12.12-macos-aarch64-none/lib/python3.12/json/__init__.py", line 231, in dumps
+        return _default_encoder.encode(obj)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+      File "/Users/praprsa/.local/share/uv/python/cpython-3.12.12-macos-aarch64-none/lib/python3.12/json/encoder.py", line 200, in encode
+        chunks = self.iterencode(o, _one_shot=True)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+      File "/Users/praprsa/.local/share/uv/python/cpython-3.12.12-macos-aarch64-none/lib/python3.12/json/encoder.py", line 258, in iterencode
+        return _iterencode(o, 0)
+               ^^^^^^^^^^^^^^^^^
+      File "/Users/praprsa/.local/share/uv/python/cpython-3.12.12-macos-aarch64-none/lib/python3.12/json/encoder.py", line 180, in default
+        raise TypeError(f'Object of type {o.__class__.__name__} '
+    TypeError: Object of type datetime is not JSON serializable

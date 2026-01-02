@@ -1,0 +1,8 @@
+[E 251119 11:28:04 3108797970:39] Token fetch failed for NSE:L&TFH-EQ: single positional indexer is out-of-bounds
+[E 251119 11:28:04 smartConnect:246] Error occurred while making a POST request to https://apiconnect.angelone.in/rest/secure/angelbroking/historical/v1/getCandleData. Error: Something Went Wrong, Please Try After Sometime. URL: https://apiconnect.angelone.in/rest/secure/angelbroking/historical/v1/getCandleData, Headers: {'Content-type': 'application/json', 'X-ClientLocalIP': '127.0.0.1', 'X-ClientPublicIP': '106.193.147.98', 'X-MACAddress': '0d:d4:49:28:e7:a8', 'Accept': 'application/json', 'X-PrivateKey': 'xbNanBzM', 'X-UserType': 'USER', 'X-SourceID': 'WEB'}, Request: {'exchange': 'NSE', 'interval': 'FIVE_MINUTE', 'fromdate': '2025-11-19 00:00', 'todate': '2025-11-20 00:00'}, Response: {'message': 'Something Went Wrong, Please Try After Sometime', 'errorcode': 'AB1004', 'status': False, 'data': None}
+[E 251119 11:28:04 3108797970:242] fetch_hdata_from failed: object of type 'NoneType' has no len()
+    Traceback (most recent call last):
+      File "/var/folders/9h/qck898y12_526qs_2yp6rspm0000gn/T/ipykernel_47624/3108797970.py", line 238, in fetch_hdata_from
+        logger.debug("Fetched %s candles", len(response["data"]))
+                                           ^^^^^^^^^^^^^^^^^^^^^
+    TypeError: object of type 'NoneType' has no len()

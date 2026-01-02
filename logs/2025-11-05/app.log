@@ -1,0 +1,47 @@
+[E 251105 09:41:16 2329578142:64] Token fetch failed for OIL: single positional indexer is out-of-bounds
+[E 251105 09:41:20 2329578142:64] Token fetch failed for OIL: single positional indexer is out-of-bounds
+[E 251105 09:41:38 2329578142:64] Token fetch failed for MFSL: single positional indexer is out-of-bounds
+[E 251105 09:41:42 2329578142:64] Token fetch failed for MFSL: single positional indexer is out-of-bounds
+[E 251105 09:41:47 2329578142:64] Token fetch failed for MFSL: single positional indexer is out-of-bounds
+[E 251105 09:43:43 532688496:64] Token fetch failed for MFSL: single positional indexer is out-of-bounds
+[E 251105 09:43:47 532688496:64] Token fetch failed for MFSL-EQ: single positional indexer is out-of-bounds
+[E 251105 09:45:02 3276912829:64] Token fetch failed for MFSL: single positional indexer is out-of-bounds
+[E 251105 09:45:06 3276912829:64] Token fetch failed for MFSL-EQ: single positional indexer is out-of-bounds
+[E 251105 09:47:04 913330194:65] Token fetch failed for MFSL-EQ: single positional indexer is out-of-bounds
+[E 251105 09:47:09 913330194:65] Token fetch failed for MFSL: single positional indexer is out-of-bounds
+[E 251105 09:51:58 1474544255:65] Token fetch failed for 2142: single positional indexer is out-of-bounds
+[E 251105 10:10:07 250905426:65] Token fetch failed for NSE:NSE:MFSL-EQ-EQ: single positional indexer is out-of-bounds
+[E 251105 10:10:07 smartConnect:246] Error occurred while making a POST request to https://apiconnect.angelone.in/rest/secure/angelbroking/historical/v1/getCandleData. Error: Something Went Wrong, Please Try After Sometime. URL: https://apiconnect.angelone.in/rest/secure/angelbroking/historical/v1/getCandleData, Headers: {'Content-type': 'application/json', 'X-ClientLocalIP': '127.0.0.1', 'X-ClientPublicIP': '106.193.147.98', 'X-MACAddress': '75:89:ad:e8:db:22', 'Accept': 'application/json', 'X-PrivateKey': 'xbNanBzM', 'X-UserType': 'USER', 'X-SourceID': 'WEB'}, Request: {'exchange': 'NSE', 'interval': 'FIVE_MINUTE', 'fromdate': '2025-11-04 00:00', 'todate': '2025-11-05 00:00'}, Response: {'message': 'Something Went Wrong, Please Try After Sometime', 'errorcode': 'AB1004', 'status': False, 'data': None}
+[E 251105 10:10:07 250905426:242] fetch_hdata_from failed: object of type 'NoneType' has no len()
+    Traceback (most recent call last):
+      File "/var/folders/9h/qck898y12_526qs_2yp6rspm0000gn/T/ipykernel_84619/250905426.py", line 238, in fetch_hdata_from
+        logger.debug("Fetched %s candles", len(response["data"]))
+                                           ^^^^^^^^^^^^^^^^^^^^^
+    TypeError: object of type 'NoneType' has no len()
+[E 251105 10:10:11 250905426:65] Token fetch failed for NSE:MFSL-EQ-EQ: single positional indexer is out-of-bounds
+[E 251105 10:10:11 smartConnect:246] Error occurred while making a POST request to https://apiconnect.angelone.in/rest/secure/angelbroking/historical/v1/getCandleData. Error: Something Went Wrong, Please Try After Sometime. URL: https://apiconnect.angelone.in/rest/secure/angelbroking/historical/v1/getCandleData, Headers: {'Content-type': 'application/json', 'X-ClientLocalIP': '127.0.0.1', 'X-ClientPublicIP': '106.193.147.98', 'X-MACAddress': '75:89:ad:e8:db:22', 'Accept': 'application/json', 'X-PrivateKey': 'xbNanBzM', 'X-UserType': 'USER', 'X-SourceID': 'WEB'}, Request: {'exchange': 'NSE', 'interval': 'FIVE_MINUTE', 'fromdate': '2025-11-04 00:00', 'todate': '2025-11-05 00:00'}, Response: {'message': 'Something Went Wrong, Please Try After Sometime', 'errorcode': 'AB1004', 'status': False, 'data': None}
+[E 251105 10:10:11 250905426:242] fetch_hdata_from failed: object of type 'NoneType' has no len()
+    Traceback (most recent call last):
+      File "/var/folders/9h/qck898y12_526qs_2yp6rspm0000gn/T/ipykernel_84619/250905426.py", line 238, in fetch_hdata_from
+        logger.debug("Fetched %s candles", len(response["data"]))
+                                           ^^^^^^^^^^^^^^^^^^^^^
+    TypeError: object of type 'NoneType' has no len()
+[E 251105 10:36:59 1953696962:36] Token fetch failed for MFSL: single positional indexer is out-of-bounds
+[E 251105 10:37:09 1953696962:36] Token fetch failed for MFSL: single positional indexer is out-of-bounds
+[E 251105 11:32:59 1953696962:36] Token fetch failed for NSE:NSE:MFSL-EQ-EQ: single positional indexer is out-of-bounds
+[E 251105 11:33:09 1953696962:36] Token fetch failed for NSE:NSE:MFSL-EQ-EQ: single positional indexer is out-of-bounds
+[E 251105 11:45:34 smartConnect:246] Error occurred while making a POST request to https://apiconnect.angelone.in/rest/secure/angelbroking/historical/v1/getCandleData. Error: Invalid date or time format. URL: https://apiconnect.angelone.in/rest/secure/angelbroking/historical/v1/getCandleData, Headers: {'Content-type': 'application/json', 'X-ClientLocalIP': '127.0.0.1', 'X-ClientPublicIP': '106.193.147.98', 'X-MACAddress': '75:89:ad:e8:db:22', 'Accept': 'application/json', 'X-PrivateKey': 'xbNanBzM', 'X-UserType': 'USER', 'X-SourceID': 'WEB'}, Request: {'exchange': 'NSE', 'symboltoken': 2142, 'interval': 'FIVE_MINUTE', 'fromdate': '2025-10-31T00:00', 'todate': '2025-11-01 00:00'}, Response: {'message': 'Invalid date or time format', 'errorcode': None, 'status': False, 'data': None}
+[E 251105 11:45:34 1414990163:220] fetch_hdata_from failed: object of type 'NoneType' has no len()
+    Traceback (most recent call last):
+      File "/var/folders/9h/qck898y12_526qs_2yp6rspm0000gn/T/ipykernel_84619/1414990163.py", line 216, in fetch_hdata_from
+        logger.debug("Fetched %s candles", len(response["data"]))
+                                           ^^^^^^^^^^^^^^^^^^^^^
+    TypeError: object of type 'NoneType' has no len()
+[E 251105 11:45:59 smartConnect:246] Error occurred while making a POST request to https://apiconnect.angelone.in/rest/secure/angelbroking/historical/v1/getCandleData. Error: Invalid date or time format. URL: https://apiconnect.angelone.in/rest/secure/angelbroking/historical/v1/getCandleData, Headers: {'Content-type': 'application/json', 'X-ClientLocalIP': '127.0.0.1', 'X-ClientPublicIP': '106.193.147.98', 'X-MACAddress': '75:89:ad:e8:db:22', 'Accept': 'application/json', 'X-PrivateKey': 'xbNanBzM', 'X-UserType': 'USER', 'X-SourceID': 'WEB'}, Request: {'exchange': 'NSE', 'symboltoken': 2142, 'interval': 'FIVE_MINUTE', 'fromdate': '2025-10-31T00:00', 'todate': '2025-11-01 00:00'}, Response: {'message': 'Invalid date or time format', 'errorcode': None, 'status': False, 'data': None}
+[E 251105 11:45:59 1414990163:220] fetch_hdata_from failed: object of type 'NoneType' has no len()
+    Traceback (most recent call last):
+      File "/var/folders/9h/qck898y12_526qs_2yp6rspm0000gn/T/ipykernel_84619/1414990163.py", line 216, in fetch_hdata_from
+        logger.debug("Fetched %s candles", len(response["data"]))
+                                           ^^^^^^^^^^^^^^^^^^^^^
+    TypeError: object of type 'NoneType' has no len()
+[E 251106 16:17:41 smartConnect:246] Error occurred while making a POST request to https://apiconnect.angelone.in/rest/secure/angelbroking/historical/v1/getCandleData. Error: Invalid Token. URL: https://apiconnect.angelone.in/rest/secure/angelbroking/historical/v1/getCandleData, Headers: {'Content-type': 'application/json', 'X-ClientLocalIP': '127.0.0.1', 'X-ClientPublicIP': '106.193.147.98', 'X-MACAddress': '75:89:ad:e8:db:22', 'Accept': 'application/json', 'X-PrivateKey': 'xbNanBzM', 'X-UserType': 'USER', 'X-SourceID': 'WEB'}, Request: {'exchange': 'NSE', 'symboltoken': 2142, 'interval': 'FIVE_MINUTE', 'fromdate': '2025-11-06 00:00', 'todate': '2025-11-07 00:00'}, Response: {'success': False, 'message': 'Invalid Token', 'errorCode': 'AG8001', 'data': ''}
