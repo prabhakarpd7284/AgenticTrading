@@ -47,36 +47,17 @@ SECTOR_MAP = {
 # Technical Indicators
 # ──────────────────────────────────────────────
 def compute_rsi(closes: list, period: int = 14) -> float:
-    """Standard RSI calculation with Wilder smoothing."""
-    if len(closes) < period + 1:
-        return 50.0  # neutral fallback
-
-    deltas = [closes[i] - closes[i - 1] for i in range(1, len(closes))]
-
-    gains = [max(0, d) for d in deltas[:period]]
-    losses = [max(0, -d) for d in deltas[:period]]
-
-    avg_gain = sum(gains) / period
-    avg_loss = sum(losses) / period
-
-    for d in deltas[period:]:
-        gain = max(0, d)
-        loss = max(0, -d)
-        avg_gain = (avg_gain * (period - 1) + gain) / period
-        avg_loss = (avg_loss * (period - 1) + loss) / period
-
-    if avg_loss == 0:
-        return 100.0
-
-    rs = avg_gain / avg_loss
-    return 100 - (100 / (1 + rs))
+    """RSI — delegates to shared indicator."""
+    from trading.utils.indicators import rsi
+    return rsi(closes, period)
 
 
 def compute_sma(closes: list, period: int) -> Optional[float]:
-    """Simple moving average."""
+    """SMA — delegates to shared indicator."""
+    from trading.utils.indicators import sma
     if len(closes) < period:
         return None
-    return sum(closes[-period:]) / period
+    return sma(closes, period)
 
 
 def compute_sma_distance(close: float, sma: Optional[float]) -> Optional[float]:

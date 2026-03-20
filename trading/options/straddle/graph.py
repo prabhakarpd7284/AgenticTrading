@@ -694,6 +694,58 @@ def validate_action_node(state: StraddleState) -> dict:
 
 
 # ──────────────────────────────────────────────
+# Execution helpers (DRY — shared by ROLL_CE, ROLL_PE, REENTER)
+# ──────────────────────────────────────────────
+def _execute_roll_leg(state: dict, leg: str, roll_strike: int, snapshot: dict,
+                      qty: int, orders: list, actions_taken: list):
+    """Close a leg and sell a new one at roll_strike. Used by ROLL_CE/ROLL_PE."""
+    from trading.options.data_service import find_option_token
+    from trading.utils.expiry_utils import iso_to_angel
+
+    leg_lower = leg.lower()
+    # Step 1: Close current leg
+    ltp = snapshot.get(leg_lower, {}).get("ltp", 0)
+    r1 = _broker.place_order(
+        symbol=state.get(f"{leg_lower}_symbol", ""), side="BUY", quantity=qty,
+        price=ltp, product_type="CARRYFORWARD", exchange="NFO",
+        symbol_token=state.get(f"{leg_lower}_token", ""),
+    )
+    orders.append(r1)
+    actions_taken.append(f"CLOSED_{leg} @ {ltp:.2f}")
+
+    # Step 2: Sell new leg at roll strike
+    exp_fmt = iso_to_angel(state.get("expiry", ""))
+    if exp_fmt:
+        _execute_sell_new_leg(state, leg, roll_strike, qty, orders, actions_taken, exp_fmt)
+
+
+def _execute_sell_new_leg(state: dict, leg: str, strike: int, qty: int,
+                          orders: list, actions_taken: list, exp_fmt: str = None):
+    """Sell a new option leg at the given strike."""
+    from trading.options.data_service import find_option_token
+    from trading.utils.expiry_utils import iso_to_angel
+
+    if not exp_fmt:
+        exp_fmt = iso_to_angel(state.get("expiry", ""))
+    if not exp_fmt:
+        return
+
+    result = find_option_token(state.get("underlying", "NIFTY"), strike, exp_fmt, leg)
+    if result:
+        new_sym, new_tok = result
+        new_ltp = _options_data.fetch_option_ltp(new_sym, new_tok).get("ltp", 0)
+        if new_ltp > 0:
+            r = _broker.place_order(
+                symbol=new_sym, side="SELL", quantity=qty,
+                price=new_ltp, product_type="CARRYFORWARD", exchange="NFO",
+                symbol_token=new_tok,
+            )
+            orders.append(r)
+            actions_taken.append(f"SOLD_NEW_{leg} {strike} @ {new_ltp:.2f}")
+            logger.info(f"Sold new {leg}@{strike}: {new_sym} @ {new_ltp:.2f}")
+
+
+# ──────────────────────────────────────────────
 # Node 5: execute_action
 # ──────────────────────────────────────────────
 def execute_action_node(state: StraddleState) -> dict:
@@ -777,113 +829,20 @@ def execute_action_node(state: StraddleState) -> dict:
         nifty_ltp   = snapshot.get("nifty", {}).get("ltp", 0)
 
         if not roll_strike:
-            # Auto-calculate: roll to current ATM
             from trading.options.data_service import find_atm_strike
             roll_strike = find_atm_strike(nifty_ltp)
 
-        if action == "ROLL_PE":
-            # Step 1: Close current PE
-            pe_ltp = snapshot.get("pe", {}).get("ltp", 0)
-            r1 = _broker.place_order(
-                symbol=state.get("pe_symbol", ""), side="BUY", quantity=qty,
-                price=pe_ltp, product_type="CARRYFORWARD", exchange="NFO",
-                symbol_token=state.get("pe_token", ""),
-            )
-            orders.append(r1)
-            actions_taken.append(f"CLOSED_PE @ {pe_ltp:.2f}")
-
-            # Step 2: Sell new PE at roll strike
-            from trading.options.data_service import find_option_token
-            expiry = state.get("expiry", "")
-            # Convert expiry to Angel One format
-            import re as _re
-            m = _re.match(r'^(\d{4})-(\d{2})-(\d{2})$', expiry)
-            if m:
-                months = {"01":"JAN","02":"FEB","03":"MAR","04":"APR","05":"MAY","06":"JUN",
-                          "07":"JUL","08":"AUG","09":"SEP","10":"OCT","11":"NOV","12":"DEC"}
-                exp_fmt = f"{m.group(3)}{months.get(m.group(2),'JAN')}{m.group(1)[2:]}"
-                new_pe = find_option_token(state.get("underlying", "NIFTY"), roll_strike, exp_fmt, "PE")
-                if new_pe:
-                    new_sym, new_tok = new_pe
-                    new_ltp = _options_data.fetch_option_ltp(new_sym, new_tok).get("ltp", 0)
-                    if new_ltp > 0:
-                        r2 = _broker.place_order(
-                            symbol=new_sym, side="SELL", quantity=qty,
-                            price=new_ltp, product_type="CARRYFORWARD", exchange="NFO",
-                            symbol_token=new_tok,
-                        )
-                        orders.append(r2)
-                        actions_taken.append(f"SOLD_NEW_PE {roll_strike} @ {new_ltp:.2f}")
-                        logger.info(f"Rolled PE: {state.get('pe_symbol')} → {new_sym} @ {new_ltp:.2f}")
-
-        elif action == "ROLL_CE":
-            # Step 1: Close current CE
-            ce_ltp = snapshot.get("ce", {}).get("ltp", 0)
-            r1 = _broker.place_order(
-                symbol=state.get("ce_symbol", ""), side="BUY", quantity=qty,
-                price=ce_ltp, product_type="CARRYFORWARD", exchange="NFO",
-                symbol_token=state.get("ce_token", ""),
-            )
-            orders.append(r1)
-            actions_taken.append(f"CLOSED_CE @ {ce_ltp:.2f}")
-
-            # Step 2: Sell new CE at roll strike
-            from trading.options.data_service import find_option_token
-            expiry = state.get("expiry", "")
-            import re as _re
-            m = _re.match(r'^(\d{4})-(\d{2})-(\d{2})$', expiry)
-            if m:
-                months = {"01":"JAN","02":"FEB","03":"MAR","04":"APR","05":"MAY","06":"JUN",
-                          "07":"JUL","08":"AUG","09":"SEP","10":"OCT","11":"NOV","12":"DEC"}
-                exp_fmt = f"{m.group(3)}{months.get(m.group(2),'JAN')}{m.group(1)[2:]}"
-                new_ce = find_option_token(state.get("underlying", "NIFTY"), roll_strike, exp_fmt, "CE")
-                if new_ce:
-                    new_sym, new_tok = new_ce
-                    new_ltp = _options_data.fetch_option_ltp(new_sym, new_tok).get("ltp", 0)
-                    if new_ltp > 0:
-                        r2 = _broker.place_order(
-                            symbol=new_sym, side="SELL", quantity=qty,
-                            price=new_ltp, product_type="CARRYFORWARD", exchange="NFO",
-                            symbol_token=new_tok,
-                        )
-                        orders.append(r2)
-                        actions_taken.append(f"SOLD_NEW_CE {roll_strike} @ {new_ltp:.2f}")
-                        logger.info(f"Rolled CE: {state.get('ce_symbol')} → {new_sym} @ {new_ltp:.2f}")
+        leg = "PE" if action == "ROLL_PE" else "CE"
+        _execute_roll_leg(state, leg, roll_strike, snapshot, qty, orders, actions_taken)
 
     # ── Re-enter: close both + sell new ATM straddle ──
     if action == "REENTER":
         nifty_ltp = snapshot.get("nifty", {}).get("ltp", 0)
-        from trading.options.data_service import find_atm_strike, find_option_token
+        from trading.options.data_service import find_atm_strike
         new_strike = find_atm_strike(nifty_ltp)
 
-        expiry = state.get("expiry", "")
-        import re as _re
-        m = _re.match(r'^(\d{4})-(\d{2})-(\d{2})$', expiry)
-        if m:
-            months = {"01":"JAN","02":"FEB","03":"MAR","04":"APR","05":"MAY","06":"JUN",
-                      "07":"JUL","08":"AUG","09":"SEP","10":"OCT","11":"NOV","12":"DEC"}
-            exp_fmt = f"{m.group(3)}{months.get(m.group(2),'JAN')}{m.group(1)[2:]}"
-
-            new_ce = find_option_token(state.get("underlying", "NIFTY"), new_strike, exp_fmt, "CE")
-            new_pe = find_option_token(state.get("underlying", "NIFTY"), new_strike, exp_fmt, "PE")
-
-            if new_ce and new_pe:
-                ce_sym, ce_tok = new_ce
-                pe_sym, pe_tok = new_pe
-                ce_ltp = _options_data.fetch_option_ltp(ce_sym, ce_tok).get("ltp", 0)
-                pe_ltp = _options_data.fetch_option_ltp(pe_sym, pe_tok).get("ltp", 0)
-
-                if ce_ltp > 0 and pe_ltp > 0:
-                    for sym, tok, ltp, leg in [(ce_sym, ce_tok, ce_ltp, "CE"), (pe_sym, pe_tok, pe_ltp, "PE")]:
-                        r = _broker.place_order(
-                            symbol=sym, side="SELL", quantity=qty,
-                            price=ltp, product_type="CARRYFORWARD", exchange="NFO",
-                            symbol_token=tok,
-                        )
-                        orders.append(r)
-                        actions_taken.append(f"SOLD_NEW_{leg} {new_strike} @ {ltp:.2f}")
-
-                    logger.info(f"Re-entered: new ATM straddle at {new_strike} | CE={ce_ltp:.2f} PE={pe_ltp:.2f}")
+        for leg in ("CE", "PE"):
+            _execute_sell_new_leg(state, leg, new_strike, qty, orders, actions_taken)
 
     success = all(o.get("success", False) for o in orders) if orders else True
 
@@ -1037,6 +996,9 @@ def journal_action_node(state: StraddleState) -> dict:
         if pos.management_log is None:
             pos.management_log = []
         pos.management_log.append(log_entry)
+        # Keep log bounded — retain last 100 entries to prevent DB bloat
+        if len(pos.management_log) > 100:
+            pos.management_log = pos.management_log[-100:]
 
         pos.save()
         logger.info(f"Straddle journal updated: ID={position_id} | action={action} | P&L={pos.current_pnl_inr:+,.0f}")

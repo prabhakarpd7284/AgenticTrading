@@ -255,17 +255,50 @@ class OptionsDataService:
 
         results: dict = {}
 
-        for key, fn in [
-            ("nifty", lambda: self.fetch_nifty_spot()),
-            ("vix",   lambda: self.fetch_vix()),
-            ("ce",    lambda: self.fetch_option_ltp(ce_symbol, ce_token)),
-            ("pe",    lambda: self.fetch_option_ltp(pe_symbol, pe_token)),
-        ]:
-            try:
-                results[key] = fn()
-            except Exception as e:
-                logger.error(f"Snapshot fetch '{key}' failed: {e}")
-                results[key] = {}
+        # Batch fetch all 4 LTPs in ONE API call (saves 3 calls + 1.2s throttle)
+        try:
+            tokens = {
+                "NSE": [NIFTY_SPOT_TOKEN, INDIA_VIX_TOKEN],
+                "NFO": [ce_token, pe_token],
+            }
+            fetched = self._broker.market_data_batch(tokens, mode="OHLC")
+
+            token_map = {
+                NIFTY_SPOT_TOKEN: "nifty",
+                INDIA_VIX_TOKEN: "vix",
+                ce_token: "ce",
+                pe_token: "pe",
+            }
+            for item in fetched:
+                tok = str(item.get("symbolToken", ""))
+                key = token_map.get(tok)
+                if key:
+                    results[key] = {
+                        "ltp": float(item.get("ltp", 0)),
+                        "open": float(item.get("open", 0)),
+                        "high": float(item.get("high", 0)),
+                        "low": float(item.get("low", 0)),
+                        "prev_close": float(item.get("close", 0)),
+                    }
+
+            # Fill any missing keys with empty dicts
+            for key in ("nifty", "vix", "ce", "pe"):
+                results.setdefault(key, {})
+
+        except Exception as e:
+            logger.error(f"Batch snapshot fetch failed, falling back to serial: {e}")
+            # Fallback to serial calls
+            for key, fn in [
+                ("nifty", lambda: self.fetch_nifty_spot()),
+                ("vix",   lambda: self.fetch_vix()),
+                ("ce",    lambda: self.fetch_option_ltp(ce_symbol, ce_token)),
+                ("pe",    lambda: self.fetch_option_ltp(pe_symbol, pe_token)),
+            ]:
+                try:
+                    results[key] = fn()
+                except Exception as ex:
+                    logger.error(f"Snapshot fetch '{key}' failed: {ex}")
+                    results[key] = {}
 
         if include_candles:
             try:

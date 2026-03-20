@@ -436,15 +436,9 @@ def detect_gap(
 # ──────────────────────────────────────────────
 
 def calculate_vwap(candles_5min: List[Dict]) -> float:
-    """Calculate Volume Weighted Average Price from intraday candles."""
-    cum_volume = 0
-    cum_pv = 0.0
-    for c in candles_5min:
-        typical_price = (c["high"] + c["low"] + c["close"]) / 3
-        vol = c.get("volume", 0)
-        cum_pv += typical_price * vol
-        cum_volume += vol
-    return round(cum_pv / cum_volume, 2) if cum_volume > 0 else 0.0
+    """Calculate VWAP from intraday candles. Delegates to shared indicator."""
+    from trading.utils.indicators import vwap
+    return vwap(candles_5min)
 
 
 def detect_vwap(

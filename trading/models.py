@@ -293,6 +293,9 @@ class StraddlePosition(models.Model):
     def combined_current_pts(self) -> float:
         return self.ce_current_price + self.pe_current_price
 
+    # Reusable status filter for active positions
+    ACTIVE_STATUSES = ["ACTIVE", "PARTIAL", "HEDGED"]
+
     @property
     def total_pnl(self) -> float:
         """True P&L including realized losses from rolls."""

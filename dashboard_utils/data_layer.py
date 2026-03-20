@@ -25,16 +25,13 @@ from trading.services.risk_engine import (
     MAX_RISK_PER_TRADE_PCT, MAX_DAILY_LOSS_PCT,
     MAX_POSITION_SIZE_PCT, MAX_OPEN_POSITIONS,
 )
-from trading.options.data_service import OptionsDataService
+from trading.options.data_service import (
+    OptionsDataService, NIFTY_SPOT_TOKEN, INDIA_VIX_TOKEN, BANKNIFTY_SPOT_TOKEN,
+)
 from trading.options.straddle.analyzer import analyze_straddle
 
 TRADING_MODE = os.getenv("TRADING_MODE", "paper")
 DEFAULT_CAPITAL = float(os.getenv("DEFAULT_CAPITAL", "500000"))
-
-# ── Tokens for index spot data ──
-BANKNIFTY_SPOT_TOKEN = "99926009"
-NIFTY_SPOT_TOKEN = "99926000"
-INDIA_VIX_TOKEN = "99926017"
 
 
 # ──────────────────────────────────────────────
@@ -790,13 +787,9 @@ def resume_ai_trading():
 # Market Hours Check
 # ──────────────────────────────────────────────
 def is_market_open() -> bool:
-    """Check if Indian market is currently open (9:15 AM - 3:30 PM IST, weekdays)."""
-    now = datetime.now()
-    if now.weekday() >= 5:  # Sat/Sun
-        return False
-    market_open = now.replace(hour=9, minute=15, second=0)
-    market_close = now.replace(hour=15, minute=30, second=0)
-    return market_open <= now <= market_close
+    """Check if Indian market is currently open."""
+    from trading.utils.time_utils import is_market_open as _is_market_open
+    return _is_market_open()
 
 
 def get_market_session_info() -> dict:
