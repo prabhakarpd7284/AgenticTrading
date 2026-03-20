@@ -67,7 +67,7 @@ python manage.py manage_straddle --analyze --position 1
 python manage.py manage_straddle --status --position 1
 
 # Force-execute an action (bypass LLM)
-python manage.py manage_straddle --execute CLOSE_BOTH --position 1
+python manage.py manage_straddle --execute CLOSE_BOTH -r-position 1
 
 # List all positions
 python manage.py manage_straddle --list

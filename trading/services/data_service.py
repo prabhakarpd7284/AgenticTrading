@@ -5,6 +5,7 @@ Reuses your existing BrokerClient and add_new_high_low_indicators logic.
 """
 import os
 import time
+import threading
 import pandas as pd
 import pyotp
 from datetime import datetime, timedelta
@@ -80,7 +81,31 @@ class TokenFetcher:
 # Broker client
 # ──────────────────────────────────────────────
 class BrokerClient:
-    """Wraps SmartConnect: authentication + data retrieval."""
+    """
+    Centralized Angel One SmartAPI gateway.
+
+    ALL broker API calls go through this class. It provides:
+      - Single authenticated session (thread-safe login)
+      - Global rate limiter (0.4s min gap between ANY API call)
+      - TTL cache for ltpData (avoids redundant spot/LTP fetches)
+      - Retry with backoff on rate-limit errors
+      - Request counting for monitoring
+
+    Use the module-level singleton: `from trading.services.data_service import broker`
+    """
+
+    # ── Class-level singleton ──
+    _instance: Optional["BrokerClient"] = None
+    _init_lock = threading.Lock()
+
+    @classmethod
+    def get_instance(cls) -> "BrokerClient":
+        """Get or create the process-wide singleton."""
+        if cls._instance is None:
+            with cls._init_lock:
+                if cls._instance is None:
+                    cls._instance = cls()
+        return cls._instance
 
     def __init__(self):
         self.api_key = os.getenv("SMARTAPI_KEY")
@@ -90,23 +115,109 @@ class BrokerClient:
         self.smart_api = SmartConnect(self.api_key)
         self._logged_in = False
 
+        # Rate limiting: min 0.4s between any API call
+        self._last_call_time = 0.0
+        self._rate_lock = threading.Lock()
+        self._min_interval = 0.4  # seconds
+
+        # LTP cache: {cache_key: (timestamp, result)}
+        self._ltp_cache: Dict[str, tuple] = {}
+        self._ltp_cache_ttl = 5  # seconds
+
+        # Stats
+        self._call_count = 0
+        self._cache_hits = 0
+
+        # Login lock
+        self._login_lock = threading.Lock()
+
+    def _throttle(self):
+        """Enforce minimum interval between API calls (thread-safe)."""
+        with self._rate_lock:
+            now = time.monotonic()
+            elapsed = now - self._last_call_time
+            if elapsed < self._min_interval:
+                time.sleep(self._min_interval - elapsed)
+            self._last_call_time = time.monotonic()
+            self._call_count += 1
+
     def login(self) -> bool:
-        """Authenticate with Angel One."""
-        try:
-            totp = pyotp.TOTP(self.totp_secret).now()
-            self.smart_api.generateSession(self.username, self.password, totp)
-            self._logged_in = True
-            logger.info("Broker login successful.")
-            return True
-        except Exception as e:
-            logger.error(f"Broker login failed: {e}")
-            self._logged_in = False
-            return False
+        """Authenticate with Angel One (thread-safe, idempotent)."""
+        with self._login_lock:
+            if self._logged_in:
+                return True
+            try:
+                totp = pyotp.TOTP(self.totp_secret).now()
+                self.smart_api.generateSession(self.username, self.password, totp)
+                self._logged_in = True
+                logger.info("Broker login successful.")
+                return True
+            except Exception as e:
+                logger.error(f"Broker login failed: {e}")
+                self._logged_in = False
+                return False
+
+    def ensure_login(self):
+        """Login if not already logged in."""
+        if not self._logged_in:
+            self.login()
 
     @property
     def is_logged_in(self) -> bool:
         return self._logged_in
 
+    # ──────────────────────────────────────────────
+    # LTP Data (with built-in cache)
+    # ──────────────────────────────────────────────
+    def ltp(self, exchange: str, symbol: str, token: str) -> dict:
+        """
+        Fetch LTP data with automatic caching.
+
+        Returns parsed dict: {ltp, open, high, low, prev_close} or {} on error.
+        Cached for 5 seconds — safe to call frequently.
+        """
+        cache_key = f"ltp:{exchange}:{token}"
+        now = time.monotonic()
+
+        # Check cache
+        entry = self._ltp_cache.get(cache_key)
+        if entry is not None:
+            ts, result = entry
+            if now - ts < self._ltp_cache_ttl:
+                self._cache_hits += 1
+                return result
+
+        # Fetch fresh
+        self.ensure_login()
+        self._throttle()
+        try:
+            r = self.smart_api.ltpData(exchange, symbol, token)
+            result = self._parse_ltp(r)
+            self._ltp_cache[cache_key] = (time.monotonic(), result)
+            return result
+        except Exception as e:
+            logger.error(f"ltpData failed ({exchange}:{symbol}): {e}")
+            return {}
+
+    @staticmethod
+    def _parse_ltp(r) -> dict:
+        """Parse ltpData response. Guards against string error responses."""
+        if not isinstance(r, dict):
+            return {}
+        d = r.get("data")
+        if not isinstance(d, dict):
+            return {}
+        return {
+            "ltp":        float(d.get("ltp", 0)),
+            "open":       float(d.get("open", 0)),
+            "high":       float(d.get("high", 0)),
+            "low":        float(d.get("low", 0)),
+            "prev_close": float(d.get("close", 0)),
+        }
+
+    # ──────────────────────────────────────────────
+    # Candle Data
+    # ──────────────────────────────────────────────
     def fetch_candles(
         self,
         symbol_token: str,
@@ -116,9 +227,10 @@ class BrokerClient:
         exchange: str = "NSE",
     ) -> List:
         """
-        Fetch OHLCV candle data.
+        Fetch OHLCV candle data with retry on rate-limit errors.
         Dates in '%Y-%m-%d %H:%M' format.
         """
+        self.ensure_login()
         params = {
             "exchange": exchange,
             "symboltoken": symbol_token,
@@ -126,16 +238,34 @@ class BrokerClient:
             "fromdate": start,
             "todate": end,
         }
-        try:
-            response = self.smart_api.getCandleData(params)
-            time.sleep(0.2)  # rate-limit guard
-            return response.get("data", [])
-        except Exception as e:
-            logger.exception(f"Candle fetch failed: {e}")
-            return []
+        max_retries = 2
+        for attempt in range(max_retries + 1):
+            self._throttle()
+            try:
+                response = self.smart_api.getCandleData(params)
+                if response is None:
+                    if attempt < max_retries:
+                        logger.warning(f"Rate limited on candles, retry {attempt+1}/{max_retries} in 2s...")
+                        time.sleep(2)
+                        continue
+                    logger.warning("Candle fetch returned None after retries")
+                    return []
+                return response.get("data", []) or []
+            except Exception as e:
+                logger.exception(f"Candle fetch failed: {e}")
+                if attempt < max_retries:
+                    time.sleep(2)
+                    continue
+                return []
+        return []
 
+    # ──────────────────────────────────────────────
+    # Portfolio / Orders
+    # ──────────────────────────────────────────────
     def fetch_holdings(self) -> List[Dict]:
         """Fetch current portfolio holdings."""
+        self.ensure_login()
+        self._throttle()
         try:
             return self.smart_api.holding() or []
         except Exception as e:
@@ -144,11 +274,210 @@ class BrokerClient:
 
     def fetch_positions(self) -> Dict:
         """Fetch open positions."""
+        self.ensure_login()
+        self._throttle()
         try:
             return self.smart_api.position() or {}
         except Exception as e:
             logger.error(f"Positions fetch failed: {e}")
             return {}
+
+    def fetch_order_book(self) -> list:
+        """Fetch today's order book."""
+        self.ensure_login()
+        self._throttle()
+        try:
+            book = self.smart_api.orderBook()
+            if isinstance(book, dict) and book.get("data"):
+                return book["data"]
+            return []
+        except Exception as e:
+            logger.error(f"Order book fetch failed: {e}")
+            return []
+
+    # ──────────────────────────────────────────────
+    # Batch Market Data (THE key optimization)
+    # ──────────────────────────────────────────────
+    def market_data_batch(
+        self,
+        tokens: Dict[str, List[str]],
+        mode: str = "OHLC",
+    ) -> List[dict]:
+        """
+        Fetch market data for up to 50 instruments in ONE API call.
+
+        This is 50x more efficient than calling ltpData() per stock.
+
+        Args:
+            tokens: {"NSE": ["2885", "1333"], "NFO": ["57710"]}
+            mode: "LTP" (just price), "OHLC" (price + OHLC), "FULL" (everything)
+                  FULL includes: volume, OI, 52wk hi/lo, circuit limits, bid/ask depth
+
+        Returns:
+            List of dicts with: exchange, tradingSymbol, symbolToken, ltp, open,
+            high, low, close, percentChange, tradeVolume, opnInterest, etc.
+        """
+        self.ensure_login()
+        self._throttle()
+        try:
+            r = self.smart_api.getMarketData(mode, tokens)
+            if isinstance(r, dict) and r.get("status"):
+                data = r.get("data", {})
+                return data.get("fetched", [])
+            return []
+        except Exception as e:
+            logger.error(f"Batch market data failed: {e}")
+            return []
+
+    # ──────────────────────────────────────────────
+    # Option Greeks (real IV, delta, gamma from exchange)
+    # ──────────────────────────────────────────────
+    def option_greeks(self, underlying: str, expiry: str) -> List[dict]:
+        """
+        Fetch real option greeks from Angel One (only works during market hours).
+
+        Args:
+            underlying: "NIFTY" or "BANKNIFTY"
+            expiry: "17MAR2026"
+
+        Returns:
+            List of dicts with: strikePrice, CE_delta, CE_gamma, CE_theta,
+            CE_vega, CE_impliedVolatility, PE_* equivalents, etc.
+        """
+        self.ensure_login()
+        self._throttle()
+        try:
+            r = self.smart_api.optionGreek({"name": underlying, "expirydate": expiry})
+            if isinstance(r, dict) and r.get("data"):
+                return r["data"] if isinstance(r["data"], list) else []
+            return []
+        except Exception as e:
+            logger.error(f"Option greeks fetch failed: {e}")
+            return []
+
+    # ──────────────────────────────────────────────
+    # OI Data (historical open interest)
+    # ──────────────────────────────────────────────
+    def oi_data(self, exchange: str, token: str, from_date: str, to_date: str) -> List[dict]:
+        """
+        Fetch historical open interest data.
+
+        Args:
+            exchange: "NFO"
+            token: instrument token
+            from_date: "2026-03-10 09:15"
+            to_date: "2026-03-17 15:30"
+        """
+        self.ensure_login()
+        self._throttle()
+        try:
+            r = self.smart_api.getOIData({
+                "exchange": exchange,
+                "symboltoken": token,
+                "fromdate": from_date,
+                "todate": to_date,
+            })
+            if isinstance(r, dict) and r.get("data"):
+                return r["data"] if isinstance(r["data"], list) else []
+            return []
+        except Exception as e:
+            logger.error(f"OI data fetch failed: {e}")
+            return []
+
+    # ──────────────────────────────────────────────
+    # Margin / RMS Limits (real capital, not hardcoded)
+    # ──────────────────────────────────────────────
+    def margin_available(self) -> dict:
+        """
+        Fetch real-time margin/capital from broker.
+
+        Returns:
+            {net, availablecash, collateral, utilisedexposure, ...}
+        """
+        self.ensure_login()
+        self._throttle()
+        try:
+            r = self.smart_api.rmsLimit()
+            if isinstance(r, dict) and isinstance(r.get("data"), dict):
+                return r["data"]
+            return {}
+        except Exception as e:
+            logger.error(f"RMS limit fetch failed: {e}")
+            return {}
+
+    # ──────────────────────────────────────────────
+    # Trade Book (today's executed trades)
+    # ──────────────────────────────────────────────
+    def fetch_trade_book(self) -> list:
+        """Fetch all executed trades for today."""
+        self.ensure_login()
+        self._throttle()
+        try:
+            r = self.smart_api.tradeBook()
+            if isinstance(r, dict) and r.get("data"):
+                return r["data"] if isinstance(r["data"], list) else []
+            return []
+        except Exception as e:
+            logger.error(f"Trade book fetch failed: {e}")
+            return []
+
+    # ──────────────────────────────────────────────
+    # Search Scrip (live symbol search)
+    # ──────────────────────────────────────────────
+    def search_scrip(self, exchange: str, query: str) -> list:
+        """
+        Live symbol search by name.
+
+        Args:
+            exchange: "NSE", "NFO", "BSE"
+            query: partial name like "RELIANCE"
+        """
+        self.ensure_login()
+        self._throttle()
+        try:
+            r = self.smart_api.searchScrip(exchange, query)
+            if isinstance(r, dict) and r.get("data"):
+                return r["data"] if isinstance(r["data"], list) else []
+            return []
+        except Exception as e:
+            logger.error(f"Search scrip failed: {e}")
+            return []
+
+    # ──────────────────────────────────────────────
+    # Estimate Charges (brokerage + STT + stamp duty)
+    # ──────────────────────────────────────────────
+    def estimate_charges(self, orders: list) -> dict:
+        """
+        Estimate brokerage and charges for a list of orders.
+
+        Args:
+            orders: list of order param dicts
+        """
+        self.ensure_login()
+        self._throttle()
+        try:
+            r = self.smart_api.estimateCharges({"orders": orders})
+            if isinstance(r, dict):
+                return r.get("data", {})
+            return {}
+        except Exception as e:
+            logger.error(f"Estimate charges failed: {e}")
+            return {}
+
+    # ──────────────────────────────────────────────
+    # Stats
+    # ──────────────────────────────────────────────
+    def get_stats(self) -> dict:
+        return {
+            "logged_in": self._logged_in,
+            "api_calls": self._call_count,
+            "cache_hits": self._cache_hits,
+            "ltp_cache_size": len(self._ltp_cache),
+        }
+
+
+# ── Module-level singleton ──
+broker = BrokerClient.get_instance()
 
 
 # ──────────────────────────────────────────────
@@ -196,60 +525,17 @@ def enrich_ohlcv(data: List) -> pd.DataFrame:
 class DataService:
     """
     Top-level data service used by graph nodes.
-    Handles broker auth, token lookup, data fetch + enrichment.
+    Uses the singleton BrokerClient for all API calls and
+    ticker_service for symbol resolution.
     """
 
     def __init__(self):
         self._broker: Optional[BrokerClient] = None
-        self._token_fetcher: Optional[TokenFetcher] = None
 
     def _ensure_broker(self):
         if self._broker is None:
-            self._broker = BrokerClient()
-        if not self._broker.is_logged_in:
-            self._broker.login()
-
-    def _ensure_tokens(self):
-        if self._token_fetcher is not None:
-            return
-
-        master_path = os.getenv("SYMBOL_MASTER_JSON", "")
-
-        # Fallback: look for local file in project dir
-        if not master_path or not os.path.exists(master_path):
-            local_path = os.path.join(
-                os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-                "NSE_CM_sym_master.json",
-            )
-            if os.path.exists(local_path):
-                master_path = local_path
-                logger.info(f"Using local symbol master: {local_path}")
-
-        # Fallback: auto-download from Angel One
-        if not master_path or not os.path.exists(master_path):
-            try:
-                import urllib.request, json
-                url = "https://margincalculator.angelbroking.com/OpenAPI_File/files/OpenAPIScripMaster.json"
-                logger.info(f"Downloading symbol master from Angel One...")
-                resp = urllib.request.urlopen(url, timeout=30)
-                data = json.loads(resp.read().decode("utf-8"))
-                download_path = os.path.join(
-                    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-                    "NSE_CM_sym_master.json",
-                )
-                with open(download_path, "w") as f:
-                    json.dump(data, f)
-                master_path = download_path
-                logger.info(f"Symbol master downloaded: {len(data)} instruments → {download_path}")
-            except Exception as e:
-                logger.error(f"Failed to download symbol master: {e}")
-                return
-
-        if master_path and os.path.exists(master_path):
-            instruments = load_symbol_master(master_path)
-            self._token_fetcher = TokenFetcher(instruments)
-        else:
-            logger.warning("Symbol master not available")
+            self._broker = BrokerClient.get_instance()
+        self._broker.ensure_login()
 
     def fetch_intraday(
         self,
@@ -270,12 +556,9 @@ class DataService:
                             day_high, day_low, range_pct, summary
         """
         self._ensure_broker()
-        self._ensure_tokens()
 
-        if self._token_fetcher is None:
-            return {"error": "Symbol master not loaded", "symbol": symbol}
-
-        token = self._token_fetcher.get_token(symbol)
+        from trading.services.ticker_service import ticker_service
+        token = ticker_service.get_token(symbol)
         if not token:
             return {"error": f"Token not found for {symbol}", "symbol": symbol}
 
@@ -351,13 +634,9 @@ class DataService:
             For intraday intervals: individual candles per trading session.
         """
         self._ensure_broker()
-        self._ensure_tokens()
 
-        if self._token_fetcher is None:
-            logger.error("Symbol master not loaded — cannot fetch historical data")
-            return []
-
-        token = self._token_fetcher.get_token(symbol)
+        from trading.services.ticker_service import ticker_service
+        token = ticker_service.get_token(symbol)
         if not token:
             logger.error(f"Token not found for {symbol}")
             return []
@@ -432,6 +711,102 @@ class DataService:
 
         logger.info(f"Historical fetch complete: {len(all_candles)} trading days for {symbol}")
         return all_candles
+
+    def fetch_multi_timeframe(
+        self,
+        symbol: str,
+        date_str: str,
+        intervals: List[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Fetch candles at multiple timeframes for the same symbol/date.
+        Used by scanning agents for multi-TF structure confirmation.
+
+        Args:
+            symbol: NSE ticker e.g. 'RELIANCE'
+            date_str: Date string '%Y-%m-%d'
+            intervals: List of intervals. Default: ['FIVE_MINUTE', 'FIFTEEN_MINUTE', 'ONE_HOUR']
+
+        Returns:
+            {"5m": [candles], "15m": [candles], "1h": [candles]}
+        """
+        if intervals is None:
+            intervals = ["FIVE_MINUTE", "FIFTEEN_MINUTE", "ONE_HOUR"]
+
+        self._ensure_broker()
+        from trading.services.ticker_service import ticker_service
+        token = ticker_service.get_token(symbol)
+        if not token:
+            return {"error": f"Token not found for {symbol}"}
+
+        # Cap end time for today
+        from datetime import datetime as _dt
+        now = _dt.now()
+        if date_str == now.strftime("%Y-%m-%d"):
+            if now.hour < 9 or (now.hour == 9 and now.minute < 16):
+                return {"error": "Market not open yet"}
+            end = f"{date_str} {min(now, now.replace(hour=15, minute=30)).strftime('%H:%M')}"
+        else:
+            end = f"{date_str} 15:30"
+
+        interval_labels = {
+            "ONE_MINUTE": "1m", "THREE_MINUTE": "3m", "FIVE_MINUTE": "5m",
+            "TEN_MINUTE": "10m", "FIFTEEN_MINUTE": "15m", "THIRTY_MINUTE": "30m",
+            "ONE_HOUR": "1h", "ONE_DAY": "1d",
+        }
+
+        result = {}
+        for interval in intervals:
+            label = interval_labels.get(interval, interval)
+            raw = self._broker.fetch_candles(token, f"{date_str} 09:15", end, interval)
+            result[label] = raw or []
+
+        return result
+
+    def fetch_batch_ltp(self, symbols: List[str]) -> List[dict]:
+        """
+        Fetch LTP for multiple symbols in ONE API call (up to 50).
+        Returns list of dicts with: symbol, ltp, open, high, low, prev_close, volume, percentChange.
+        """
+        self._ensure_broker()
+        from trading.services.ticker_service import ticker_service
+
+        tokens = []
+        token_map = {}
+        for sym in symbols[:50]:  # API limit is 50
+            tok = ticker_service.get_token(sym)
+            if tok:
+                tokens.append(tok)
+                token_map[tok] = sym
+
+        if not tokens:
+            return []
+
+        fetched = self._broker.market_data_batch({"NSE": tokens}, mode="FULL")
+
+        results = []
+        for item in fetched:
+            tok = str(item.get("symbolToken", ""))
+            sym = token_map.get(tok)
+            if not sym:
+                continue
+            results.append({
+                "symbol": sym,
+                "ltp": float(item.get("ltp", 0)),
+                "open": float(item.get("open", 0)),
+                "high": float(item.get("high", 0)),
+                "low": float(item.get("low", 0)),
+                "prev_close": float(item.get("close", 0)),
+                "volume": int(item.get("tradeVolume", 0)),
+                "oi": int(item.get("opnInterest", 0)),
+                "pct_change": float(item.get("percentChange", 0)),
+                "low_52w": float(item.get("52WeekLow", 0)),
+                "high_52w": float(item.get("52WeekHigh", 0)),
+                "upper_circuit": float(item.get("upperCircuit", 0)),
+                "lower_circuit": float(item.get("lowerCircuit", 0)),
+            })
+
+        return results
 
     def fetch_holdings(self) -> List[Dict]:
         """Fetch current broker holdings."""

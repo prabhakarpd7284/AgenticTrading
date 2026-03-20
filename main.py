@@ -164,7 +164,24 @@ def broker_login():
         logger.error("Failed to initialize or login to BrokerClient: %s", e)
 
 broker_client = broker_login()
-token_fetcher = TokenFetcher(load_symbol_master(os.getenv("SYMBOL_MASTER_JSON")))
+# Legacy token_fetcher — delegate to centralized ticker_service
+from trading.services.ticker_service import ticker_service as _ts
+
+class _LegacyTokenFetcher:
+    """Shim so old code calling token_fetcher.get_symbol_token() still works."""
+    def get_symbol_token(self, sym_ticker: str):
+        # Input: "NSE:RELIANCE-EQ" → extract "RELIANCE"
+        clean = sym_ticker
+        if ":" in clean:
+            clean = clean.split(":", 1)[1]
+        if clean.endswith("-EQ"):
+            clean = clean[:-3]
+        return _ts.get_token(clean)
+
+    def get_symbol_token_list(self, stocks_list):
+        return {s: self.get_symbol_token(s) for s in stocks_list}
+
+token_fetcher = _LegacyTokenFetcher()
 # ==============================
 # Data enrichment
 # ==============================

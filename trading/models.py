@@ -223,8 +223,10 @@ class StraddlePosition(models.Model):
         CLOSE_BOTH      = "CLOSE_BOTH"
         CLOSE_CE        = "CLOSE_CE"
         CLOSE_PE        = "CLOSE_PE"
+        ROLL_PE         = "ROLL_PE"
+        ROLL_CE         = "ROLL_CE"
         HEDGE_FUTURES   = "HEDGE_FUTURES"
-        ROLL            = "ROLL"
+        REENTER         = "REENTER"
 
     # ── Position setup ──
     underlying      = models.CharField(max_length=20, default="NIFTY", db_index=True)
@@ -248,6 +250,7 @@ class StraddlePosition(models.Model):
     # ── Live state (updated each cycle) ──
     net_delta       = models.FloatField(default=0.0)
     current_pnl_inr = models.FloatField(default=0.0)
+    realized_pnl    = models.FloatField(default=0.0, help_text="Accumulated P&L from rolled/closed legs")
     status          = models.CharField(max_length=10, choices=Status.choices, default=Status.ACTIVE)
     action_taken    = models.CharField(
         max_length=20, choices=ActionTaken.choices, default=ActionTaken.NONE
@@ -289,3 +292,119 @@ class StraddlePosition(models.Model):
     @property
     def combined_current_pts(self) -> float:
         return self.ce_current_price + self.pe_current_price
+
+    @property
+    def total_pnl(self) -> float:
+        """True P&L including realized losses from rolls."""
+        return self.current_pnl_inr + self.realized_pnl
+
+    @property
+    def ce_strike_actual(self) -> int:
+        """Extract actual CE strike from symbol (may differ from self.strike after rolls)."""
+        import re
+        m = re.search(r'(\d{5})CE', self.ce_symbol)
+        return int(m.group(1)) if m else self.strike
+
+    @property
+    def pe_strike_actual(self) -> int:
+        """Extract actual PE strike from symbol (may differ from self.strike after rolls)."""
+        import re
+        m = re.search(r'(\d{5})PE', self.pe_symbol)
+        return int(m.group(1)) if m else self.strike
+
+    @property
+    def display_strike(self) -> str:
+        """Human-readable strike display, handles asymmetric positions."""
+        ce_s = self.ce_strike_actual
+        pe_s = self.pe_strike_actual
+        if ce_s == pe_s:
+            return str(ce_s)
+        return f"CE@{ce_s}/PE@{pe_s}"
+
+
+class WatchlistEntry(models.Model):
+    """
+    Daily watchlist — stocks selected by the premarket scanner.
+    Tracks which stocks were watched, which triggered, and outcomes.
+    """
+
+    class SetupType(models.TextChoices):
+        ORB_LONG = "ORB_LONG"
+        ORB_SHORT = "ORB_SHORT"
+        PDH_BREAK = "PDH_BREAK"
+        PDL_BREAK = "PDL_BREAK"
+        GAP_AND_GO = "GAP_AND_GO"
+        GAP_FILL = "GAP_FILL"
+        VWAP_RECLAIM = "VWAP_RECLAIM"
+        VWAP_REJECT = "VWAP_REJECT"
+
+    class Outcome(models.TextChoices):
+        WATCHING = "WATCHING"     # On watchlist, not yet triggered
+        TRIGGERED = "TRIGGERED"   # Structure triggered
+        TRADED = "TRADED"         # Trade taken
+        SKIPPED = "SKIPPED"       # Triggered but skipped (risk/LLM)
+        NO_SIGNAL = "NO_SIGNAL"   # Nothing triggered
+
+    symbol = models.CharField(max_length=30, db_index=True)
+    scan_date = models.DateField(db_index=True)
+    score = models.FloatField(help_text="Premarket scanner score 0-100")
+    bias = models.CharField(max_length=10, default="NEUTRAL")
+    setups = models.JSONField(default=list, help_text="List of potential setup types")
+
+    # Previous day context
+    prev_high = models.FloatField(default=0.0)
+    prev_low = models.FloatField(default=0.0)
+    prev_close = models.FloatField(default=0.0)
+    prev_atr = models.FloatField(default=0.0)
+
+    # Today's data (updated during market hours)
+    orb_high = models.FloatField(null=True, blank=True)
+    orb_low = models.FloatField(null=True, blank=True)
+    vwap = models.FloatField(null=True, blank=True)
+
+    # Outcome
+    outcome = models.CharField(max_length=12, choices=Outcome.choices, default=Outcome.WATCHING)
+    triggered_setup = models.CharField(max_length=20, blank=True, default="")
+    reason = models.TextField(blank=True, default="")
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-scan_date", "-score"]
+        unique_together = ("symbol", "scan_date")
+        indexes = [
+            models.Index(fields=["scan_date", "score"]),
+        ]
+
+    def __str__(self):
+        return f"[{self.scan_date}] {self.symbol} score={self.score:.0f} {self.outcome}"
+
+
+class TraderNote(models.Model):
+    """Persistent per-ticker notes for the trader's journal."""
+    symbol = models.CharField(max_length=30, db_index=True, unique=True)
+    note = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["symbol"]
+
+    def __str__(self):
+        return f"Note: {self.symbol} ({len(self.note)} chars)"
+
+
+class SystemControl(models.Model):
+    """
+    Global system control flags.
+    Used for AI pause/resume, force-close triggers, etc.
+    """
+    key = models.CharField(max_length=50, unique=True)
+    value = models.JSONField(default=dict)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["key"]
+
+    def __str__(self):
+        return f"Control: {self.key} = {self.value}"
