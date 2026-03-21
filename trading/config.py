@@ -39,7 +39,7 @@ class LevelBounceConfig:
     sl_beyond_extreme: float = 20  # SL placed this many pts beyond the extreme
     min_rr: float = 1.5            # Minimum risk:reward ratio
     min_level_score: int = 20      # Minimum level strength to trade
-    max_signals: int = 3           # Max signals per scan cycle
+    max_signals: int = 11           # Max signals per scan cycle
 
 
 @dataclass(frozen=True)
@@ -70,7 +70,7 @@ class TradeManagerConfig:
     """Active trade management parameters."""
     breakeven_at_r: float = 0.5    # Move SL to breakeven at this R multiple
     partial_at_r: float = 1.5      # Take 50% profit at this R multiple
-    time_stop_candles: int = 6     # Exit if no progress in N candles (30 min)
+    time_stop_candles: int = 6     # 30 min — protects against big losers
     time_stop_min_move: float = 0.2  # "No progress" threshold in R multiples
     trail_atr_factor: float = 0.5  # Trail at 0.5 ATR after partial
     tight_trail_atr_factor: float = 0.3  # Tighter trail at 2R+
@@ -97,7 +97,7 @@ class RiskConfig:
     max_position_size_pct: float = float(os.getenv("MAX_POSITION_SIZE_PCT", "10.0"))
     min_risk_reward: float = 1.5
     min_confidence: float = 0.55
-    max_open_positions: int = 3
+    max_open_positions: int = 11
     default_capital: float = float(os.getenv("DEFAULT_CAPITAL", "500000"))
 
 
@@ -109,10 +109,10 @@ class RiskConfig:
 class StraddleConfig:
     """Straddle lifecycle parameters."""
     hard_stop_multiplier: float = 1.3    # Close if combined > 1.3x sold
-    shift_threshold: int = 200           # Shift when NIFTY moves > 200 pts
+    shift_threshold: int = 250           # Shift when NIFTY moves > 250 pts
     max_shifts_per_day: int = 2
-    vix_calm: float = 15
-    vix_elevated: float = 22
+    vix_calm: float = 14
+    vix_elevated: float = 20
     scenario_offsets: tuple = (300, 150, 0, -150, -400, -700)
 
 
