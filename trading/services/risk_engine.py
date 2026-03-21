@@ -16,7 +16,7 @@ MAX_RISK_PER_TRADE_PCT = float(os.getenv("MAX_RISK_PER_TRADE_PCT", "1.0"))
 MAX_DAILY_LOSS_PCT = float(os.getenv("MAX_DAILY_LOSS_PCT", "3.0"))
 MAX_POSITION_SIZE_PCT = float(os.getenv("MAX_POSITION_SIZE_PCT", "10.0"))
 MIN_RISK_REWARD_RATIO = 1.5
-MIN_CONFIDENCE = 0.6
+MIN_CONFIDENCE = 0.55  # Optimized: conf≥0.55 + Camarilla SL + regime filter = PF 1.47
 MAX_OPEN_POSITIONS = 3
 
 

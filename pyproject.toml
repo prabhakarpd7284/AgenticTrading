@@ -1,23 +1,39 @@
 [project]
 name = "agentictrading"
-version = "0.1.0"
-description = "Add your description here"
+version = "0.2.0"
+description = "Agentic trading system with RAG + risk engine + paper/live execution"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    # Django ORM
+    "django>=5.1",
+    # LangChain + Anthropic
     "langchain>=0.3.27",
+    "langchain-anthropic>=0.3",
     "langchain-community>=0.4",
     "langchain-groq>=1.0.0",
     "langchain-ollama>=1.0.0",
     "langgraph>=0.6.11",
     "langsmith>=0.4.37",
-    "matplotlib>=3.10.7",
-    "mplfinance>=0.12.10b0",
-    "notebook>=7.4.7",
-    "ollama>=0.6.0",
+    # Broker
+    "smartapi-python>=1.5.5",
+    "pyotp>=2.9.0",
+    # Data
     "pandas>=2.3.3",
     "python-dateutil>=2.9.0.post0",
+    "matplotlib>=3.10.7",
+    "mplfinance>=0.12.10b0",
+    # Utilities
     "python-dotenv>=1.1.1",
-    "smartapi-python>=1.5.5",
+    "logzero>=1.7.0",
+    "pydantic>=2.0",
+    # UI (optional)
     "streamlit>=1.51.0",
+    "notebook>=7.4.7",
+    "ollama>=0.6.0",
+    "streamlit-autorefresh>=1.0.1",
 ]
+
+[project.optional-dependencies]
+postgres = ["psycopg2-binary>=2.9"]
+celery = ["celery>=5.3", "redis>=5.0"]

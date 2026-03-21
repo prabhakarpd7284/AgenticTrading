@@ -29,11 +29,18 @@ class BrokerService:
         """
         Args:
             smart_api: SmartConnect instance (required for live mode).
-                       Can be None in paper mode.
+                       If None, auto-resolves from the singleton BrokerClient.
         """
         self._api = smart_api
         self.mode = TRADING_MODE
         logger.info(f"BrokerService initialized in {self.mode.upper()} mode")
+
+        # Auto-wire the singleton broker for live mode
+        if self._api is None and self.mode == "live":
+            from trading.services.data_service import BrokerClient
+            b = BrokerClient.get_instance()
+            b.ensure_login()
+            self._api = b.smart_api
 
     # ──────────────────────────────────────────
     # Place order
@@ -70,9 +77,11 @@ class BrokerService:
             }
 
         try:
+            # NSE equity symbols need -EQ suffix; NFO options use the symbol as-is
+            trading_symbol = f"{symbol}-EQ" if exchange == "NSE" else symbol
             order_params = {
                 "variety": "NORMAL",
-                "tradingsymbol": f"{symbol}-EQ",
+                "tradingsymbol": trading_symbol,
                 "symboltoken": symbol_token,
                 "transactiontype": side,
                 "exchange": exchange,
