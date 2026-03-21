@@ -18,14 +18,16 @@ from trading.intraday.levels import LevelMap
 from trading.intraday.state import IntradaySignal, SetupType, TradeBias
 
 
-# ── Parameters ──
-MIN_LEVEL_SCORE = 25           # Need a meaningful level to break
-BREAK_CONFIRMATION = 2         # Candles price must stay beyond level after break
-RETEST_PROXIMITY_ATR = 0.15    # How close price must return to level (% of ATR)
-RETEST_HOLD_CANDLES = 2        # Candles the retest must hold for
-SL_BEYOND_LEVEL_ATR = 0.10     # SL placed this far beyond the level
-MIN_RR = 2.0
-MAX_SIGNALS = 2
+# ── Parameters from centralized config ──
+from trading.config import config as _cfg
+
+MIN_LEVEL_SCORE = _cfg.level_retest.min_level_score
+BREAK_CONFIRMATION = _cfg.level_retest.break_confirmation
+RETEST_PROXIMITY_ATR = _cfg.level_retest.retest_proximity_atr
+RETEST_HOLD_CANDLES = _cfg.level_retest.retest_hold_candles
+SL_BEYOND_LEVEL_ATR = _cfg.level_retest.sl_beyond_level_atr
+MIN_RR = _cfg.level_retest.min_rr
+MAX_SIGNALS = _cfg.level_retest.max_signals
 
 
 def detect_level_retest(

@@ -20,8 +20,10 @@ from trading.intraday.levels import LevelMap
 from trading.intraday.state import IntradaySignal
 
 
-# ── Minimum level score to accept a signal ──
-MIN_LEVEL_SCORE_FOR_SIGNAL = 20   # reject if no level near entry with score >= 20
+# ── Parameters from centralized config ──
+from trading.config import config as _cfg
+
+MIN_LEVEL_SCORE_FOR_SIGNAL = _cfg.sweet_spot.min_level_score
 
 
 def evaluate_signal(

@@ -17,13 +17,15 @@ from trading.intraday.state import IntradaySignal, SetupType, TradeBias
 from trading.utils.indicators import rsi as calc_rsi
 
 
-# ── Parameters ──
-MIN_DEVIATION_PCT = 0.8     # Price must be > 0.8% from VWAP
-RSI_OVERBOUGHT = 65         # RSI above this + price far above VWAP = fade signal
-RSI_OVERSOLD = 35           # RSI below this + price far below VWAP = fade signal
-SL_BEYOND_EXTREME_ATR = 0.2 # SL beyond recent extreme
-MIN_RR = 1.5
-MAX_SIGNALS = 1
+# ── Parameters from centralized config ──
+from trading.config import config as _cfg
+
+MIN_DEVIATION_PCT = _cfg.vwap_fade.min_deviation_pct
+RSI_OVERBOUGHT = _cfg.vwap_fade.rsi_overbought
+RSI_OVERSOLD = _cfg.vwap_fade.rsi_oversold
+SL_BEYOND_EXTREME_ATR = _cfg.vwap_fade.sl_beyond_extreme_atr
+MIN_RR = _cfg.vwap_fade.min_rr
+MAX_SIGNALS = _cfg.vwap_fade.max_signals
 
 
 def detect_vwap_fade(

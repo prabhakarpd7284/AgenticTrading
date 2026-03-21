@@ -25,10 +25,13 @@ class ExitDecision:
 
 
 # Tunable parameters
-BREAKEVEN_AT_R = 0.5       # Move SL to breakeven when profit = 0.5R
-PARTIAL_AT_R = 1.5         # Take 50% off at 1.5R (spec: let winners run longer before taking partial)
-TIME_STOP_CANDLES = 6      # Exit if no progress in 6 candles (30 min — spec)
-TIME_STOP_MIN_MOVE = 0.2   # "No progress" = less than 0.2R in time_stop period
+# ── Parameters from centralized config ──
+from trading.config import config as _cfg
+
+BREAKEVEN_AT_R = _cfg.trade_manager.breakeven_at_r
+PARTIAL_AT_R = _cfg.trade_manager.partial_at_r
+TIME_STOP_CANDLES = _cfg.trade_manager.time_stop_candles
+TIME_STOP_MIN_MOVE = _cfg.trade_manager.time_stop_min_move
 
 
 def manage_trade(

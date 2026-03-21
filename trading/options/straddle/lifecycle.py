@@ -31,10 +31,12 @@ class LifecycleDecision:
     urgency: str = "MONITOR"
 
 
-# ── Tunable parameters (from SPEC V2 analysis) ──
-HARD_STOP_MULTIPLIER = 1.3     # Close if combined > 1.3x sold (spec: earlier than 1.5x)
-SHIFT_THRESHOLD = 200          # Shift when NIFTY moves >200 pts from center
-MAX_SHIFTS_PER_DAY = 2         # Don't churn — max 2 shifts
+# ── Parameters from centralized config ──
+from trading.config import config as _cfg
+
+HARD_STOP_MULTIPLIER = _cfg.straddle.hard_stop_multiplier
+SHIFT_THRESHOLD = _cfg.straddle.shift_threshold
+MAX_SHIFTS_PER_DAY = _cfg.straddle.max_shifts_per_day
 
 
 def decide(

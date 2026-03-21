@@ -21,14 +21,16 @@ from trading.intraday.levels import LevelMap
 from trading.intraday.state import IntradaySignal, SetupType, TradeBias
 
 
-# ── Tunable parameters (calibrated from backtest) ──
-LOOKBACK = 3              # Candles on each side to confirm local extreme
-LEVEL_PROXIMITY = 30      # Max pts from a level to count as "at level"
-MIN_REVERSAL = 30         # Min pts price must move away to confirm reversal
-SL_BEYOND_EXTREME = 20    # SL placed this many pts beyond the extreme
-MIN_RR = 1.5              # Minimum risk:reward ratio
-MIN_LEVEL_SCORE = 20      # Minimum level strength to trade
-MAX_SIGNALS = 3           # Max signals per scan cycle
+# ── Parameters from centralized config ──
+from trading.config import config as _cfg
+
+LOOKBACK = _cfg.level_bounce.lookback
+LEVEL_PROXIMITY = _cfg.level_bounce.level_proximity
+MIN_REVERSAL = _cfg.level_bounce.min_reversal
+SL_BEYOND_EXTREME = _cfg.level_bounce.sl_beyond_extreme
+MIN_RR = _cfg.level_bounce.min_rr
+MIN_LEVEL_SCORE = _cfg.level_bounce.min_level_score
+MAX_SIGNALS = _cfg.level_bounce.max_signals
 
 
 def detect_level_bounce(
@@ -120,17 +122,20 @@ def _build_signal_from_high(
 
     # SL: just above the extreme
     sl = extreme_price + SL_BEYOND_EXTREME
-
-    # Target: next support level below entry
-    target_level = level_map.find_support_below(entry)
-    if target_level:
-        target = target_level.price
-    else:
-        target = entry - (sl - entry) * 2.5  # fallback: 2.5R
-
     risk = sl - entry
     if risk <= 0:
         return None
+
+    # Target: find support level far enough for good R:R
+    # Skip levels that are too close (within 1R distance) — they give poor R:R
+    min_target_price = entry - risk * MIN_RR
+    target = entry - risk * 2.5  # default fallback
+
+    for lvl in sorted(level_map.levels, key=lambda l: -l.price):
+        if lvl.price < min_target_price and lvl.level_type in ("support", "pivot") and lvl.strength >= 15:
+            target = lvl.price
+            break
+
     reward = entry - target
     rr = reward / risk
     if rr < MIN_RR:
@@ -185,16 +190,19 @@ def _build_signal_from_low(
     current = _f(candles[-1], "close")
     entry = current
     sl = extreme_price - SL_BEYOND_EXTREME
-
-    target_level = level_map.find_resistance_above(entry)
-    if target_level:
-        target = target_level.price
-    else:
-        target = entry + (entry - sl) * 2.5
-
     risk = entry - sl
     if risk <= 0:
         return None
+
+    # Target: find resistance far enough for good R:R
+    min_target_price = entry + risk * MIN_RR
+    target = entry + risk * 2.5  # default fallback
+
+    for lvl in sorted(level_map.levels, key=lambda l: l.price):
+        if lvl.price > min_target_price and lvl.level_type in ("resistance", "pivot") and lvl.strength >= 15:
+            target = lvl.price
+            break
+
     reward = target - entry
     rr = reward / risk
     if rr < MIN_RR:

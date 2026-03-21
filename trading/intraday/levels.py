@@ -96,8 +96,11 @@ class LevelMap:
         lm.pdc = pc
 
         # ── 1. Previous day high/low/close ──
-        all_levels.append(Level(ph, "PDH", 25, "resistance", "Previous day high"))
-        all_levels.append(Level(pl, "PDL", 25, "support", "Previous day low"))
+        from trading.config import config as _cfg
+        lc = _cfg.levels
+
+        all_levels.append(Level(ph, "PDH", lc.pdh_pdl_base_score, "resistance", "Previous day high"))
+        all_levels.append(Level(pl, "PDL", lc.pdh_pdl_base_score, "support", "Previous day low"))
         all_levels.append(Level(pc, "PDC", 15, "pivot", "Previous day close"))
 
         # ── 2. Camarilla pivots ──
@@ -114,25 +117,25 @@ class LevelMap:
         lm.cam_s4 = cam_s4
         lm.cam_pivot = cam_p
 
-        all_levels.append(Level(cam_r3, "Cam_R3", 25, "resistance", "Camarilla R3 — sell zone"))
-        all_levels.append(Level(cam_r4, "Cam_R4", 25, "resistance", "Camarilla R4 — stop hunt"))
-        all_levels.append(Level(cam_s3, "Cam_S3", 25, "support", "Camarilla S3 — buy zone"))
-        all_levels.append(Level(cam_s4, "Cam_S4", 25, "support", "Camarilla S4 — stop hunt"))
+        all_levels.append(Level(cam_r3, "Cam_R3", lc.camarilla_base_score, "resistance", "Camarilla R3 — sell zone"))
+        all_levels.append(Level(cam_r4, "Cam_R4", lc.camarilla_base_score, "resistance", "Camarilla R4 — stop hunt"))
+        all_levels.append(Level(cam_s3, "Cam_S3", lc.camarilla_base_score, "support", "Camarilla S3 — buy zone"))
+        all_levels.append(Level(cam_s4, "Cam_S4", lc.camarilla_base_score, "support", "Camarilla S4 — stop hunt"))
         all_levels.append(Level(cam_p, "Cam_Pivot", 15, "pivot", "Camarilla pivot"))
 
         # ── 3. Swing points from daily chart (past 10 days) ──
         swings = _find_swing_points(daily_candles, lookback=2)
         for stype, price, dt in swings:
             ltype = "resistance" if stype == "SWING_HIGH" else "support"
-            all_levels.append(Level(price, stype, 30, ltype, f"Swing {stype.lower()} from {dt}"))
+            all_levels.append(Level(price, stype, lc.swing_base_score, ltype, f"Swing {stype.lower()} from {dt}"))
 
         # ── 4. Round numbers (within 500 pts of prev close) ──
         # NIFTY: every 100 pts. Stocks: every 50 or 100 depending on price.
-        step = 100 if pc > 5000 else 50 if pc > 500 else 10
+        step = lc.round_step_nifty if pc > 5000 else lc.round_step_stock if pc > 500 else 10
         base = int(pc / step) * step
         for rn in range(base - 5 * step, base + 6 * step, step):
             if abs(rn - pc) < 5 * step:
-                all_levels.append(Level(float(rn), "Round", 20, "pivot",
+                all_levels.append(Level(float(rn), "Round", lc.round_base_score, "pivot",
                                         f"Round number {rn}"))
 
         # ── 5. Week high/low (from daily data) ──
@@ -140,8 +143,8 @@ class LevelMap:
             week_data = daily_candles[-5:]
             week_high = max(_get_high(c) for c in week_data)
             week_low = min(_get_low(c) for c in week_data)
-            all_levels.append(Level(week_high, "Week_High", 20, "resistance", "5-day high"))
-            all_levels.append(Level(week_low, "Week_Low", 20, "support", "5-day low"))
+            all_levels.append(Level(week_high, "Week_High", lc.week_hl_base_score, "resistance", "5-day high"))
+            all_levels.append(Level(week_low, "Week_Low", lc.week_hl_base_score, "support", "5-day low"))
 
         # ── 6. Intraday levels (if candles available) ──
         if intraday_candles and len(intraday_candles) >= 3:
@@ -149,7 +152,7 @@ class LevelMap:
             vwap_val = _calc_vwap(intraday_candles)
             if vwap_val > 0:
                 lm.vwap = vwap_val
-                all_levels.append(Level(vwap_val, "VWAP", 20, "pivot",
+                all_levels.append(Level(vwap_val, "VWAP", lc.vwap_base_score, "pivot",
                                         "Volume weighted average price"))
 
             # ORB (first 3 candles = 15 min)
@@ -158,8 +161,8 @@ class LevelMap:
             orb_low = min(_get_low(c) for c in orb_candles)
             lm.orb_high = orb_high
             lm.orb_low = orb_low
-            all_levels.append(Level(orb_high, "ORB_High", 15, "resistance", "Opening range high"))
-            all_levels.append(Level(orb_low, "ORB_Low", 15, "support", "Opening range low"))
+            all_levels.append(Level(orb_high, "ORB_High", lc.orb_base_score, "resistance", "Opening range high"))
+            all_levels.append(Level(orb_low, "ORB_Low", lc.orb_base_score, "support", "Opening range low"))
 
             # Day high/low (running)
             lm.day_high = max(_get_high(c) for c in intraday_candles)
@@ -321,7 +324,8 @@ def _score_confluence(levels: List[Level]) -> List[Level]:
     If PDH and Cam_R3 and a round number are all within 30 pts,
     each gets a boost because 3 independent sources confirm the zone.
     """
-    CLUSTER_DIST = 30  # pts — levels within this distance reinforce each other
+    from trading.config import config as _cfg
+    CLUSTER_DIST = _cfg.levels.cluster_distance
 
     for i, lvl in enumerate(levels):
         cluster_boost = 0
