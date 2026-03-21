@@ -12,7 +12,7 @@ This is the heartbeat of the intraday agent.
 import os
 import sys
 import time
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 from logzero import logger
@@ -115,10 +115,56 @@ class IntradayMonitor:
                 setup.confluence_score = confluence.get("confluence_score", 0)
                 setup.confluence_bias = confluence.get("confluence_bias", "NEUTRAL")
 
-                # Run structure detectors
+                # Build level map for this stock
+                from trading.intraday.levels import LevelMap
+                try:
+                    from trading.services.data_service import DataService
+                    ds = DataService()
+                    hist = ds.fetch_historical(setup.symbol,
+                        (date.today() - timedelta(days=10)).isoformat(),
+                        (date.today() - timedelta(days=1)).isoformat(), "ONE_DAY")
+                    level_map = LevelMap.build(hist or [], setup.today_open, candles)
+                except Exception:
+                    level_map = None
+
+                # Run structure detectors (existing V1 setups)
                 signals = detect_all_structures(setup, candles, avg_vol)
 
+                # Run level bounce detector (V2)
+                if level_map:
+                    try:
+                        from trading.intraday.level_bounce import detect_level_bounce
+                        from trading.intraday.level_retest import detect_level_retest
+                        from trading.intraday.vwap_fade import detect_vwap_fade
+
+                        atr = setup.prev_atr or (setup.prev_high - setup.prev_low)
+                        bounce_sigs = detect_level_bounce(level_map, candles, atr, avg_vol)
+                        retest_sigs = detect_level_retest(level_map, candles, atr, avg_vol)
+                        fade_sigs = detect_vwap_fade(level_map, candles, atr, avg_vol)
+
+                        for s in bounce_sigs + retest_sigs + fade_sigs:
+                            s.symbol = setup.symbol
+                            s.token = setup.token
+                        signals.extend(bounce_sigs + retest_sigs + fade_sigs)
+                    except Exception as e:
+                        logger.warning(f"  [{setup.symbol}] V2 detectors failed: {e}")
+
+                # Apply Sweet Spot Filter to ALL signals (V1 + V2)
+                if level_map and signals:
+                    from trading.intraday.sweet_spot import evaluate_signal
+                    atr = setup.prev_atr or (setup.prev_high - setup.prev_low)
+                    filtered = []
+                    for sig in signals:
+                        enriched = evaluate_signal(sig, level_map, atr)
+                        if enriched:
+                            filtered.append(enriched)
+                        else:
+                            logger.info(f"  [{setup.symbol}] {sig.setup_type.value} rejected — not at level")
+                    signals = filtered
+
                 if signals:
+                    # Sort by confidence, take best
+                    signals.sort(key=lambda s: -s.confidence)
                     best = signals[0]
 
                     # Regime-based confidence adjustment
@@ -132,15 +178,16 @@ class IntradayMonitor:
                             logger.info(f"  [{setup.symbol}] Regime {self._regime.classification}: "
                                         f"conf {original_conf:.2f} → {best.confidence:.2f}")
 
-                    # Multi-timeframe confirmation
-                    if self._confirm_multi_tf(setup, best, today_str):
+                    # Multi-timeframe confirmation (skip for level bounces — they're self-confirming)
+                    is_level_setup = best.setup_type.value.startswith("LEVEL_BOUNCE")
+                    if is_level_setup or self._confirm_multi_tf(setup, best, today_str):
                         all_signals.append(best)
                         regime_tag = f" | Regime: {self._regime.classification}" if hasattr(self, '_regime') and self._regime else ""
+                        level_tag = f" | Level: {best.near_pivot}" if best.near_pivot else ""
                         logger.info(f"  SIGNAL: {best.symbol} {best.setup_type.value} "
                                     f"@ {best.entry_price:.2f} | Conf {best.confidence:.2f} | "
-                                    f"Confluence {setup.confluence_score}{regime_tag} | MTF confirmed")
+                                    f"Confluence {setup.confluence_score}{regime_tag}{level_tag}")
 
-                        # Update WatchlistEntry outcome
                         self._update_watchlist_outcome(setup, best)
                     else:
                         logger.info(f"  SIGNAL FILTERED: {best.symbol} {best.setup_type.value} "

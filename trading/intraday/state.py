@@ -19,6 +19,8 @@ class SetupType(str, Enum):
     GAP_FILL = "GAP_FILL"           # Gap reverting, trade the fill
     VWAP_RECLAIM = "VWAP_RECLAIM"   # Price reclaims VWAP from below → long
     VWAP_REJECT = "VWAP_REJECT"     # Price rejects at VWAP from below → short
+    LEVEL_BOUNCE_LONG = "LEVEL_BOUNCE_LONG"    # Bounce off support level → long
+    LEVEL_BOUNCE_SHORT = "LEVEL_BOUNCE_SHORT"  # Rejection at resistance level → short
 
 
 class TradeBias(str, Enum):
@@ -94,6 +96,12 @@ class IntradaySignal:
     confidence: float                     # 0.0–1.0
     reason: str = ""
     timestamp: str = ""
+    side: str = ""                        # "BUY" or "SELL" (derived from bias if empty)
+    near_pivot: str = ""                  # nearest level name (e.g. "Cam_R3", "PDH")
+
+    def __post_init__(self):
+        if not self.side:
+            self.side = "BUY" if self.bias == TradeBias.LONG else "SELL"
 
 
 @dataclass

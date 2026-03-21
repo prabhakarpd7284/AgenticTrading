@@ -510,30 +510,70 @@ class Command(BaseCommand):
                               f"P&L: {pnl:+,.0f} | Decay: {decay:.0f}% | UW: {underwater}")
                 continue
 
-            # Full workflow
-            from trading.options.straddle.graph import run_straddle_workflow
-            result = run_straddle_workflow(
-                position_id=pos.id, underlying=pos.underlying,
-                strike=pos.strike, expiry=pos.expiry.isoformat(),
-                lot_size=pos.lot_size, lots=pos.lots,
-                ce_symbol=pos.ce_symbol, ce_token=pos.ce_token,
-                pe_symbol=pos.pe_symbol, pe_token=pos.pe_token,
-                ce_sell_price=pos.ce_sell_price, pe_sell_price=pos.pe_sell_price,
+            # ── Simple lifecycle check first (no LLM, no API budget) ──
+            from trading.options.straddle.lifecycle import decide, count_shifts_today
+            from trading.options.data_service import OptionsDataService
+
+            svc = OptionsDataService()
+            ce_data = svc.fetch_option_ltp(pos.ce_symbol, pos.ce_token)
+            pe_data = svc.fetch_option_ltp(pos.pe_symbol, pos.pe_token)
+            ce_ltp = ce_data.get("ltp", 0)
+            pe_ltp = pe_data.get("ltp", 0)
+
+            is_expiry_day = (pos.expiry - date.today()).days == 0
+            shifts = count_shifts_today(pos.management_log)
+
+            decision = decide(
+                ce_sell=pos.ce_sell_price, pe_sell=pos.pe_sell_price,
+                ce_ltp=ce_ltp, pe_ltp=pe_ltp,
+                ce_strike=pos.ce_strike_actual, pe_strike=pos.pe_strike_actual,
+                nifty_spot=svc.fetch_nifty_spot().get("ltp", 0),
+                is_expiry_day=is_expiry_day,
+                shifts_today=shifts,
             )
 
-            action = (result.get("recommended_action") or {}).get("action", "N/A")
-            pnl = (result.get("analysis") or {}).get("net_pnl_inr", 0)
-            exec_r = result.get("execution_result") or {}
+            action = decision.action
+            pnl_pts = (pos.ce_sell_price + pos.pe_sell_price) - (ce_ltp + pe_ltp)
+            pnl_inr = pnl_pts * pos.lot_size * pos.lots
 
-            self._log(f"  #{pos.id} {pos.underlying} {pos.strike} | {action} | "
-                      f"P&L: {pnl:+,.0f} | Exec: {exec_r.get('actions_taken', [])}")
-            # Get true P&L including realized roll losses
+            if action == "HOLD":
+                # Update position prices in DB
+                pos.ce_current_price = ce_ltp
+                pos.pe_current_price = pe_ltp
+                pos.current_pnl_inr = pnl_inr
+                pos.save(update_fields=["ce_current_price", "pe_current_price",
+                                         "current_pnl_inr", "last_updated"])
+
+                self._log(f"  #{pos.id} {pos.underlying} {pos.display_strike} | HOLD | "
+                          f"P&L: {pos.total_pnl:+,.0f} | {decision.reason[:60]}")
+
+            elif action in ("CLOSE_BOTH", "SHIFT_TO_ATM"):
+                # Use the full LangGraph workflow for execution
+                from trading.options.straddle.graph import run_straddle_workflow
+
+                # For SHIFT_TO_ATM, we run REENTER with the new strike
+                if action == "SHIFT_TO_ATM":
+                    self._log(f"  #{pos.id} SHIFT to {decision.new_strike} | {decision.reason[:60]}")
+
+                result = run_straddle_workflow(
+                    position_id=pos.id, underlying=pos.underlying,
+                    strike=pos.strike, expiry=pos.expiry.isoformat(),
+                    lot_size=pos.lot_size, lots=pos.lots,
+                    ce_symbol=pos.ce_symbol, ce_token=pos.ce_token,
+                    pe_symbol=pos.pe_symbol, pe_token=pos.pe_token,
+                    ce_sell_price=pos.ce_sell_price, pe_sell_price=pos.pe_sell_price,
+                )
+                exec_r = result.get("execution_result") or {}
+                self._log(f"  #{pos.id} {pos.underlying} {pos.display_strike} | {action} | "
+                          f"Exec: {exec_r.get('actions_taken', [])}")
+
             pos.refresh_from_db()
             self._emit("STRADDLE_CYCLE", {
-                "position_id": pos.id, "underlying": pos.underlying, "strike": pos.strike,
+                "position_id": pos.id, "underlying": pos.underlying,
+                "strike": pos.display_strike,
                 "action": action, "pnl": pos.total_pnl,
                 "unrealized": pos.current_pnl_inr, "realized": pos.realized_pnl,
-                "executed": exec_r.get("actions_taken", []),
+                "reason": decision.reason[:80],
             })
 
     # ══════════════════════════════════════════════
@@ -712,6 +752,19 @@ class Command(BaseCommand):
             self._log(f"  --- Watchlist Conversion ---")
             self._log(f"    Scanned: {total_wl} | Triggered: {triggered} | Traded: {traded} | "
                       f"Conversion: {(traded/total_wl*100) if total_wl else 0:.0f}%")
+
+        # ── Level quality scorecard (V2) ──
+        trades_at_level = 0
+        trades_total = trades.count()
+        for t in trades:
+            if t.reasoning and any(kw in t.reasoning for kw in
+                    ["Cam_", "PDH", "PDL", "Round", "SWING", "VWAP", "ORB", "Level", "level"]):
+                trades_at_level += 1
+        if trades_total > 0:
+            self._log(f"  --- Level Quality (V2) ---")
+            self._log(f"    Trades at level: {trades_at_level}/{trades_total} "
+                      f"({trades_at_level/trades_total*100:.0f}%)")
+            # Target: 100% of trades should be at significant levels
 
         # ── Straddle performance detail ──
         for p in straddles:

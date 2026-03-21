@@ -286,6 +286,22 @@ class PremarketScanner:
             score += 5
             reasons.append(f"decent move {last_change_pct:+.1f}%")
 
+        # 7. Level proximity bonus (0-15 pts) — V2 level-aware scoring
+        #    Boost stocks where current price is near a high-confluence level
+        try:
+            from trading.intraday.levels import LevelMap
+            level_map = LevelMap.build(recent)
+            current = last_day["close"]
+            nearest, lvl_score = level_map.find_nearest(current, max_dist=atr * 0.5 if atr > 0 else 50)
+            if nearest and lvl_score >= 30:
+                score += 15
+                reasons.append(f"near {nearest.source}={nearest.price:.0f} (level score={lvl_score})")
+            elif nearest and lvl_score >= 20:
+                score += 8
+                reasons.append(f"near {nearest.source}={nearest.price:.0f}")
+        except Exception:
+            pass  # Level map is optional — don't crash the scanner
+
         setup.score = min(score, 100)  # Cap at 100
         setup.reason = " | ".join(reasons)
 
