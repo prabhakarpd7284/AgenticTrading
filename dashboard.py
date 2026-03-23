@@ -1217,8 +1217,8 @@ elif page == "Screener":
                 st.markdown("**Conditions:**")
                 for c in s.conditions:
                     st.markdown(f"- {c.description}")
-                st.markdown(f"**Entry:** {s.entry.method} | **SL:** {s.stoploss.method} ({s.stoploss.params}) | "
-                            f"**Target:** {s.target.method} ({s.target.params})")
+                st.markdown(f"**Entry:** {s.entry_rule.method} | **SL:** {s.stoploss_rule.method} ({s.stoploss_rule.params}) | "
+                            f"**Target:** {s.target_rule.method} ({s.target_rule.params})")
 
 
 # ══════════════════════════════════════════════
