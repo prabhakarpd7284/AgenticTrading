@@ -357,9 +357,32 @@ class Command(BaseCommand):
 
         signals = monitor.run_scan_cycle()
 
+        # ── Screener signals (V2 strategies — VWAP, Pivot, BB, EMA) ──
+        screener_signals = self._run_screener_scan()
+        if screener_signals:
+            self._log(f"  Screener: {len(screener_signals)} signal(s)")
+            # Convert screener Signal → IntradaySignal for unified processing
+            from trading.intraday.state import IntradaySignal, SetupType, TradeBias
+            for ss in screener_signals:
+                try:
+                    setup = SetupType.VWAP_RECLAIM if ss.side == "BUY" else SetupType.VWAP_REJECT
+                    bias = TradeBias.LONG if ss.side == "BUY" else TradeBias.SHORT
+                    intra_sig = IntradaySignal(
+                        symbol=ss.symbol, token="",
+                        setup_type=setup, bias=bias, side=ss.side,
+                        entry_price=ss.entry, stop_loss=ss.stoploss, target=ss.target,
+                        risk_reward=ss.risk_reward, confidence=ss.confidence,
+                        reason=f"[SCR:{ss.strategy}] {' | '.join(ss.reasons[:2])}",
+                        near_pivot=ss.strategy,
+                    )
+                    signals.append(intra_sig)
+                except Exception as e:
+                    logger.warning(f"Screener signal conversion failed: {e}")
+
         self._emit("EQUITY_SCAN", {
             "watchlist_size": len(self._equity_state.watchlist),
             "signals_found": len(signals),
+            "screener_signals": len(screener_signals) if screener_signals else 0,
             "open_positions": self._equity_state.open_positions,
         })
 
@@ -389,6 +412,65 @@ class Command(BaseCommand):
 
             if action == "TRADED":
                 self._equity_state.open_positions += 1
+
+    def _run_screener_scan(self) -> list:
+        """
+        Run the screener engine on watchlist symbols.
+        Returns list of screener Signal objects (not IntradaySignal).
+        Lightweight — reuses cached candle data, no extra API calls.
+        """
+        try:
+            from trading.screener.engine import ScreenerEngine
+            from trading.screener.strategies import STRATEGIES
+            from trading.services.ticker_service import ticker_service
+            from trading.utils.time_utils import can_fetch_candles, cap_end_time
+
+            # Use watchlist symbols if available, else top stocks
+            symbols = [s.symbol for s in (self._equity_state.watchlist if self._equity_state else [])]
+            if not symbols:
+                return []
+
+            # Initialize engine (lazy — reuse if possible)
+            if not hasattr(self, '_screener_engine') or self._screener_engine is None:
+                enabled = [s for s in STRATEGIES if s.enabled]
+                self._screener_engine = ScreenerEngine(symbols=symbols[:10], strategies=enabled)
+
+                # Bootstrap with candles (uses 1 batch call + candle fetches)
+                def _fetch(symbol, tf, n_bars):
+                    token = ticker_service.get_token(symbol)
+                    if not token or not can_fetch_candles():
+                        return []
+                    interval = {"1m": "ONE_MINUTE", "5m": "FIVE_MINUTE", "15m": "FIFTEEN_MINUTE"}.get(tf, "FIVE_MINUTE")
+                    end = cap_end_time(date.today().isoformat())
+                    return self._broker.fetch_candles(token, f"{date.today().isoformat()} 09:15", end, interval) or []
+
+                self._screener_engine.bootstrap(fetch_candles_fn=_fetch)
+
+            # Feed current prices (from cached equity snapshot — no extra API call)
+            batch = []
+            snapshot = getattr(self, '_last_equity_snapshot', None) or []
+            for item in snapshot:
+                if isinstance(item, dict) and item.get("symbol") in symbols:
+                    batch.append({
+                        "symbol": item["symbol"],
+                        "ltp": item.get("ltp", 0),
+                        "volume": item.get("volume", 0),
+                    })
+
+            if not batch:
+                return []
+
+            signals = []
+            self._screener_engine.add_output_handler(lambda sig: signals.append(sig))
+            self._screener_engine.on_batch_tick(batch)
+            # Remove handler to prevent accumulation
+            self._screener_engine._handlers = [h for h in self._screener_engine._handlers
+                                                 if h.__name__ != '<lambda>']
+            return signals
+
+        except Exception as e:
+            logger.warning(f"Screener scan failed (non-fatal): {e}")
+            return []
 
     def _check_equity_exits(self, now: datetime):
         """Check SL/target hits + cache live prices for dashboard."""

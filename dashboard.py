@@ -104,6 +104,7 @@ with st.sidebar:
             "Command Center",
             "Intraday Agent",
             "Market Scanner",
+            "Screener",
             "Trade Workflow",
             "Straddle Console",
             "Journal & Analytics",
@@ -737,6 +738,7 @@ elif page == "Market Scanner":
 
     from dashboard_utils.components import render_indicator_chart
     from dashboard_utils.market_scanner import SECTOR_MAP, fetch_nifty50_ltp, rank_opportunities
+    from dashboard_utils.candle_cache import fetch_and_cache_candles, get_candles_for_timeframe
 
     # ── Scan controls ──
     sc1, sc2, sc3 = st.columns([2, 1, 1])
@@ -799,80 +801,72 @@ elif page == "Market Scanner":
                 m3.metric("Sector", stock.get("sector", "—"))
                 m4.metric("Score", stock.get("opportunity_score", 0))
 
-            # Fetch 5-min candles + compute indicators
+            # ── Fetch candles (cached, auto-detects after-hours) ──
             analysis_data = st.session_state.get(f"analysis_{selected}")
 
-            if st.button(f"Analyze {selected}", type="primary", use_container_width=True):
-                with st.spinner(f"Fetching candles + computing indicators for {selected}..."):
+            ab1, ab2 = st.columns([1, 1])
+            with ab1:
+                analyze_btn = st.button(f"Analyze {selected}", type="primary", use_container_width=True)
+            with ab2:
+                refresh_btn = st.button("Refresh Data", use_container_width=True)
+
+            if analyze_btn or refresh_btn:
+                with st.spinner(f"Fetching candles for {selected} (2 API calls, cached)..."):
                     try:
-                        from trading.services.data_service import DataService
-                        from trading.services.ticker_service import ticker_service
                         from trading.utils.indicators import (
-                            camarilla_pivots, compute_indicator_confluence,
-                            bollinger_bands, macd, rsi, vwap as calc_vwap, atr as calc_atr,
+                            compute_indicator_confluence, atr as calc_atr,
                         )
-                        from trading.utils.time_utils import can_fetch_candles, cap_end_time
+                        from trading.services.ticker_service import ticker_service
 
-                        ds = DataService()
-                        token = ticker_service.get_token(selected)
+                        cache = fetch_and_cache_candles(selected, force=refresh_btn)
+                        if cache.get("error"):
+                            st.error(cache["error"])
+                        else:
+                            candles = cache.get("intraday_5m", [])
+                            pivots = cache.get("pivots", {})
+                            prev_day = cache.get("prev_day")
+                            token = ticker_service.get_token(selected)
 
-                        # Get prev day data for pivots
-                        daily = ds.fetch_historical(selected,
-                            (date.today() - timedelta(days=7)).isoformat(),
-                            (date.today() - timedelta(days=1)).isoformat(), "ONE_DAY")
+                            # Compute indicators from intraday candles
+                            closes = [c["close"] for c in candles] if candles else []
+                            indicators = {}
+                            if closes:
+                                indicators = compute_indicator_confluence(
+                                    closes, candles,
+                                    prev_high=prev_day["high"] if prev_day else 0,
+                                    prev_low=prev_day["low"] if prev_day else 0,
+                                    prev_close=prev_day["close"] if prev_day else 0,
+                                )
 
-                        pivots = {}
-                        prev_day = None
-                        if daily and len(daily) >= 1:
-                            prev_day = daily[-1]
-                            pivots = camarilla_pivots(prev_day["high"], prev_day["low"], prev_day["close"])
+                            # Structure detection
+                            signals = []
+                            if candles and len(candles) >= 4 and prev_day:
+                                from trading.intraday.structures import detect_all_structures
+                                from trading.intraday.state import StockSetup, TradeBias
+                                from trading.services.data_service import DataService
+                                ds = DataService()
+                                daily = cache.get("daily", [])
+                                setup = StockSetup(
+                                    symbol=selected, token=token or "", bias=TradeBias.NEUTRAL, score=50,
+                                    prev_high=prev_day["high"], prev_low=prev_day["low"],
+                                    prev_close=prev_day["close"],
+                                    prev_atr=calc_atr(daily[-5:]) if len(daily) >= 5 else 0,
+                                    pivot_s3=pivots.get("S3", 0), pivot_s4=pivots.get("S4", 0),
+                                    pivot_r3=pivots.get("R3", 0), pivot_r4=pivots.get("R4", 0),
+                                    pivot_p=pivots.get("P", 0),
+                                    today_open=candles[0]["open"] if candles else 0,
+                                    orb_high=max(c["high"] for c in candles[:3]) if len(candles) >= 3 else 0,
+                                    orb_low=min(c["low"] for c in candles[:3]) if len(candles) >= 3 else 0,
+                                )
+                                avg_vol = sum(c.get("volume", 0) for c in candles) / len(candles)
+                                signals = detect_all_structures(setup, candles, avg_vol)
 
-                        # Get intraday candles
-                        candles = []
-                        if can_fetch_candles() and token:
-                            from trading.services.data_service import BrokerClient
-                            b = BrokerClient.get_instance()
-                            end = cap_end_time(date.today().isoformat())
-                            raw = b.fetch_candles(token, f"{date.today().isoformat()} 09:15", end, "FIVE_MINUTE")
-                            if raw:
-                                candles = [{"open": float(r[1]), "high": float(r[2]), "low": float(r[3]),
-                                            "close": float(r[4]), "volume": int(r[5])} for r in raw]
-
-                        # Compute indicators
-                        closes = [c["close"] for c in candles] if candles else []
-                        indicators = {}
-                        if closes:
-                            indicators = compute_indicator_confluence(
-                                closes, candles,
-                                prev_high=prev_day["high"] if prev_day else 0,
-                                prev_low=prev_day["low"] if prev_day else 0,
-                                prev_close=prev_day["close"] if prev_day else 0,
-                            )
-
-                        # Structure detection
-                        signals = []
-                        if candles and len(candles) >= 4 and prev_day:
-                            from trading.intraday.structures import detect_all_structures
-                            from trading.intraday.state import StockSetup, TradeBias
-                            setup = StockSetup(
-                                symbol=selected, token=token or "", bias=TradeBias.NEUTRAL, score=50,
-                                prev_high=prev_day["high"], prev_low=prev_day["low"],
-                                prev_close=prev_day["close"], prev_atr=calc_atr(daily[-5:]) if daily else 0,
-                                pivot_s3=pivots.get("S3", 0), pivot_s4=pivots.get("S4", 0),
-                                pivot_r3=pivots.get("R3", 0), pivot_r4=pivots.get("R4", 0),
-                                pivot_p=pivots.get("P", 0),
-                                today_open=candles[0]["open"] if candles else 0,
-                                orb_high=max(c["high"] for c in candles[:3]) if len(candles) >= 3 else 0,
-                                orb_low=min(c["low"] for c in candles[:3]) if len(candles) >= 3 else 0,
-                            )
-                            avg_vol = sum(c.get("volume", 0) for c in candles) / len(candles)
-                            signals = detect_all_structures(setup, candles, avg_vol)
-
-                        analysis_data = {
-                            "candles": candles, "pivots": pivots, "indicators": indicators,
-                            "signals": signals, "prev_day": prev_day,
-                        }
-                        st.session_state[f"analysis_{selected}"] = analysis_data
+                            analysis_data = {
+                                "candles": candles, "pivots": pivots, "indicators": indicators,
+                                "signals": signals, "prev_day": prev_day,
+                                "intraday_date": cache.get("intraday_date", ""),
+                            }
+                            st.session_state[f"analysis_{selected}"] = analysis_data
 
                     except Exception as e:
                         st.error(f"Analysis failed: {e}")
@@ -885,6 +879,7 @@ elif page == "Market Scanner":
                 pivots = analysis_data.get("pivots", {})
                 indicators = analysis_data.get("indicators", {})
                 signals = analysis_data.get("signals", [])
+                intraday_date = analysis_data.get("intraday_date", "")
 
                 # Indicator metrics
                 ic1, ic2, ic3, ic4, ic5, ic6 = st.columns(6)
@@ -895,16 +890,44 @@ elif page == "Market Scanner":
                 ic5.metric("Confluence", f"{indicators.get('confluence_score', 0)}")
                 ic6.metric("Bias", indicators.get("confluence_bias", "—"))
 
-                # Custom chart with indicators
+                if intraday_date:
+                    from trading.utils.time_utils import is_market_open
+                    status = "LIVE" if is_market_open() else "After-hours"
+                    st.caption(f"Intraday data: {intraday_date} ({status})")
+
+                # ── Timeframe tabs: 5m | Daily | Weekly | Monthly ──
+                tf_tab1, tf_tab2, tf_tab3, tf_tab4 = st.tabs(["5m Intraday", "Daily", "Weekly", "Monthly"])
+
                 best_signal = signals[0] if signals else None
-                render_indicator_chart(
-                    candles, selected, pivots,
-                    bb=indicators.get("bb"),
-                    vwap_val=indicators.get("vwap", 0),
-                    entry=best_signal.entry_price if best_signal else 0,
-                    sl=best_signal.stop_loss if best_signal else 0,
-                    target=best_signal.target if best_signal else 0,
-                )
+
+                with tf_tab1:
+                    render_indicator_chart(
+                        candles, selected, pivots,
+                        bb=indicators.get("bb"),
+                        vwap_val=indicators.get("vwap", 0),
+                        entry=best_signal.entry_price if best_signal else 0,
+                        sl=best_signal.stop_loss if best_signal else 0,
+                        target=best_signal.target if best_signal else 0,
+                        timeframe="5m",
+                    )
+
+                with tf_tab2:
+                    daily_candles = get_candles_for_timeframe(selected, "daily")
+                    render_indicator_chart(
+                        daily_candles, selected, timeframe="daily",
+                    )
+
+                with tf_tab3:
+                    weekly_candles = get_candles_for_timeframe(selected, "weekly")
+                    render_indicator_chart(
+                        weekly_candles, selected, timeframe="weekly",
+                    )
+
+                with tf_tab4:
+                    monthly_candles = get_candles_for_timeframe(selected, "monthly")
+                    render_indicator_chart(
+                        monthly_candles, selected, timeframe="monthly",
+                    )
 
                 # Camarilla levels
                 if pivots:
@@ -966,6 +989,236 @@ elif page == "Market Scanner":
                             f"The AI team checks every 5 minutes — structures form throughout the day.")
     else:
         st.info("Click **Scan Now** to discover opportunities.")
+
+
+# ══════════════════════════════════════════════
+# PAGE: SCREENER
+# ══════════════════════════════════════════════
+elif page == "Screener":
+    st.header("Live Screener")
+    st.caption("Real-time opportunity detection across NIFTY 50 | 6 strategies | Multi-TF")
+
+    from trading.screener.strategies import STRATEGIES
+    from trading.screener.signals import Signal
+
+    tab_live, tab_backtest, tab_strategies_tab = st.tabs([
+        "Live Signals", "Backtest", "Strategies"
+    ])
+
+    # ── Live Signals Tab ──
+    with tab_live:
+        lc1, lc2, lc3 = st.columns([2, 1, 1])
+
+        with lc1:
+            screener_symbols = st.text_input(
+                "Symbols (comma separated)",
+                value="RELIANCE,HDFCBANK,TCS,INFY,SBIN,AXISBANK,ICICIBANK,KOTAKBANK,BAJFINANCE,ITC",
+                key="screener_syms",
+            ).strip().upper().split(",")
+            screener_symbols = [s.strip() for s in screener_symbols if s.strip()]
+
+        with lc2:
+            screener_strategies = st.multiselect(
+                "Strategies",
+                [s.name for s in STRATEGIES if s.enabled],
+                default=[s.name for s in STRATEGIES if s.enabled],
+                key="screener_strats",
+            )
+
+        with lc3:
+            scan_btn = st.button("Scan Now", type="primary", use_container_width=True, key="screener_scan")
+
+        if scan_btn and screener_symbols:
+            with st.spinner(f"Running screener on {len(screener_symbols)} symbols..."):
+                try:
+                    from trading.screener.engine import ScreenerEngine
+                    from trading.services.data_service import BrokerClient
+                    from trading.services.ticker_service import ticker_service
+
+                    # Build engine with selected strategies
+                    selected = [s for s in STRATEGIES if s.name in screener_strategies and s.enabled]
+                    engine = ScreenerEngine(symbols=screener_symbols, strategies=selected)
+
+                    # Collect signals
+                    signals_found = []
+                    engine.add_output_handler(lambda sig: signals_found.append(sig))
+
+                    # Bootstrap with historical candles
+                    b = BrokerClient.get_instance()
+                    b.ensure_login()
+
+                    def fetch_fn(symbol, tf, n_bars):
+                        token = ticker_service.get_token(symbol)
+                        if not token:
+                            return []
+                        from trading.utils.time_utils import can_fetch_candles, cap_end_time
+                        if not can_fetch_candles():
+                            return []
+                        interval = {"1m": "ONE_MINUTE", "5m": "FIVE_MINUTE", "15m": "FIFTEEN_MINUTE"}.get(tf, "FIVE_MINUTE")
+                        end = cap_end_time(date.today().isoformat())
+                        raw = b.fetch_candles(token, f"{date.today().isoformat()} 09:15", end, interval)
+                        return raw or []
+
+                    engine.bootstrap(fetch_candles_fn=fetch_fn)
+
+                    # Run batch tick with current prices
+                    batch = []
+                    from trading.services.data_service import DataService
+                    ds = DataService()
+                    ltp_data = ds.fetch_batch_ltp(screener_symbols)
+                    for item in ltp_data:
+                        batch.append({
+                            "symbol": item["symbol"],
+                            "ltp": item["ltp"],
+                            "volume": item.get("volume", 0),
+                        })
+                    if batch:
+                        engine.on_batch_tick(batch)
+
+                    st.session_state["screener_signals"] = signals_found
+                    st.session_state["screener_ts"] = datetime.now()
+                    st.session_state["screener_engine_stats"] = {
+                        "symbols": len(screener_symbols),
+                        "strategies": len(selected),
+                        "bars_total": sum(len(s.bars.get("5m", [])) for s in engine.stores.values()),
+                    }
+
+                except Exception as e:
+                    st.error(f"Screener failed: {e}")
+                    import traceback
+                    st.code(traceback.format_exc())
+
+        # Display signals
+        signals_found = st.session_state.get("screener_signals", [])
+        scan_ts = st.session_state.get("screener_ts")
+        stats = st.session_state.get("screener_engine_stats", {})
+
+        if scan_ts:
+            st.caption(f"Last scan: {scan_ts.strftime('%H:%M:%S')} | "
+                       f"{stats.get('symbols', 0)} symbols | "
+                       f"{stats.get('strategies', 0)} strategies | "
+                       f"{stats.get('bars_total', 0)} bars loaded")
+
+        if signals_found:
+            st.success(f"{len(signals_found)} signal(s) detected")
+
+            for sig in signals_found:
+                with st.container():
+                    arrow = "🟢" if sig.side == "BUY" else "🔴"
+                    st.markdown(f"### {arrow} {sig.symbol} — {sig.strategy}")
+
+                    sc1, sc2, sc3, sc4, sc5 = st.columns(5)
+                    sc1.metric("Side", sig.side)
+                    sc2.metric("Entry", f"₹{sig.entry:,.2f}")
+                    sc3.metric("Stop Loss", f"₹{sig.stoploss:,.2f}")
+                    sc4.metric("Target", f"₹{sig.target:,.2f}")
+                    sc5.metric("R:R", f"{sig.risk_reward:.1f}")
+
+                    sc6, sc7 = st.columns(2)
+                    sc6.metric("Confidence", f"{sig.confidence:.0%}")
+                    sc7.metric("Risk", f"{sig.risk_points:.1f} pts ({sig.risk_pct}%)")
+
+                    st.caption(f"Reasons: {' | '.join(sig.reasons)}")
+
+                    # Human-in-the-loop: approve trade
+                    acol1, acol2 = st.columns([1, 1])
+                    with acol1:
+                        if st.button(f"APPROVE {sig.symbol} {sig.side}", type="primary",
+                                     key=f"approve_scr_{sig.symbol}_{sig.strategy}"):
+                            st.info(f"Approved — route to execution pipeline")
+                    with acol2:
+                        if st.button(f"Skip", key=f"skip_scr_{sig.symbol}_{sig.strategy}"):
+                            st.info("Skipped")
+
+                    st.markdown("---")
+        elif scan_ts:
+            st.info("No signals detected in this scan. Market may be quiet or conditions not met.")
+
+    # ── Backtest Tab ──
+    with tab_backtest:
+        st.subheader("Screener Backtest")
+
+        bc1, bc2, bc3 = st.columns(3)
+        bt_from = bc1.date_input("From", value=date.today() - timedelta(days=5), key="scr_bt_from")
+        bt_to = bc2.date_input("To", value=date.today() - timedelta(days=1), key="scr_bt_to")
+        bt_syms = bc3.text_input("Symbols", value="RELIANCE,HDFCBANK,TCS,INFY,SBIN", key="scr_bt_syms")
+
+        if st.button("Run Backtest", type="primary", key="scr_bt_run"):
+            with st.spinner("Running screener backtest..."):
+                try:
+                    from trading.screener.backtest import run_backtest as screener_backtest
+                    symbols = [s.strip() for s in bt_syms.split(",") if s.strip()]
+                    result = screener_backtest(
+                        symbols=symbols,
+                        from_date=bt_from.isoformat(),
+                        to_date=bt_to.isoformat(),
+                    )
+
+                    # Summary
+                    sm1, sm2, sm3, sm4 = st.columns(4)
+                    sm1.metric("Signals", result.total_signals)
+                    sm2.metric("Trades", len(result.trades))
+                    sm3.metric("Win Rate", f"{result.win_rate:.0f}%")
+                    sm4.metric("Profit Factor", f"{result.profit_factor:.2f}")
+
+                    sm5, sm6, sm7, sm8 = st.columns(4)
+                    sm5.metric("Total P&L", f"{result.total_pnl:+,.0f} pts")
+                    sm6.metric("Avg R:R", f"{result.avg_rr_achieved:.1f}")
+                    sm7.metric("Max DD", f"{result.max_drawdown:+,.0f} pts")
+                    sm8.metric("Best Day", f"{result.best_day_pnl:+,.0f}" if hasattr(result, 'best_day_pnl') else "—")
+
+                    # Per strategy
+                    if result.per_strategy:
+                        st.subheader("By Strategy")
+                        strat_rows = []
+                        for name, stats in result.per_strategy.items():
+                            strat_rows.append({
+                                "Strategy": name,
+                                "Trades": stats.get("trades", 0),
+                                "Wins": stats.get("wins", 0),
+                                "WR%": f"{stats.get('win_rate', 0):.0f}%",
+                                "P&L": f"{stats.get('pnl', 0):+,.0f}",
+                                "PF": f"{stats.get('profit_factor', 0):.2f}",
+                            })
+                        st.dataframe(pd.DataFrame(strat_rows), use_container_width=True, hide_index=True)
+
+                    # Trade log
+                    if result.trades:
+                        st.subheader("Trade Log")
+                        trade_rows = []
+                        for t in result.trades:
+                            trade_rows.append({
+                                "Time": t.signal.timestamp.strftime("%m-%d %H:%M") if t.signal else "—",
+                                "Symbol": t.signal.symbol if t.signal else "—",
+                                "Strategy": t.signal.strategy if t.signal else "—",
+                                "Side": t.signal.side if t.signal else "—",
+                                "Entry": f"{t.entry_price:.2f}" if hasattr(t, 'entry_price') else "—",
+                                "Exit": f"{t.exit_price:.2f}",
+                                "P&L": f"{t.pnl:+,.1f}",
+                                "Reason": t.exit_reason,
+                            })
+                        st.dataframe(pd.DataFrame(trade_rows), use_container_width=True, hide_index=True)
+
+                except Exception as e:
+                    st.error(f"Backtest failed: {e}")
+                    import traceback
+                    st.code(traceback.format_exc())
+
+    # ── Strategies Tab ──
+    with tab_strategies_tab:
+        st.subheader("Strategy Definitions")
+        for s in STRATEGIES:
+            status = "🟢 Enabled" if s.enabled else "🔴 Disabled"
+            with st.expander(f"{status} — {s.name} ({s.side})"):
+                st.markdown(f"**{s.description}**")
+                st.markdown(f"**Side:** {s.side} | **Min R:R:** {s.min_rr} | **Cooldown:** {s.cooldown_bars} bars")
+                if s.active_window:
+                    st.markdown(f"**Active window:** {s.active_window[0].strftime('%H:%M')} — {s.active_window[1].strftime('%H:%M')}")
+                st.markdown("**Conditions:**")
+                for c in s.conditions:
+                    st.markdown(f"- {c.description}")
+                st.markdown(f"**Entry:** {s.entry.method} | **SL:** {s.stoploss.method} ({s.stoploss.params}) | "
+                            f"**Target:** {s.target.method} ({s.target.params})")
 
 
 # ══════════════════════════════════════════════
