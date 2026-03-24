@@ -69,12 +69,12 @@ class VWAPFadeConfig:
 class TradeManagerConfig:
     """Active trade management parameters."""
     breakeven_at_r: float = 0.5    # Move SL to breakeven at this R multiple
-    partial_at_r: float = 1.5      # Take 50% profit at this R multiple
-    time_stop_candles: int = 6     # 30 min — protects against big losers
-    time_stop_min_move: float = 0.2  # "No progress" threshold in R multiples
-    trail_atr_factor: float = 0.5  # Trail at 0.5 ATR after partial
-    tight_trail_atr_factor: float = 0.3  # Tighter trail at 2R+
-    tight_trail_at_r: float = 2.0  # When to switch to tight trail
+    partial_at_r: float = 1.0      # Take 50% at 1R (was 1.5R — too far, never reached)
+    time_stop_candles: int = 10    # 50 min — give trades room (was 6 = too aggressive)
+    time_stop_min_move: float = 0.3  # "No progress" = less than 0.3R
+    trail_atr_factor: float = 0.3  # Trail at 0.3 ATR after partial (was 0.5 — too loose)
+    tight_trail_atr_factor: float = 0.2  # Tighter trail at 1.5R+
+    tight_trail_at_r: float = 1.5  # Switch to tight trail earlier (was 2.0)
 
 
 @dataclass(frozen=True)
@@ -94,7 +94,7 @@ class RiskConfig:
     """Risk engine parameters."""
     max_risk_per_trade_pct: float = float(os.getenv("MAX_RISK_PER_TRADE_PCT", "1.0"))
     max_daily_loss_pct: float = float(os.getenv("MAX_DAILY_LOSS_PCT", "3.0"))
-    max_position_size_pct: float = float(os.getenv("MAX_POSITION_SIZE_PCT", "10.0"))
+    max_position_size_pct: float = float(os.getenv("MAX_POSITION_SIZE_PCT", "15.0"))  # 15% to allow proper sizing on expensive stocks
     min_risk_reward: float = 1.5
     min_confidence: float = 0.55
     max_open_positions: int = 11
@@ -165,6 +165,31 @@ class BrokerConfig:
 
 
 # ══════════════════════════════════════════════
+# Screener Config
+# ══════════════════════════════════════════════
+
+@dataclass(frozen=True)
+class ScreenerConfig:
+    """Live screener parameters."""
+    poll_interval: float = 5.0               # REST polling interval (seconds)
+    min_rr: float = 1.5                      # Global minimum risk:reward
+    max_signals_per_symbol: int = 3          # Max signals per symbol per day
+    cooldown_bars: int = 5                   # Default cooldown between signals
+    bb_period: int = 20                      # Bollinger Bands period
+    bb_std: float = 2.0                      # Bollinger Bands std dev
+    rsi_period: int = 14                     # RSI period
+    sma_fast: int = 9                        # Fast SMA
+    sma_slow: int = 20                       # Slow SMA
+    big_candle_atr_multiple: float = 1.5     # Bar range / ATR to qualify as "big"
+    # Telegram
+    telegram_max_per_minute: int = 5
+    telegram_max_per_hour: int = 30
+    telegram_signal_cooldown: int = 300      # seconds between same symbol+strategy
+    # Backtest
+    backtest_slippage_pct: float = 0.05      # % slippage on entry
+
+
+# ══════════════════════════════════════════════
 # Backtest Config
 # ══════════════════════════════════════════════
 
@@ -203,6 +228,7 @@ class TradingConfig:
     straddle: StraddleConfig = field(default_factory=StraddleConfig)
     levels: LevelConfig = field(default_factory=LevelConfig)
     scanner: ScannerConfig = field(default_factory=ScannerConfig)
+    screener: ScreenerConfig = field(default_factory=ScreenerConfig)
     broker: BrokerConfig = field(default_factory=BrokerConfig)
     backtest: BacktestConfig = field(default_factory=BacktestConfig)
 
