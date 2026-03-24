@@ -339,7 +339,11 @@ def _build_summary(
     """Build comprehensive backtest summary."""
 
     if not trades:
-        return {"trades": [], "summary": {"total_trades": 0}, "config": config}
+        return {"trades": [], "summary": {
+            "total_trades": 0, "wins": 0, "losses": 0, "win_rate": 0,
+            "total_pnl": 0, "avg_pnl_per_trade": 0, "profit_factor": 0,
+            "max_drawdown": 0, "outcomes": {},
+        }, "config": config}
 
     wins = [t for t in trades if t.pnl_inr > 0]
     losses = [t for t in trades if t.pnl_inr <= 0]
