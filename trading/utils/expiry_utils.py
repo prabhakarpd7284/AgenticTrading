@@ -104,18 +104,38 @@ def days_to_expiry(expiry: str) -> int:
 
 def next_expiry_date(underlying: str = "NIFTY") -> Optional[date]:
     """
-    Find the next weekly expiry date.
-    NIFTY weekly expiry = Tuesday. BANKNIFTY = Wednesday.
-    Returns the next expiry date from today (inclusive if today is expiry).
+    Find the next expiry date from the actual scrip master.
+    Falls back to hardcoded weekday if scrip master unavailable.
     """
     from datetime import timedelta
     today = date.today()
-    expiry_weekday = 1 if underlying == "NIFTY" else 2  # Tue=1, Wed=2
 
+    # Try scrip master first — authoritative source
+    try:
+        from trading.services.ticker_service import ticker_service
+        ticker_service._ensure_loaded()
+
+        expiries = set()
+        for key, inst in ticker_service._nfo_by_key.items():
+            if inst.get("name") == underlying and inst.get("instrumenttype") == "OPTIDX":
+                exp_str = inst.get("expiry", "")
+                if exp_str:
+                    try:
+                        # Angel One format: "30MAR2026" or "24MAR2026"
+                        exp_date = datetime.strptime(exp_str, "%d%b%Y").date()
+                        if exp_date >= today:
+                            expiries.add(exp_date)
+                    except (ValueError, TypeError):
+                        pass
+
+        if expiries:
+            return min(expiries)
+    except Exception:
+        pass
+
+    # Fallback: hardcoded weekday
+    expiry_weekday = 1 if underlying == "NIFTY" else 2  # Tue=1, Wed=2
     days_ahead = (expiry_weekday - today.weekday()) % 7
     if days_ahead == 0:
-        # Today is expiry day
         return today
-
-    next_exp = today + timedelta(days=days_ahead)
-    return next_exp
+    return today + timedelta(days=days_ahead)
