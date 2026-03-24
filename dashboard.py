@@ -1530,11 +1530,11 @@ elif page == "Straddle Console":
     def _is_market_hours() -> bool:
         return is_market_open()
 
-    st.header("Short Straddle Console")
+    st.header("Options Console")
     mode_badge = "🔴 LIVE" if TRADING_MODE == "live" else "🟢 PAPER"
     st.caption(
-        f"Register → Monitor → Analyze → Execute  |  "
-        f"@OptionsStrategist + @RiskGuard  |  {mode_badge}  |  "
+        f"Adaptive Engine: Straddle / Spreads / Skip based on VIX & regime  |  "
+        f"{mode_badge}  |  "
         f"{'🟢 Market Open' if _is_market_hours() else '🔴 Market Closed'}"
     )
 
@@ -1543,9 +1543,109 @@ elif page == "Straddle Console":
                     StraddlePosition.Status.PARTIAL]
     ).order_by("-opened_at"))
 
-    tab_monitor, tab_analyze, tab_payoff, tab_register, tab_history = st.tabs([
-        "📊 Monitor", "🤖 Analyze & Act", "📈 Payoff & Greeks", "➕ Register", "📜 History"
+    tab_adaptive, tab_monitor, tab_analyze, tab_payoff, tab_register, tab_history = st.tabs([
+        "🎯 Adaptive", "📊 Monitor", "🤖 Analyze & Act", "📈 Payoff & Greeks", "➕ Register", "📜 History"
     ])
+
+    # ────────────────────────────────
+    # TAB: Adaptive Engine
+    # ────────────────────────────────
+    with tab_adaptive:
+        st.subheader("Adaptive Options Strategy")
+
+        # Show current VIX + regime
+        try:
+            vix_data = _svc.fetch_vix()
+            nifty_data = _svc.fetch_nifty_spot()
+            vix_ltp = vix_data.get("ltp", 0)
+            nifty_ltp = nifty_data.get("ltp", 0)
+            nifty_prev = nifty_data.get("prev_close", 0)
+            nifty_open = nifty_data.get("open", nifty_ltp)
+
+            from trading.config import config as _tcfg
+
+            ac1, ac2, ac3, ac4 = st.columns(4)
+            ac1.metric("VIX", f"{vix_ltp:.1f}",
+                       "CALM" if vix_ltp < _tcfg.straddle.vix_calm else
+                       "ELEVATED" if vix_ltp < _tcfg.straddle.vix_elevated else "SPIKE")
+            ac2.metric("NIFTY", f"{nifty_ltp:,.0f}",
+                       f"{(nifty_ltp - nifty_prev) / nifty_prev * 100:+.1f}%" if nifty_prev else "")
+            gap = (nifty_open - nifty_prev) / nifty_prev * 100 if nifty_prev else 0
+            ac3.metric("Gap", f"{gap:+.1f}%")
+
+            from trading.utils.expiry_utils import next_expiry_date
+            exp = next_expiry_date("NIFTY")
+            dte = (exp - date.today()).days if exp else "?"
+            ac4.metric("DTE", dte)
+
+            # Run the adaptive engine to show what it WOULD do right now
+            from trading.options.adaptive import AdaptiveOptionsEngine
+            engine = AdaptiveOptionsEngine()
+            decision = engine.decide(
+                nifty_spot=nifty_ltp, vix=vix_ltp, dte=dte if isinstance(dte, int) else 5,
+                nifty_prev_close=nifty_prev, nifty_open=nifty_open,
+                expiry_date=exp.isoformat() if exp else "",
+            )
+
+            st.markdown("---")
+            emoji = {"STRADDLE": "📊", "BEAR_PUT_SPREAD": "📉", "BULL_CALL_SPREAD": "📈",
+                     "0DTE_THETA": "⏱", "SKIP": "⏭"}.get(decision.strategy, "📋")
+            st.markdown(f"### {emoji} Recommendation: **{decision.strategy}**")
+            st.info(decision.reason)
+
+            summary = engine.summary(decision)
+            st.code(summary)
+
+            # Strategy decision rules
+            with st.expander("Decision Rules"):
+                st.markdown(f"""
+                | VIX | Trend | Strategy |
+                |-----|-------|----------|
+                | < {_tcfg.straddle.vix_calm} | Any | **Short Straddle** (ideal theta) |
+                | {_tcfg.straddle.vix_calm}-{_tcfg.straddle.vix_elevated} | Range | **Short Straddle** (lifecycle managed) |
+                | > {_tcfg.straddle.vix_elevated} | Down | **Bear Put Spread** (defined risk) |
+                | > {_tcfg.straddle.vix_elevated} | Up | **Bull Call Spread** (defined risk) |
+                | > {_tcfg.straddle.vix_elevated} | Flat | **Skip** (no edge) |
+                | > 35 | Any | **Skip** (extreme vol) |
+                | 0 DTE | VIX < 25 | **Expiry Theta** (sell 9:30, close 2:30) |
+                """)
+
+        except Exception as e:
+            st.warning(f"Could not run adaptive engine: {e}")
+
+        # Show active positions (straddles + spreads)
+        st.markdown("---")
+        st.subheader("Active Positions")
+        if _active_positions:
+            for pos in _active_positions:
+                # Determine if it's a spread or straddle
+                is_spread = False
+                if pos.management_log:
+                    first = pos.management_log[0]
+                    if first.get("spread_type") or first.get("action", "").endswith("SPREAD"):
+                        is_spread = True
+
+                if is_spread:
+                    first_log = pos.management_log[0] if pos.management_log else {}
+                    st.success(
+                        f"**#{pos.id} {first_log.get('spread_type', 'SPREAD')}** | "
+                        f"Long@{first_log.get('long_strike', pos.strike)} / "
+                        f"Short@{first_log.get('short_strike', '')} | "
+                        f"Net debit: {first_log.get('net_debit', 0):.1f} pts | "
+                        f"Max loss: ₹{first_log.get('max_loss', 0):,.0f} | "
+                        f"Max profit: ₹{first_log.get('max_profit', 0):,.0f} | "
+                        f"P&L: ₹{pos.total_pnl:+,.0f}"
+                    )
+                else:
+                    dte = max(0, (pos.expiry - date.today()).days)
+                    st.info(
+                        f"**#{pos.id} STRADDLE {pos.display_strike}** | "
+                        f"Expiry: {pos.expiry} (DTE={dte}) | "
+                        f"CE sold@{pos.ce_sell_price:.0f} PE sold@{pos.pe_sell_price:.0f} | "
+                        f"P&L: ₹{pos.total_pnl:+,.0f} (real: ₹{pos.realized_pnl:+,.0f})"
+                    )
+        else:
+            st.caption("No active options positions.")
 
     # ────────────────────────────────
     # TAB: Monitor
@@ -2323,11 +2423,51 @@ elif page == "Journal & Analytics":
             st.info("No closed trades in the last 30 days for analytics.")
         else:
             st.subheader("Performance Summary (30 days)")
-            a1, a2, a3, a4 = st.columns(4)
-            a1.metric("Closed Trades", analytics["trades"])
-            a2.metric("Max Win Streak", analytics["max_win_streak"])
-            a3.metric("Max Loss Streak", analytics["max_loss_streak"])
-            a4.metric("Current Streak", f"{analytics['current_streak']:+d}")
+            a1, a2, a3, a4, a5, a6 = st.columns(6)
+            a1.metric("Trades", analytics["trades"])
+            a2.metric("Win Rate", f"{analytics.get('win_rate', 0):.0f}%")
+            a3.metric("Total P&L", f"₹{analytics.get('total_pnl', 0):+,.0f}")
+            a4.metric("Avg P&L", f"₹{analytics.get('avg_pnl', 0):+,.0f}")
+            a5.metric("Win Streak", f"+{analytics['max_win_streak']}")
+            a6.metric("Loss Streak", f"-{analytics['max_loss_streak']}")
+
+            # ── Setup-Type P&L Breakdown (V2) ──
+            st.subheader("P&L by Setup Type")
+            from collections import defaultdict as _dd
+            _cutoff = date.today() - timedelta(days=30)
+            _all_trades = list(TradeJournal.objects.filter(
+                trade_date__gte=_cutoff, pnl__isnull=False
+            ).order_by("created_at"))
+
+            setup_stats = _dd(lambda: {"trades": 0, "wins": 0, "pnl": 0})
+            for t in _all_trades:
+                # Extract setup type from reasoning
+                setup = "OTHER"
+                if t.reasoning:
+                    if "[" in t.reasoning:
+                        setup = t.reasoning.split("]")[0].replace("[", "").strip()
+                    elif "SCR:" in t.reasoning:
+                        setup = t.reasoning.split("SCR:")[1].split("]")[0] if "]" in t.reasoning else "SCREENER"
+                    elif "Level" in t.reasoning or "level" in t.reasoning:
+                        setup = "LEVEL_BOUNCE"
+                setup_stats[setup]["trades"] += 1
+                setup_stats[setup]["pnl"] += t.pnl
+                if t.pnl > 0:
+                    setup_stats[setup]["wins"] += 1
+
+            if setup_stats:
+                setup_rows = []
+                for stype, stats in sorted(setup_stats.items(), key=lambda x: -x[1]["pnl"]):
+                    wr = stats["wins"] / stats["trades"] * 100 if stats["trades"] else 0
+                    setup_rows.append({
+                        "Setup": stype,
+                        "Trades": stats["trades"],
+                        "Wins": stats["wins"],
+                        "WR%": f"{wr:.0f}%",
+                        "P&L": f"₹{stats['pnl']:+,.0f}",
+                        "Avg": f"₹{stats['pnl']/stats['trades']:+,.0f}" if stats["trades"] else "—",
+                    })
+                st.dataframe(pd.DataFrame(setup_rows), use_container_width=True, hide_index=True)
 
             # Per-symbol P&L chart
             st.subheader("P&L by Symbol")
@@ -2424,6 +2564,62 @@ elif page == "Risk Control":
         else:
             st.success("✅ None")
         st.caption(f"{risk['active_straddles']} active straddle(s)")
+
+    st.markdown("---")
+
+    # ── V2 Portfolio Risk Metrics ──
+    st.subheader("Portfolio Risk (V2)")
+
+    pr1, pr2, pr3, pr4 = st.columns(4)
+
+    # Equity risk at play
+    from trading.models import TradeJournal as _TJ
+    open_trades = _TJ.objects.filter(trade_date=date.today(), status__in=["EXECUTED", "PAPER"])
+    eq_risk = sum(abs(t.entry_price - t.stop_loss) * t.quantity for t in open_trades)
+    pr1.metric("Equity Risk", f"₹{eq_risk:,.0f}",
+               f"{eq_risk/risk['capital']*100:.1f}% of capital")
+
+    # Options risk at play
+    opt_risk = 0
+    for pos in StraddlePosition.objects.filter(status__in=["ACTIVE", "PARTIAL", "HEDGED"]):
+        # Check if spread (capped) or straddle
+        is_spread = pos.management_log and pos.management_log[0].get("spread_type")
+        if is_spread:
+            opt_risk += pos.management_log[0].get("max_loss", 6750)
+        else:
+            opt_risk += pos.combined_sell_pts * pos.lot_size * pos.lots * 0.3  # 1.3x stop estimate
+    pr2.metric("Options Risk", f"₹{opt_risk:,.0f}",
+               f"{opt_risk/risk['capital']*100:.1f}% of capital")
+
+    # Total capital at risk
+    total_risk = eq_risk + opt_risk
+    pr3.metric("Total at Risk", f"₹{total_risk:,.0f}",
+               f"{total_risk/risk['capital']*100:.1f}%")
+
+    # Daily limit usage
+    daily_used = risk["daily_loss"]
+    daily_limit = risk["max_daily_loss"]
+    pr4.metric("Daily Limit Used", f"₹{daily_used:,.0f} / {daily_limit:,.0f}",
+               f"{risk['daily_loss_pct']:.0f}%")
+
+    # Risk breakdown
+    with st.expander("Risk Breakdown"):
+        st.markdown(f"""
+        **Equity:**
+        - {open_trades.count()} open positions
+        - Risk per trade: 1% = ₹{risk['capital']*0.01:,.0f}
+        - Max concurrent: {risk['max_open_positions']} × 1% = {risk['max_open_positions']}%
+
+        **Options:**
+        - Spreads: max loss ₹6,750 (1.4% of capital) — CAPPED
+        - Straddle: max loss 1.3x premium ≈ ₹8,500 (1.7%) — with lifecycle
+        - VIX gate: no straddles when VIX > 20
+
+        **Combined worst case:**
+        - Equity: {risk['max_open_positions']} × ₹{risk['capital']*0.01:,.0f} = ₹{risk['capital']*risk['max_open_positions']*0.01:,.0f}
+        - Options: ₹{opt_risk:,.0f}
+        - Total: ₹{risk['capital']*risk['max_open_positions']*0.01 + opt_risk:,.0f} ({(risk['max_open_positions']*0.01 + opt_risk/risk['capital'])*100:.1f}%)
+        """)
 
     st.markdown("---")
 
@@ -2675,18 +2871,96 @@ elif page == "Settings":
     ])
 
     with tab_config:
-        st.subheader("Current Configuration")
+        st.subheader("V2 Trading Config")
+
+        from trading.config import config as _tcfg
+
+        # Full config summary
+        st.code(_tcfg.summary())
+
+        # Detailed sub-configs in expanders
+        with st.expander("Risk Management"):
+            r = _tcfg.risk
+            st.markdown(f"""
+            | Parameter | Value |
+            |-----------|-------|
+            | Max risk/trade | **{r.max_risk_per_trade_pct}%** (₹{r.default_capital * r.max_risk_per_trade_pct/100:,.0f}) |
+            | Max daily loss | **{r.max_daily_loss_pct}%** (₹{r.default_capital * r.max_daily_loss_pct/100:,.0f}) |
+            | Max position size | **{r.max_position_size_pct}%** |
+            | Min R:R | **{r.min_risk_reward}** |
+            | Min confidence | **{r.min_confidence}** |
+            | Max positions | **{r.max_open_positions}** |
+            | Capital | **₹{r.default_capital:,.0f}** |
+            """)
+
+        with st.expander("Level Bounce"):
+            lb = _tcfg.level_bounce
+            st.markdown(f"""
+            | Parameter | Value |
+            |-----------|-------|
+            | Lookback | {lb.lookback} candles |
+            | Level proximity | {lb.level_proximity} pts |
+            | Min reversal | {lb.min_reversal} pts |
+            | SL beyond extreme | {lb.sl_beyond_extreme} pts |
+            | Min R:R | {lb.min_rr} |
+            | Min level score | {lb.min_level_score} |
+            | Max signals/cycle | {lb.max_signals} |
+            """)
+
+        with st.expander("Trade Manager"):
+            tm = _tcfg.trade_manager
+            st.markdown(f"""
+            | Parameter | Value |
+            |-----------|-------|
+            | Breakeven at | {tm.breakeven_at_r}R |
+            | Partial profit at | {tm.partial_at_r}R (50%) |
+            | Time stop | {tm.time_stop_candles} candles ({tm.time_stop_candles*5} min) |
+            | Trail factor | {tm.trail_atr_factor} ATR |
+            | Tight trail at | {tm.tight_trail_at_r}R ({tm.tight_trail_atr_factor} ATR) |
+            """)
+
+        with st.expander("Options (Adaptive)"):
+            s = _tcfg.straddle
+            st.markdown(f"""
+            | Parameter | Value |
+            |-----------|-------|
+            | VIX calm | < {s.vix_calm} |
+            | VIX elevated | < {s.vix_elevated} |
+            | Hard stop | {s.hard_stop_multiplier}x premium |
+            | Shift threshold | {s.shift_threshold} pts |
+            | Max shifts/day | {s.max_shifts_per_day} |
+            """)
+
+        with st.expander("Level Scoring"):
+            lc = _tcfg.levels
+            st.markdown(f"""
+            | Level Source | Base Score |
+            |-------------|-----------|
+            | PDH/PDL | {lc.pdh_pdl_base_score} |
+            | Camarilla | {lc.camarilla_base_score} |
+            | Swing points | {lc.swing_base_score} |
+            | Round numbers | {lc.round_base_score} |
+            | VWAP | {lc.vwap_base_score} |
+            | ORB | {lc.orb_base_score} |
+            | Week H/L | {lc.week_hl_base_score} |
+            | Cluster distance | {lc.cluster_distance} pts |
+            """)
+
+        with st.expander("Presets"):
+            from trading.config import TradingConfig
+            st.markdown("**Default:**")
+            st.code(TradingConfig.default().summary())
+            st.markdown("**Aggressive:**")
+            st.code(TradingConfig.aggressive().summary())
+            st.markdown("**Conservative:**")
+            st.code(TradingConfig.conservative().summary())
+
+        st.markdown("---")
+        st.subheader("System Info")
         config_data = {
             "Trading Mode": TRADING_MODE.upper(),
             "LLM Model": os.getenv("LLM_MODEL", "not set"),
             "Anthropic Key": "✅ Set" if os.getenv("ANTHROPIC_API_KEY", "").startswith("sk-") else "❌ Not set",
-            "Max Risk/Trade": f"{os.getenv('MAX_RISK_PER_TRADE_PCT', '1.0')}%",
-            "Max Daily Loss": f"{os.getenv('MAX_DAILY_LOSS_PCT', '3.0')}%",
-            "Max Position Size": f"{os.getenv('MAX_POSITION_SIZE_PCT', '10.0')}%",
-            "Min Confidence": "0.6",
-            "Max Open Positions": "3",
-            "Min R:R Ratio": "1.5",
-            "Default Capital": f"₹{os.getenv('DEFAULT_CAPITAL', '500000')}",
             "Database": os.getenv("DB_ENGINE", "sqlite3"),
         }
         for k, v in config_data.items():
