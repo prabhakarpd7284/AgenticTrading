@@ -226,26 +226,168 @@ if page == "Command Center":
 
     st.markdown("---")
 
-    # ── AI Activity Feed ──
-    st.subheader("AI Activity Feed")
-    feed = get_ai_activity_feed(15)
-    if feed:
-        feed_rows = []
-        for f in feed:
-            type_emoji = {
-                "PLANNER_REQ": "📤", "PLANNER_RES": "📥", "PLANNER_ERR": "💥",
-                "RISK_APPROVE": "✅", "RISK_REJECT": "❌",
-                "EXECUTION": "⚡", "RECONCILE": "🔄",
-            }.get(f["type"], "📋")
-            feed_rows.append({
-                "Time": f["time"],
-                "Event": f"{type_emoji} {f['type']}",
-                "Symbol": f["symbol"],
-                "Detail": f["detail"],
-            })
-        st.dataframe(pd.DataFrame(feed_rows), use_container_width=True, hide_index=True)
-    else:
-        st.info("No AI activity yet today.")
+    # ── V2 System Status: Live Event Stream + Hourly Snapshots ──
+    tab_events, tab_hourly, tab_options_decision = st.tabs([
+        "Live Events", "Hourly Snapshots", "Options Decision"
+    ])
+
+    with tab_events:
+        # Read event log for today's activity
+        import json as _json
+        try:
+            _event_log = open("logs/trading_day_events.jsonl")
+            events = [_json.loads(l) for l in _event_log if l.strip()]
+            _event_log.close()
+            non_hb = [e for e in events if e["type"] != "HEARTBEAT"]
+
+            if non_hb:
+                # Summary counts
+                from collections import Counter as _Counter
+                type_counts = _Counter(e["type"] for e in non_hb)
+                ev_cols = st.columns(6)
+                for i, (etype, count) in enumerate(type_counts.most_common(6)):
+                    emoji = {"TRADE": "📈", "EXIT": "📉", "EQUITY_SCAN": "🔍",
+                             "STRADDLE_CYCLE": "🔄", "OPTIONS_DECISION": "🎯",
+                             "SIGNAL_REJECTED": "🚫", "HOURLY_SNAPSHOT": "📊",
+                             "DAY_START": "🌅", "DAY_REVIEW": "📋"}.get(etype, "📋")
+                    ev_cols[i % 6].metric(etype, f"{emoji} {count}")
+
+                # Event table
+                ev_rows = []
+                for e in reversed(non_hb[-20:]):
+                    d = e.get("data", {})
+                    detail = ""
+                    if e["type"] == "TRADE":
+                        detail = f"{d.get('side','')} {d.get('symbol','')} @{d.get('entry',0):.0f} {d.get('setup','')}"
+                    elif e["type"] == "EXIT":
+                        detail = f"{d.get('symbol','')} {d.get('reason','')} P&L:{d.get('pnl',0):+,.0f}"
+                    elif e["type"] == "EQUITY_SCAN":
+                        detail = f"{d.get('signals_found',0)} signals | scr:{d.get('screener_signals',0)} | open:{d.get('open_positions',0)}"
+                    elif e["type"] == "STRADDLE_CYCLE":
+                        detail = f"#{d.get('position_id','')} {d.get('action','')} P&L:{d.get('pnl',0):+,.0f}"
+                    elif e["type"] == "OPTIONS_DECISION":
+                        detail = f"{d.get('strategy','')} VIX:{d.get('vix',0):.0f} DTE:{d.get('dte','')}"
+                    elif e["type"] == "OPTIONS_SPREAD":
+                        detail = f"{d.get('strategy','')} {d.get('long_strike','')}/{d.get('short_strike','')} max_loss:{d.get('max_loss',0):,.0f}"
+                    elif e["type"] == "HOURLY_SNAPSHOT":
+                        detail = f"NIFTY:{d.get('nifty',0):,.0f} Total:{d.get('total_pnl',0):+,.0f}"
+                    elif e["type"] == "SIGNAL_REJECTED":
+                        detail = f"{d.get('symbol','')} {d.get('setup','')} — {d.get('reason','')[:40]}"
+                    else:
+                        detail = str(d)[:60]
+
+                    ev_rows.append({
+                        "Time": e["time"],
+                        "Event": e["type"],
+                        "Detail": detail,
+                    })
+                st.dataframe(pd.DataFrame(ev_rows), use_container_width=True, hide_index=True)
+            else:
+                st.info("No events yet today. Start run_trading_day.")
+        except FileNotFoundError:
+            st.info("No event log. Run: python manage.py run_trading_day")
+
+    with tab_hourly:
+        try:
+            _event_log2 = open("logs/trading_day_events.jsonl")
+            events2 = [_json.loads(l) for l in _event_log2 if l.strip()]
+            _event_log2.close()
+            snapshots = [e for e in events2 if e["type"] == "HOURLY_SNAPSHOT"]
+
+            if snapshots:
+                snap_rows = []
+                for s in snapshots:
+                    d = s["data"]
+                    snap_rows.append({
+                        "Time": d.get("time", s["time"]),
+                        "NIFTY": f"{d.get('nifty',0):,.0f}",
+                        "Eq Open": d.get("equity_open", 0),
+                        "Eq Realized": f"₹{d.get('equity_realized',0):+,.0f}",
+                        "Eq Unrealized": f"₹{d.get('equity_unrealized',0):+,.0f}",
+                        "Opt Active": d.get("options_active", 0),
+                        "Opt P&L": f"₹{d.get('options_realized',0)+d.get('options_unrealized',0):+,.0f}",
+                        "Total": f"₹{d.get('total_pnl',0):+,.0f}",
+                    })
+                st.dataframe(pd.DataFrame(snap_rows), use_container_width=True, hide_index=True)
+
+                # P&L progression chart
+                if len(snap_rows) >= 2:
+                    chart_data = [{"Time": s["data"].get("time", ""), "P&L": s["data"].get("total_pnl", 0)}
+                                  for s in snapshots]
+                    st.line_chart(pd.DataFrame(chart_data).set_index("Time"), height=200)
+            else:
+                st.info("No hourly snapshots yet. They post at 10:00, 11:00, ... 15:00.")
+        except FileNotFoundError:
+            st.info("No event log.")
+
+    with tab_options_decision:
+        st.subheader("Today's Adaptive Options Decision")
+        try:
+            _event_log3 = open("logs/trading_day_events.jsonl")
+            events3 = [_json.loads(l) for l in _event_log3 if l.strip()]
+            _event_log3.close()
+
+            opt_decisions = [e for e in events3 if e["type"] == "OPTIONS_DECISION"]
+            opt_spreads = [e for e in events3 if e["type"] == "OPTIONS_SPREAD"]
+            opt_straddles = [e for e in events3 if e["type"] == "STRADDLE_REGISTERED"]
+
+            if opt_decisions:
+                for od in opt_decisions:
+                    d = od["data"]
+                    strategy = d.get("strategy", "?")
+                    emoji = {"STRADDLE": "📊", "BEAR_PUT_SPREAD": "📉", "BULL_CALL_SPREAD": "📈",
+                             "0DTE_THETA": "⏱", "SKIP": "⏭"}.get(strategy, "📋")
+                    st.markdown(f"### {emoji} {strategy}")
+                    oc1, oc2, oc3 = st.columns(3)
+                    oc1.metric("VIX", f"{d.get('vix',0):.1f}")
+                    oc2.metric("DTE", d.get("dte", "?"))
+                    oc3.metric("NIFTY", f"{d.get('spot',0):,.0f}")
+                    st.caption(d.get("reason", ""))
+
+            if opt_spreads:
+                for os_evt in opt_spreads:
+                    d = os_evt["data"]
+                    st.success(
+                        f"Spread #{d.get('position_id','')} | "
+                        f"{d.get('strategy','')} {d.get('long_strike','')}/{d.get('short_strike','')} | "
+                        f"Max loss: ₹{d.get('max_loss',0):,.0f} | Max profit: ₹{d.get('max_profit',0):,.0f}"
+                    )
+
+            if opt_straddles:
+                for os_evt in opt_straddles:
+                    d = os_evt["data"]
+                    st.info(
+                        f"Straddle #{d.get('position_id','')} @{d.get('strike','')} | "
+                        f"Premium: {d.get('combined',0):.0f} pts | DTE: {d.get('dte','')}"
+                    )
+
+            if not opt_decisions and not opt_spreads and not opt_straddles:
+                st.info("No options decision yet. The adaptive engine runs at ~9:20 AM.")
+        except FileNotFoundError:
+            st.info("No event log.")
+
+    st.markdown("---")
+
+    # ── AI Activity Feed (legacy) ──
+    with st.expander("Audit Log (last 15 entries)"):
+        feed = get_ai_activity_feed(15)
+        if feed:
+            feed_rows = []
+            for f in feed:
+                type_emoji = {
+                    "PLANNER_REQ": "📤", "PLANNER_RES": "📥", "PLANNER_ERR": "💥",
+                    "RISK_APPROVE": "✅", "RISK_REJECT": "❌",
+                    "EXECUTION": "⚡", "RECONCILE": "🔄",
+                }.get(f["type"], "📋")
+                feed_rows.append({
+                    "Time": f["time"],
+                    "Event": f"{type_emoji} {f['type']}",
+                    "Symbol": f["symbol"],
+                    "Detail": f["detail"],
+                })
+            st.dataframe(pd.DataFrame(feed_rows), use_container_width=True, hide_index=True)
+        else:
+            st.info("No AI activity yet today.")
 
 
 
