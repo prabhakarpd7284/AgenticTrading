@@ -629,25 +629,128 @@ class Command(BaseCommand):
                 self._log(f"  #{pos.id} {pos.underlying} {pos.display_strike} | HOLD | "
                           f"P&L: {pos.total_pnl:+,.0f} | {decision.reason[:60]}")
 
-            elif action in ("CLOSE_BOTH", "SHIFT_TO_ATM"):
-                # Use the full LangGraph workflow for execution
-                from trading.options.straddle.graph import run_straddle_workflow
+            elif action == "CLOSE_BOTH":
+                # Direct execution — no LLM, no validator, lifecycle already decided
+                from trading.services.broker_service import BrokerService
+                broker_svc = BrokerService()
+                qty = pos.lot_size * pos.lots
 
-                # For SHIFT_TO_ATM, we run REENTER with the new strike
-                if action == "SHIFT_TO_ATM":
-                    self._log(f"  #{pos.id} SHIFT to {decision.new_strike} | {decision.reason[:60]}")
-
-                result = run_straddle_workflow(
-                    position_id=pos.id, underlying=pos.underlying,
-                    strike=pos.strike, expiry=pos.expiry.isoformat(),
-                    lot_size=pos.lot_size, lots=pos.lots,
-                    ce_symbol=pos.ce_symbol, ce_token=pos.ce_token,
-                    pe_symbol=pos.pe_symbol, pe_token=pos.pe_token,
-                    ce_sell_price=pos.ce_sell_price, pe_sell_price=pos.pe_sell_price,
+                # Close CE
+                r1 = broker_svc.place_order(
+                    symbol=pos.ce_symbol, side="BUY", quantity=qty,
+                    price=ce_ltp, product_type="CARRYFORWARD", exchange="NFO",
+                    symbol_token=pos.ce_token,
                 )
-                exec_r = result.get("execution_result") or {}
-                self._log(f"  #{pos.id} {pos.underlying} {pos.display_strike} | {action} | "
-                          f"Exec: {exec_r.get('actions_taken', [])}")
+                # Close PE
+                r2 = broker_svc.place_order(
+                    symbol=pos.pe_symbol, side="BUY", quantity=qty,
+                    price=pe_ltp, product_type="CARRYFORWARD", exchange="NFO",
+                    symbol_token=pos.pe_token,
+                )
+
+                # Update DB
+                pos.ce_current_price = ce_ltp
+                pos.pe_current_price = pe_ltp
+                pos.current_pnl_inr = pnl_inr
+                pos.status = "CLOSED"
+                pos.action_taken = "CLOSE_BOTH"
+                pos.closed_at = datetime.now()
+                if pos.management_log is None:
+                    pos.management_log = []
+                pos.management_log.append({
+                    "time": datetime.now().strftime("%H:%M"),
+                    "action": "CLOSE_BOTH",
+                    "nifty": svc.fetch_nifty_spot().get("ltp", 0),
+                    "pnl_inr": pos.total_pnl,
+                    "reason": decision.reason[:100],
+                    "executed": True,
+                })
+                pos.save()
+
+                self._log(f"  #{pos.id} CLOSED | CE@{ce_ltp:.1f} PE@{pe_ltp:.1f} | "
+                          f"P&L: {pos.total_pnl:+,.0f} | {decision.reason[:50]}",
+                          style="WARNING")
+
+            elif action == "SHIFT_TO_ATM":
+                # Close both legs + sell new ATM straddle
+                from trading.services.broker_service import BrokerService
+                from trading.options.data_service import find_atm_strike, find_option_token
+                from trading.utils.expiry_utils import iso_to_angel
+                broker_svc = BrokerService()
+                qty = pos.lot_size * pos.lots
+                new_strike = decision.new_strike
+
+                self._log(f"  #{pos.id} SHIFT {pos.display_strike} → {new_strike} | {decision.reason[:50]}")
+
+                # Step 1: Close both legs
+                broker_svc.place_order(symbol=pos.ce_symbol, side="BUY", quantity=qty,
+                    price=ce_ltp, product_type="CARRYFORWARD", exchange="NFO",
+                    symbol_token=pos.ce_token)
+                broker_svc.place_order(symbol=pos.pe_symbol, side="BUY", quantity=qty,
+                    price=pe_ltp, product_type="CARRYFORWARD", exchange="NFO",
+                    symbol_token=pos.pe_token)
+
+                # Realize P&L from closing
+                close_pnl = ((pos.ce_sell_price - ce_ltp) + (pos.pe_sell_price - pe_ltp)) * qty
+                pos.realized_pnl += close_pnl
+
+                # Step 2: Sell new ATM straddle
+                exp_fmt = iso_to_angel(pos.expiry.isoformat())
+                new_ce = find_option_token(pos.underlying, new_strike, exp_fmt, "CE") if exp_fmt else None
+                new_pe = find_option_token(pos.underlying, new_strike, exp_fmt, "PE") if exp_fmt else None
+
+                if new_ce and new_pe:
+                    new_ce_sym, new_ce_tok = new_ce
+                    new_pe_sym, new_pe_tok = new_pe
+                    new_ce_ltp = svc.fetch_option_ltp(new_ce_sym, new_ce_tok).get("ltp", 0)
+                    new_pe_ltp = svc.fetch_option_ltp(new_pe_sym, new_pe_tok).get("ltp", 0)
+
+                    if new_ce_ltp > 0 and new_pe_ltp > 0:
+                        broker_svc.place_order(symbol=new_ce_sym, side="SELL", quantity=qty,
+                            price=new_ce_ltp, product_type="CARRYFORWARD", exchange="NFO",
+                            symbol_token=new_ce_tok)
+                        broker_svc.place_order(symbol=new_pe_sym, side="SELL", quantity=qty,
+                            price=new_pe_ltp, product_type="CARRYFORWARD", exchange="NFO",
+                            symbol_token=new_pe_tok)
+
+                        # Update position to new legs
+                        pos.ce_symbol = new_ce_sym
+                        pos.ce_token = new_ce_tok
+                        pos.ce_sell_price = new_ce_ltp
+                        pos.ce_current_price = new_ce_ltp
+                        pos.pe_symbol = new_pe_sym
+                        pos.pe_token = new_pe_tok
+                        pos.pe_sell_price = new_pe_ltp
+                        pos.pe_current_price = new_pe_ltp
+                        pos.strike = new_strike
+                        pos.current_pnl_inr = 0  # fresh position
+
+                        self._log(f"  #{pos.id} NEW straddle @{new_strike} | "
+                                  f"CE={new_ce_ltp:.1f} PE={new_pe_ltp:.1f} | "
+                                  f"Combined={new_ce_ltp+new_pe_ltp:.1f}")
+                    else:
+                        # Can't sell new — just close
+                        pos.status = "CLOSED"
+                        pos.action_taken = "CLOSE_BOTH"
+                        pos.closed_at = datetime.now()
+                        self._log(f"  #{pos.id} SHIFT failed (no premium) — closed instead")
+                else:
+                    pos.status = "CLOSED"
+                    pos.action_taken = "CLOSE_BOTH"
+                    pos.closed_at = datetime.now()
+                    self._log(f"  #{pos.id} SHIFT failed (tokens not found) — closed instead")
+
+                if pos.management_log is None:
+                    pos.management_log = []
+                pos.management_log.append({
+                    "time": datetime.now().strftime("%H:%M"),
+                    "action": action,
+                    "nifty": svc.fetch_nifty_spot().get("ltp", 0),
+                    "pnl_inr": pos.total_pnl,
+                    "reason": decision.reason[:100],
+                    "executed": True,
+                })
+                pos.save()
 
             pos.refresh_from_db()
             self._emit("STRADDLE_CYCLE", {
@@ -990,6 +1093,19 @@ class Command(BaseCommand):
 
         if self._dry_run:
             return
+
+        # VIX gate: don't sell straddles when VIX > elevated threshold
+        # High VIX = big directional moves = straddle killer
+        try:
+            svc = OptionsDataService()
+            vix = svc.fetch_vix()
+            vix_ltp = vix.get("ltp", 0)
+            from trading.config import config as _cfg
+            if vix_ltp > _cfg.straddle.vix_elevated:
+                self._log(f"  Straddle SKIPPED: VIX {vix_ltp:.1f} > {_cfg.straddle.vix_elevated} (too volatile)")
+                return
+        except Exception:
+            pass  # If VIX check fails, proceed cautiously
 
         # Check what's already active per underlying
         active = StraddlePosition.objects.filter(status__in=["ACTIVE", "PARTIAL", "HEDGED"])
