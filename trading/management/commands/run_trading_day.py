@@ -333,8 +333,86 @@ class Command(BaseCommand):
             "cache_hits": self._broker.get_stats()["cache_hits"],
         })
 
+        # ── Hourly snapshot (on the hour) ──
+        if now.minute < 1 and now.hour >= 10 and now.hour <= 15:
+            last_snap_hour = getattr(self, '_last_snapshot_hour', 0)
+            if now.hour != last_snap_hour:
+                self._last_snapshot_hour = now.hour
+                self._post_hourly_snapshot(now, open_eq, active_str, realized_pnl)
+
         # Sleep until next check (every 15 seconds)
         self._sleep(15)
+
+    def _post_hourly_snapshot(self, now: datetime, open_eq: int, active_str: int, realized_pnl: float):
+        """Post an hourly portfolio snapshot to event log + Telegram."""
+        from trading.models import TradeJournal, StraddlePosition
+        from trading.options.data_service import OptionsDataService
+
+        # Equity unrealized
+        eq_unrealized = self._last_equity_snapshot.get("unrealized", 0)
+
+        # Options unrealized
+        opt_unrealized = 0
+        opt_realized = 0
+        for p in StraddlePosition.objects.filter(status__in=["ACTIVE", "PARTIAL", "HEDGED"]):
+            opt_unrealized += p.current_pnl_inr
+            opt_realized += p.realized_pnl
+        for p in StraddlePosition.objects.filter(status="CLOSED", trade_date=date.today()):
+            opt_realized += p.total_pnl
+
+        total = realized_pnl + eq_unrealized + opt_unrealized + opt_realized
+
+        # NIFTY spot
+        nifty_ltp = 0
+        try:
+            svc = OptionsDataService()
+            nifty_ltp = svc.fetch_nifty_spot().get("ltp", 0)
+        except Exception:
+            pass
+
+        snapshot = {
+            "time": now.strftime("%H:%M"),
+            "nifty": nifty_ltp,
+            "equity_open": open_eq,
+            "equity_realized": round(realized_pnl, 0),
+            "equity_unrealized": round(eq_unrealized, 0),
+            "options_active": active_str,
+            "options_realized": round(opt_realized, 0),
+            "options_unrealized": round(opt_unrealized, 0),
+            "total_pnl": round(total, 0),
+            "capital": 500000 + total,
+        }
+
+        self._log(
+            f"  ── HOURLY SNAPSHOT {now.strftime('%H:00')} ──\n"
+            f"    NIFTY: {nifty_ltp:,.0f}\n"
+            f"    Equity: {open_eq} open | realized {realized_pnl:+,.0f} | unrealized {eq_unrealized:+,.0f}\n"
+            f"    Options: {active_str} active | realized {opt_realized:+,.0f} | unrealized {opt_unrealized:+,.0f}\n"
+            f"    DAY TOTAL: {total:+,.0f} | Capital: {500000+total:,.0f}",
+            style="SUCCESS",
+        )
+
+        self._emit("HOURLY_SNAPSHOT", snapshot)
+
+        # Post to Telegram if configured
+        try:
+            import os, urllib.request, json
+            bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "")
+            chat_id = os.getenv("TELEGRAM_CHAT_ID", "")
+            if bot_token and chat_id:
+                msg = (
+                    f"📊 *{now.strftime('%H:00')} Snapshot*\n"
+                    f"NIFTY: `{nifty_ltp:,.0f}`\n"
+                    f"Equity: {open_eq} open | `{realized_pnl+eq_unrealized:+,.0f}`\n"
+                    f"Options: {active_str} active | `{opt_realized+opt_unrealized:+,.0f}`\n"
+                    f"*Day Total: `{total:+,.0f}` INR*"
+                )
+                url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+                data = json.dumps({"chat_id": chat_id, "text": msg, "parse_mode": "Markdown"}).encode()
+                req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
+                urllib.request.urlopen(req, timeout=5)
+        except Exception:
+            pass  # Telegram is optional
 
     def _run_equity_cycle(self, now: datetime):
         from trading.intraday.monitor import IntradayMonitor
