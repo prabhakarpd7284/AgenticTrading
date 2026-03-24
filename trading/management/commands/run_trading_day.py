@@ -1084,30 +1084,75 @@ class Command(BaseCommand):
     # ══════════════════════════════════════════════
     def _maybe_register_straddle(self):
         """
-        Auto-register ATM straddles for NIFTY (and BANKNIFTY if no active position).
-        Registers one per underlying. Max 2 straddles at a time.
+        Adaptive options strategy — picks the right play for the market regime.
+
+        Replaces fixed straddle-only with:
+          VIX < 20       → Short Straddle (theta)
+          VIX > 20 + gap → Bear/Bull Put/Call Spread (defined risk)
+          VIX > 20 + flat→ Skip
+          0 DTE + VIX<25 → Expiry-day theta
         """
         from trading.models import StraddlePosition
         from trading.options.data_service import OptionsDataService, find_option_token, find_atm_strike
-        from trading.utils.expiry_utils import iso_to_angel
+        from trading.options.adaptive import AdaptiveOptionsEngine
+        from trading.utils.expiry_utils import iso_to_angel, next_expiry_date
 
         if self._dry_run:
             return
 
-        # VIX gate: don't sell straddles when VIX > elevated threshold
-        # High VIX = big directional moves = straddle killer
+        # Check if already have active position
+        active = StraddlePosition.objects.filter(status__in=["ACTIVE", "PARTIAL", "HEDGED"])
+        if active.exists():
+            self._log(f"  Options: already active — skipping")
+            return
+
         try:
             svc = OptionsDataService()
-            vix = svc.fetch_vix()
-            vix_ltp = vix.get("ltp", 0)
-            from trading.config import config as _cfg
-            if vix_ltp > _cfg.straddle.vix_elevated:
-                self._log(f"  Straddle SKIPPED: VIX {vix_ltp:.1f} > {_cfg.straddle.vix_elevated} (too volatile)")
-                return
-        except Exception:
-            pass  # If VIX check fails, proceed cautiously
+            nifty = svc.fetch_nifty_spot()
+            vix_data = svc.fetch_vix()
+            spot = nifty.get("ltp", 0)
+            vix = vix_data.get("ltp", 0)
+            prev_close = nifty.get("prev_close", 0)
+            nifty_open = nifty.get("open", spot)
 
-        # Check what's already active per underlying
+            if spot == 0 or vix == 0:
+                self._log("  Options: no market data — skipping")
+                return
+
+            # Find next expiry
+            expiry = next_expiry_date()
+            dte = (expiry - date.today()).days if expiry else 5
+
+            # Ask the adaptive engine
+            engine = AdaptiveOptionsEngine()
+            decision = engine.decide(
+                nifty_spot=spot, vix=vix, dte=dte,
+                nifty_prev_close=prev_close, nifty_open=nifty_open,
+                expiry_date=expiry.isoformat() if expiry else "",
+            )
+
+            self._log(f"  Options: {decision.strategy} | {decision.reason[:60]}")
+            self._emit("OPTIONS_DECISION", {
+                "strategy": decision.strategy, "reason": decision.reason[:100],
+                "vix": vix, "dte": dte, "spot": spot,
+            })
+
+            if decision.strategy == "SKIP":
+                return
+
+            if decision.strategy in ("STRADDLE", "0DTE_THETA"):
+                # Register as straddle position (existing flow)
+                self._register_straddle_from_decision(decision, svc, expiry)
+
+            elif decision.strategy in ("BEAR_PUT_SPREAD", "BULL_CALL_SPREAD"):
+                self._execute_spread_from_decision(decision, svc, expiry)
+
+        except Exception as e:
+            logger.error(f"Adaptive options failed: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+
+        # Legacy: check for individual underlyings below
         active = StraddlePosition.objects.filter(status__in=["ACTIVE", "PARTIAL", "HEDGED"])
         active_underlyings = set(active.values_list("underlying", flat=True))
 
@@ -1121,6 +1166,143 @@ class Command(BaseCommand):
             if cfg["underlying"] in active_underlyings:
                 continue
             self._register_single_straddle(cfg)
+
+    def _register_straddle_from_decision(self, decision, svc, expiry):
+        """Register a straddle position from an adaptive decision."""
+        from trading.options.data_service import find_option_token
+        from trading.utils.expiry_utils import iso_to_angel
+        from trading.models import StraddlePosition
+
+        exp_fmt = iso_to_angel(expiry.isoformat()) if expiry else None
+        if not exp_fmt:
+            self._log("  Cannot register: no expiry format")
+            return
+
+        ce = find_option_token("NIFTY", decision.strike, exp_fmt, "CE")
+        pe = find_option_token("NIFTY", decision.strike, exp_fmt, "PE")
+        if not ce or not pe:
+            self._log(f"  Cannot register: tokens not found for {decision.strike}")
+            return
+
+        ce_sym, ce_tok = ce
+        pe_sym, pe_tok = pe
+        ce_ltp = svc.fetch_option_ltp(ce_sym, ce_tok).get("ltp", 0)
+        pe_ltp = svc.fetch_option_ltp(pe_sym, pe_tok).get("ltp", 0)
+
+        if ce_ltp <= 0 or pe_ltp <= 0:
+            self._log("  Cannot register: no premium data")
+            return
+
+        pos = StraddlePosition.objects.create(
+            underlying="NIFTY", strike=decision.strike, expiry=expiry,
+            lot_size=75, lots=decision.lots,
+            ce_symbol=ce_sym, ce_token=ce_tok, ce_sell_price=ce_ltp,
+            pe_symbol=pe_sym, pe_token=pe_tok, pe_sell_price=pe_ltp,
+            trade_date=date.today(),
+        )
+
+        combined = ce_ltp + pe_ltp
+        self._log(f"  REGISTERED #{pos.id} | {decision.strategy} @{decision.strike} | "
+                  f"CE={ce_ltp:.1f} PE={pe_ltp:.1f} = {combined:.1f} pts")
+        self._emit("STRADDLE_REGISTERED", {
+            "position_id": pos.id, "strategy": decision.strategy,
+            "strike": decision.strike, "combined": combined, "dte": (expiry - date.today()).days,
+        })
+
+    def _execute_spread_from_decision(self, decision, svc, expiry):
+        """Execute a bear put or bull call spread from an adaptive decision."""
+        from trading.options.data_service import find_option_token
+        from trading.utils.expiry_utils import iso_to_angel
+        from trading.services.broker_service import BrokerService
+        from trading.models import StraddlePosition
+
+        exp_fmt = iso_to_angel(expiry.isoformat()) if expiry else None
+        if not exp_fmt:
+            self._log("  Cannot execute spread: no expiry format")
+            return
+
+        qty = 75 * decision.lots
+        broker_svc = BrokerService()
+
+        if decision.strategy == "BEAR_PUT_SPREAD":
+            # Buy ATM put (long_strike), Sell OTM put (short_strike)
+            long_opt = find_option_token("NIFTY", decision.long_strike, exp_fmt, "PE")
+            short_opt = find_option_token("NIFTY", decision.short_strike, exp_fmt, "PE")
+            leg_type = "PE"
+        else:  # BULL_CALL_SPREAD
+            long_opt = find_option_token("NIFTY", decision.long_strike, exp_fmt, "CE")
+            short_opt = find_option_token("NIFTY", decision.short_strike, exp_fmt, "CE")
+            leg_type = "CE"
+
+        if not long_opt or not short_opt:
+            self._log(f"  Cannot execute spread: tokens not found")
+            return
+
+        long_sym, long_tok = long_opt
+        short_sym, short_tok = short_opt
+        long_ltp = svc.fetch_option_ltp(long_sym, long_tok).get("ltp", 0)
+        short_ltp = svc.fetch_option_ltp(short_sym, short_tok).get("ltp", 0)
+
+        if long_ltp <= 0 or short_ltp <= 0:
+            self._log("  Cannot execute spread: no premium data")
+            return
+
+        net_debit = long_ltp - short_ltp  # pay for long, receive from short
+
+        # Execute: buy long leg, sell short leg
+        r1 = broker_svc.place_order(
+            symbol=long_sym, side="BUY", quantity=qty,
+            price=long_ltp, product_type="CARRYFORWARD", exchange="NFO",
+            symbol_token=long_tok,
+        )
+        r2 = broker_svc.place_order(
+            symbol=short_sym, side="SELL", quantity=qty,
+            price=short_ltp, product_type="CARRYFORWARD", exchange="NFO",
+            symbol_token=short_tok,
+        )
+
+        # Track as a StraddlePosition (reuse model, strategy field distinguishes)
+        pos = StraddlePosition.objects.create(
+            underlying="NIFTY",
+            strike=decision.long_strike,
+            expiry=expiry,
+            lot_size=75, lots=decision.lots,
+            ce_symbol=long_sym if leg_type == "CE" else short_sym,
+            ce_token=long_tok if leg_type == "CE" else short_tok,
+            ce_sell_price=long_ltp if leg_type == "CE" else short_ltp,
+            pe_symbol=short_sym if leg_type == "PE" else long_sym,
+            pe_token=short_tok if leg_type == "PE" else long_tok,
+            pe_sell_price=short_ltp if leg_type == "PE" else long_ltp,
+            trade_date=date.today(),
+            management_log=[{
+                "time": datetime.now().strftime("%H:%M"),
+                "action": decision.strategy,
+                "nifty": svc.fetch_nifty_spot().get("ltp", 0),
+                "pnl_inr": 0,
+                "reason": decision.reason[:100],
+                "executed": True,
+                "spread_type": decision.strategy,
+                "long_strike": decision.long_strike,
+                "short_strike": decision.short_strike,
+                "net_debit": net_debit,
+                "max_loss": net_debit * qty,
+                "max_profit": (decision.spread_width - net_debit) * qty,
+            }],
+        )
+
+        self._log(f"  {decision.strategy} #{pos.id} | "
+                  f"BUY {leg_type}@{decision.long_strike}={long_ltp:.1f} "
+                  f"SELL {leg_type}@{decision.short_strike}={short_ltp:.1f} | "
+                  f"Net debit: {net_debit:.1f} pts | "
+                  f"Max loss: {net_debit * qty:,.0f} Max profit: {(decision.spread_width - net_debit) * qty:,.0f}",
+                  style="SUCCESS")
+
+        self._emit("OPTIONS_SPREAD", {
+            "position_id": pos.id, "strategy": decision.strategy,
+            "long_strike": decision.long_strike, "short_strike": decision.short_strike,
+            "net_debit": net_debit, "max_loss": net_debit * qty,
+            "max_profit": (decision.spread_width - net_debit) * qty,
+        })
 
     def _register_single_straddle(self, cfg: dict):
         """Register a single ATM straddle for the given underlying config."""

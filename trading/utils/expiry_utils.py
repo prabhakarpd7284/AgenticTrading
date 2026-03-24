@@ -100,3 +100,22 @@ def days_to_expiry(expiry: str) -> int:
         return max(0, (expiry_date - date.today()).days)
     except (ValueError, TypeError):
         return 999
+
+
+def next_expiry_date(underlying: str = "NIFTY") -> Optional[date]:
+    """
+    Find the next weekly expiry date.
+    NIFTY weekly expiry = Tuesday. BANKNIFTY = Wednesday.
+    Returns the next expiry date from today (inclusive if today is expiry).
+    """
+    from datetime import timedelta
+    today = date.today()
+    expiry_weekday = 1 if underlying == "NIFTY" else 2  # Tue=1, Wed=2
+
+    days_ahead = (expiry_weekday - today.weekday()) % 7
+    if days_ahead == 0:
+        # Today is expiry day
+        return today
+
+    next_exp = today + timedelta(days=days_ahead)
+    return next_exp
