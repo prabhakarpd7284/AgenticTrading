@@ -147,6 +147,12 @@ class Command(BaseCommand):
 
             # 9:15 - 14:59 — Active trading
             if now.hour < 15:
+                # Late start: run premarket if we missed it
+                if not self._premarket_done:
+                    self._log("Late start — running premarket scan now")
+                    self._run_premarket()
+                    self._premarket_done = True
+
                 # AI pause check
                 from dashboard_utils.data_layer import is_ai_paused
                 if is_ai_paused():
@@ -657,6 +663,49 @@ class Command(BaseCommand):
         for pos in active:
             dte = (pos.expiry - date.today()).days
 
+            # ── Check if this is a SPREAD (defined risk — no lifecycle management needed) ──
+            is_spread = False
+            if pos.management_log:
+                first_log = pos.management_log[0] if pos.management_log else {}
+                is_spread = first_log.get("spread_type") is not None
+
+            if is_spread:
+                # Spreads just need price update — risk is already capped
+                from trading.options.data_service import OptionsDataService
+                svc = OptionsDataService()
+                ce_data = svc.fetch_option_ltp(pos.ce_symbol, pos.ce_token)
+                pe_data = svc.fetch_option_ltp(pos.pe_symbol, pos.pe_token)
+                pos.ce_current_price = ce_data.get("ltp", pos.ce_current_price)
+                pos.pe_current_price = pe_data.get("ltp", pos.pe_current_price)
+
+                # Compute spread P&L: long leg value - short leg value - net debit
+                first_log = pos.management_log[0]
+                net_debit = first_log.get("net_debit", 0)
+                long_ltp = pos.ce_current_price  # CE is long leg for bull call
+                short_ltp = pos.pe_current_price  # PE is short leg (reused fields)
+                spread_value = long_ltp - short_ltp
+                pos.current_pnl_inr = (spread_value - net_debit) * pos.lot_size * pos.lots
+                pos.save(update_fields=["ce_current_price", "pe_current_price",
+                                         "current_pnl_inr", "last_updated"])
+
+                self._log(f"  #{pos.id} SPREAD | long={long_ltp:.1f} short={short_ltp:.1f} | "
+                          f"P&L: {pos.total_pnl:+,.0f} | {first_log.get('spread_type', 'SPREAD')}")
+
+                # Close at expiry
+                if dte <= 0:
+                    pos.status = "CLOSED"
+                    pos.action_taken = "CLOSE_BOTH"
+                    pos.closed_at = datetime.now()
+                    pos.save()
+                    self._log(f"  #{pos.id} SPREAD EXPIRED | Final P&L: {pos.total_pnl:+,.0f}")
+
+                self._emit("STRADDLE_CYCLE", {
+                    "position_id": pos.id, "underlying": pos.underlying,
+                    "strike": pos.display_strike, "action": "HOLD",
+                    "pnl": pos.total_pnl, "reason": "Spread — defined risk, no lifecycle needed",
+                })
+                continue
+
             if self._dry_run:
                 from dashboard_utils.data_layer import run_straddle_analysis
                 from trading.options.data_service import OptionsDataService
@@ -670,7 +719,7 @@ class Command(BaseCommand):
                               f"P&L: {pnl:+,.0f} | Decay: {decay:.0f}% | UW: {underwater}")
                 continue
 
-            # ── Simple lifecycle check first (no LLM, no API budget) ──
+            # ── Straddle lifecycle (only for actual straddles, not spreads) ──
             from trading.options.straddle.lifecycle import decide, count_shifts_today
             from trading.options.data_service import OptionsDataService
 

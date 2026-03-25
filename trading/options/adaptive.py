@@ -93,15 +93,16 @@ def classify_regime(
     # Gap
     gap_pct = ((nifty_open - nifty_prev_close) / nifty_prev_close * 100) if nifty_prev_close else 0
 
-    # Trend (simple: direction from prev close)
+    # Trend: need a convincing gap (>1.0%) to call directional
+    # A 0.5% gap in a counter-trend is just noise
     if nifty_current > 0:
         move = (nifty_current - nifty_prev_close) / nifty_prev_close * 100
     else:
         move = gap_pct
 
-    if move > 0.3:
+    if move > 1.0:
         trend = "UP"
-    elif move < -0.3:
+    elif move < -1.0:
         trend = "DOWN"
     else:
         trend = "NEUTRAL"
