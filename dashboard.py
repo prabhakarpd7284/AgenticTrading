@@ -49,7 +49,8 @@ from dashboard_utils.components import (
     render_symbol_pnl_chart, render_alerts,
 )
 from dashboard_utils.market_scanner import (
-    NIFTY_50_SYMBOLS, SECTOR_MAP, fetch_nifty50_ltp, rank_opportunities,
+    NIFTY_50_SYMBOLS, NIFTY_NEXT50_SYMBOLS, SCREENER_UNIVERSE,
+    SECTOR_MAP, fetch_nifty50_ltp, rank_opportunities,
 )
 
 
@@ -1138,108 +1139,238 @@ elif page == "Market Scanner":
 # ══════════════════════════════════════════════
 elif page == "Screener":
     st.header("Live Screener")
-    st.caption("Real-time opportunity detection across NIFTY 50 | 6 strategies | Multi-TF")
+    st.caption("Real-time market pulse for manual traders | 98 symbols | WebSocket + indicators")
 
     from trading.screener.strategies import STRATEGIES
     from trading.screener.signals import Signal
+    from dashboard_utils.market_scanner import SCREENER_UNIVERSE, NIFTY_50_SYMBOLS, SECTOR_MAP
+    from dashboard_utils.components import render_indicator_chart
 
-    tab_live, tab_backtest, tab_strategies_tab = st.tabs([
-        "Live Signals", "Backtest", "Strategies"
+    # ── Controls ──
+    ctrl1, ctrl2, ctrl3, ctrl4 = st.columns([1, 1, 1, 1])
+    with ctrl1:
+        scr_universe = st.selectbox("Universe", ["All (98)", "NIFTY 50", "Custom"], key="scr_univ")
+    with ctrl2:
+        scr_sector = st.selectbox("Sector", ["All"] + list(SECTOR_MAP.keys()), key="scr_sector")
+    with ctrl3:
+        scr_sort = st.selectbox("Sort by", ["Change %", "RSI (Oversold)", "RSI (Overbought)", "Volume", "Near Pivot"], key="scr_sort")
+    with ctrl4:
+        scr_auto = st.checkbox("Auto-refresh (30s)", value=is_market_open(), key="scr_auto")
+        if scr_auto:
+            st_autorefresh(interval=30000, key="scr_refresh")
+
+    scan_btn = st.button("Scan Now", type="primary", key="screener_scan_v2")
+
+    # ── Resolve symbols ──
+    if scr_universe == "NIFTY 50":
+        scr_symbols = list(NIFTY_50_SYMBOLS)
+    elif scr_universe == "Custom":
+        custom = st.text_input("Symbols", "RELIANCE,TCS,HDFCBANK", key="scr_custom")
+        scr_symbols = [s.strip() for s in custom.split(",") if s.strip()]
+    else:
+        scr_symbols = list(SCREENER_UNIVERSE)
+
+    # Filter by sector
+    if scr_sector != "All":
+        sector_syms = set(SECTOR_MAP.get(scr_sector, []))
+        scr_symbols = [s for s in scr_symbols if s in sector_syms]
+
+    if not scr_symbols:
+        st.warning("No symbols selected. Choose a universe or enter custom symbols.")
+        st.stop()
+
+    # ── Tabs ──
+    tab_watchlist, tab_signals, tab_backtest, tab_strategies_tab = st.tabs([
+        "Watchlist & Heatmap", "Signals", "Backtest", "Strategies"
     ])
 
-    # ── Live Signals Tab ──
-    with tab_live:
-        lc1, lc2, lc3 = st.columns([2, 1, 1])
+    # ══════════════════════════════════════════════
+    # TAB 1: WATCHLIST & HEATMAP
+    # ══════════════════════════════════════════════
+    with tab_watchlist:
+        # Fetch batch data — supports >50 symbols via multiple API calls
+        should_fetch = scan_btn or "scr_watchlist" not in st.session_state
+        if not should_fetch and scr_auto:
+            # Auto-refresh: only if cache is stale (>25s old)
+            wl_ts_check = st.session_state.get("scr_watchlist_ts")
+            if wl_ts_check and (datetime.now() - wl_ts_check).total_seconds() > 25:
+                should_fetch = True
 
-        with lc1:
-            screener_symbols = st.text_input(
-                "Symbols (comma separated)",
-                value="RELIANCE,HDFCBANK,TCS,INFY,SBIN,AXISBANK,ICICIBANK,KOTAKBANK,BAJFINANCE,ITC",
-                key="screener_syms",
-            ).strip().upper().split(",")
-            screener_symbols = [s.strip() for s in screener_symbols if s.strip()]
+        if should_fetch:
+            with st.spinner(f"Fetching {len(scr_symbols)} stocks..."):
+                try:
+                    from trading.services.data_service import DataService
+                    ds = DataService()
+                    # Batch in chunks of 50 (API limit)
+                    ltp_data = []
+                    for i in range(0, len(scr_symbols), 50):
+                        chunk = scr_symbols[i:i + 50]
+                        ltp_data.extend(ds.fetch_batch_ltp(chunk))
+                    st.session_state["scr_watchlist"] = ltp_data
+                    st.session_state["scr_watchlist_ts"] = datetime.now()
+                except Exception as e:
+                    st.error(f"Fetch failed: {e}")
+                    ltp_data = []
 
-        with lc2:
-            screener_strategies = st.multiselect(
+        watchlist = st.session_state.get("scr_watchlist", [])
+        wl_ts = st.session_state.get("scr_watchlist_ts")
+
+        if wl_ts:
+            st.caption(f"Last update: {wl_ts.strftime('%H:%M:%S')} | {len(watchlist)} stocks")
+
+        if watchlist:
+            # Sort
+            if scr_sort == "Change %":
+                watchlist.sort(key=lambda x: abs(x.get("pct_change", 0)), reverse=True)
+            elif scr_sort == "Volume":
+                watchlist.sort(key=lambda x: x.get("volume", 0), reverse=True)
+            elif scr_sort == "RSI (Oversold)":
+                watchlist.sort(key=lambda x: x.get("pct_change", 0))
+            elif scr_sort == "RSI (Overbought)":
+                watchlist.sort(key=lambda x: x.get("pct_change", 0), reverse=True)
+
+            # ── Market Summary Row ──
+            gainers = sum(1 for s in watchlist if s.get("pct_change", 0) > 0)
+            losers = sum(1 for s in watchlist if s.get("pct_change", 0) < 0)
+            avg_change = sum(s.get("pct_change", 0) for s in watchlist) / len(watchlist) if watchlist else 0
+            top_gainer = max(watchlist, key=lambda x: x.get("pct_change", 0)) if watchlist else {}
+            top_loser = min(watchlist, key=lambda x: x.get("pct_change", 0)) if watchlist else {}
+
+            m1, m2, m3, m4, m5 = st.columns(5)
+            m1.metric("Stocks", len(watchlist))
+            m2.metric("Gainers / Losers", f"{gainers} / {losers}")
+            m3.metric("Avg Change", f"{avg_change:+.2f}%")
+            m4.metric("Top Gainer", f"{top_gainer.get('symbol', '')} {top_gainer.get('pct_change', 0):+.2f}%")
+            m5.metric("Top Loser", f"{top_loser.get('symbol', '')} {top_loser.get('pct_change', 0):+.2f}%")
+
+            # ── Heatmap Table ──
+            rows = []
+            for s in watchlist:
+                pct = s.get("pct_change", 0)
+                rows.append({
+                    "Symbol": s.get("symbol", ""),
+                    "LTP": f"₹{s.get('ltp', 0):,.2f}",
+                    "Change%": f"{pct:+.2f}%",
+                    "Open": f"₹{s.get('open', 0):,.2f}",
+                    "High": f"₹{s.get('high', 0):,.2f}",
+                    "Low": f"₹{s.get('low', 0):,.2f}",
+                    "Volume": f"{s.get('volume', 0):,.0f}",
+                    "52W H": f"₹{s.get('high_52w', 0):,.0f}" if s.get("high_52w") else "",
+                    "52W L": f"₹{s.get('low_52w', 0):,.0f}" if s.get("low_52w") else "",
+                })
+
+            df = pd.DataFrame(rows)
+            st.dataframe(df, use_container_width=True, hide_index=True, height=600)
+
+            # ── Click to expand chart ──
+            st.markdown("---")
+            st.subheader("Chart View")
+            chart_sym = st.selectbox(
+                "Select symbol for chart",
+                [s.get("symbol", "") for s in watchlist],
+                key="scr_chart_sym",
+            )
+
+            if chart_sym:
+                with st.spinner(f"Loading {chart_sym} chart..."):
+                    try:
+                        from dashboard_utils.candle_cache import fetch_and_cache_candles, get_candles_for_timeframe
+                        fetch_and_cache_candles(chart_sym)
+
+                        chart_tabs = st.tabs(["5m Intraday", "Daily", "Weekly"])
+
+                        with chart_tabs[0]:
+                            candles_5m = get_candles_for_timeframe(chart_sym, "5m")
+                            if candles_5m:
+                                from trading.utils.indicators import bollinger_bands, vwap, camarilla_pivots
+                                closes = [c["close"] for c in candles_5m]
+                                bb = bollinger_bands(closes) if len(closes) >= 20 else {}
+                                vwap_val = vwap(candles_5m) if candles_5m else 0
+                                prev = st.session_state.get(f"candle_cache_{chart_sym}", {}).get("prev_day") or {}
+                                pivots = {}
+                                if prev.get("high", 0) > 0 and prev.get("close", 0) > 0:
+                                    pivots = camarilla_pivots(prev["high"], prev["low"], prev["close"])
+                                render_indicator_chart(candles_5m, chart_sym, pivots=pivots, bb=bb, vwap_val=vwap_val, timeframe="5m")
+                            else:
+                                st.info("No 5m candles available")
+
+                        with chart_tabs[1]:
+                            candles_d = get_candles_for_timeframe(chart_sym, "daily")
+                            if candles_d:
+                                closes_d = [c["close"] for c in candles_d]
+                                bb_d = bollinger_bands(closes_d) if len(closes_d) >= 20 else {}
+                                render_indicator_chart(candles_d, chart_sym, bb=bb_d, timeframe="daily")
+                            else:
+                                st.info("No daily candles")
+
+                        with chart_tabs[2]:
+                            candles_w = get_candles_for_timeframe(chart_sym, "weekly")
+                            if candles_w:
+                                render_indicator_chart(candles_w, chart_sym, timeframe="weekly")
+                            else:
+                                st.info("No weekly candles")
+
+                    except Exception as e:
+                        st.error(f"Chart failed: {e}")
+
+    # ══════════════════════════════════════════════
+    # TAB 2: SIGNALS
+    # ══════════════════════════════════════════════
+    with tab_signals:
+        st.subheader("Live Signal Detection")
+
+        sig_c1, sig_c2 = st.columns([3, 1])
+        with sig_c1:
+            sig_strats = st.multiselect(
                 "Strategies",
                 [s.name for s in STRATEGIES if s.enabled],
                 default=[s.name for s in STRATEGIES if s.enabled],
-                key="screener_strats",
+                key="scr_sig_strats",
             )
+        with sig_c2:
+            sig_scan = st.button("Run Scan", type="primary", use_container_width=True, key="scr_sig_scan")
 
-        with lc3:
-            scan_btn = st.button("Scan Now", type="primary", use_container_width=True, key="screener_scan")
-
-        if scan_btn and screener_symbols:
-            with st.spinner(f"Running screener on {len(screener_symbols)} symbols..."):
+        if sig_scan:
+            with st.spinner(f"Scanning {len(scr_symbols)} symbols for signals..."):
                 try:
                     from trading.screener.engine import ScreenerEngine
-                    from trading.services.data_service import BrokerClient
+                    from trading.services.data_service import BrokerClient, DataService
                     from trading.services.ticker_service import ticker_service
 
-                    # Build engine with selected strategies
-                    selected = [s for s in STRATEGIES if s.name in screener_strategies and s.enabled]
-                    engine = ScreenerEngine(symbols=screener_symbols, strategies=selected)
+                    selected = [s for s in STRATEGIES if s.name in sig_strats and s.enabled]
+                    engine = ScreenerEngine(symbols=scr_symbols, strategies=selected)
 
-                    # Collect signals
                     signals_found = []
                     engine.add_output_handler(lambda sig: signals_found.append(sig))
 
-                    # Bootstrap with historical candles
-                    b = BrokerClient.get_instance()
-                    b.ensure_login()
+                    engine.bootstrap(fetch_candles_fn=True)
 
-                    def fetch_fn(symbol, tf, n_bars):
-                        token = ticker_service.get_token(symbol)
-                        if not token:
-                            return []
-                        from trading.utils.time_utils import can_fetch_candles, cap_end_time
-                        if not can_fetch_candles():
-                            return []
-                        interval = {"1m": "ONE_MINUTE", "5m": "FIVE_MINUTE", "15m": "FIFTEEN_MINUTE"}.get(tf, "FIVE_MINUTE")
-                        end = cap_end_time(date.today().isoformat())
-                        raw = b.fetch_candles(token, f"{date.today().isoformat()} 09:15", end, interval)
-                        return raw or []
-
-                    engine.bootstrap(fetch_candles_fn=fetch_fn)
-
-                    # Run batch tick with current prices
-                    batch = []
-                    from trading.services.data_service import DataService
+                    # Feed current prices (batch >50)
                     ds = DataService()
-                    ltp_data = ds.fetch_batch_ltp(screener_symbols)
-                    for item in ltp_data:
-                        batch.append({
-                            "symbol": item["symbol"],
-                            "ltp": item["ltp"],
-                            "volume": item.get("volume", 0),
-                        })
+                    ltp_all = []
+                    for i in range(0, len(scr_symbols), 50):
+                        ltp_all.extend(ds.fetch_batch_ltp(scr_symbols[i:i + 50]))
+                    batch = [{"symbol": i["symbol"], "ltp": i["ltp"], "volume": i.get("volume", 0)} for i in ltp_all]
                     if batch:
                         engine.on_batch_tick(batch)
 
-                    st.session_state["screener_signals"] = signals_found
-                    st.session_state["screener_ts"] = datetime.now()
-                    st.session_state["screener_engine_stats"] = {
-                        "symbols": len(screener_symbols),
-                        "strategies": len(selected),
-                        "bars_total": sum(len(s.bars.get("5m", [])) for s in engine.stores.values()),
-                    }
+                    st.session_state["scr_signals"] = signals_found
+                    st.session_state["scr_sig_ts"] = datetime.now()
+                    st.session_state["scr_sig_stats"] = engine.get_stats()
 
                 except Exception as e:
-                    st.error(f"Screener failed: {e}")
+                    st.error(f"Scan failed: {e}")
                     import traceback
                     st.code(traceback.format_exc())
 
-        # Display signals
-        signals_found = st.session_state.get("screener_signals", [])
-        scan_ts = st.session_state.get("screener_ts")
-        stats = st.session_state.get("screener_engine_stats", {})
+        signals_found = st.session_state.get("scr_signals", [])
+        sig_ts = st.session_state.get("scr_sig_ts")
+        sig_stats = st.session_state.get("scr_sig_stats", {})
 
-        if scan_ts:
-            st.caption(f"Last scan: {scan_ts.strftime('%H:%M:%S')} | "
-                       f"{stats.get('symbols', 0)} symbols | "
-                       f"{stats.get('strategies', 0)} strategies | "
-                       f"{stats.get('bars_total', 0)} bars loaded")
+        if sig_ts:
+            st.caption(f"Last scan: {sig_ts.strftime('%H:%M:%S')} | "
+                       f"{sig_stats.get('symbols', 0)} symbols | "
+                       f"{sig_stats.get('bars_processed', 0)} bars")
 
         if signals_found:
             st.success(f"{len(signals_found)} signal(s) detected")
@@ -1249,96 +1380,69 @@ elif page == "Screener":
                     arrow = "🟢" if sig.side == "BUY" else "🔴"
                     st.markdown(f"### {arrow} {sig.symbol} — {sig.strategy}")
 
-                    sc1, sc2, sc3, sc4, sc5 = st.columns(5)
+                    sc1, sc2, sc3, sc4, sc5, sc6 = st.columns(6)
                     sc1.metric("Side", sig.side)
                     sc2.metric("Entry", f"₹{sig.entry:,.2f}")
-                    sc3.metric("Stop Loss", f"₹{sig.stoploss:,.2f}")
+                    sc3.metric("SL", f"₹{sig.stoploss:,.2f}")
                     sc4.metric("Target", f"₹{sig.target:,.2f}")
                     sc5.metric("R:R", f"{sig.risk_reward:.1f}")
+                    sc6.metric("Risk", f"{sig.risk_points:.1f} pts")
 
-                    sc6, sc7 = st.columns(2)
-                    sc6.metric("Confidence", f"{sig.confidence:.0%}")
-                    sc7.metric("Risk", f"{sig.risk_points:.1f} pts ({sig.risk_pct}%)")
+                    st.caption(f"Confidence: {sig.confidence:.0%} | Reasons: {' + '.join(sig.reasons)}")
 
-                    st.caption(f"Reasons: {' | '.join(sig.reasons)}")
-
-                    # Human-in-the-loop: approve trade
                     acol1, acol2 = st.columns([1, 1])
                     with acol1:
                         if st.button(f"APPROVE {sig.symbol} {sig.side}", type="primary",
-                                     key=f"approve_scr_{sig.symbol}_{sig.strategy}"):
-                            st.info(f"Approved — route to execution pipeline")
+                                     key=f"approve_v2_{sig.symbol}_{sig.strategy}"):
+                            st.info(f"Approved — route to execution")
                     with acol2:
-                        if st.button(f"Skip", key=f"skip_scr_{sig.symbol}_{sig.strategy}"):
+                        if st.button(f"Skip", key=f"skip_v2_{sig.symbol}_{sig.strategy}"):
                             st.info("Skipped")
-
                     st.markdown("---")
-        elif scan_ts:
-            st.info("No signals detected in this scan. Market may be quiet or conditions not met.")
+        elif sig_ts:
+            st.info("No signals in this scan. Conditions not met or market is quiet.")
 
-    # ── Backtest Tab ──
+    # ══════════════════════════════════════════════
+    # TAB 3: BACKTEST
+    # ══════════════════════════════════════════════
     with tab_backtest:
         st.subheader("Screener Backtest")
 
         bc1, bc2, bc3 = st.columns(3)
         bt_from = bc1.date_input("From", value=date.today() - timedelta(days=5), key="scr_bt_from")
         bt_to = bc2.date_input("To", value=date.today() - timedelta(days=1), key="scr_bt_to")
-        bt_syms = bc3.text_input("Symbols", value="RELIANCE,HDFCBANK,TCS,INFY,SBIN", key="scr_bt_syms")
+        bt_syms = bc3.text_input("Symbols", value="RELIANCE,HDFCBANK,TCS,INFY,SBIN,ICICIBANK,LT,BAJFINANCE", key="scr_bt_syms")
 
         if st.button("Run Backtest", type="primary", key="scr_bt_run"):
             with st.spinner("Running screener backtest..."):
                 try:
                     from trading.screener.backtest import run_backtest as screener_backtest
                     symbols = [s.strip() for s in bt_syms.split(",") if s.strip()]
-                    result = screener_backtest(
-                        symbols=symbols,
-                        from_date=bt_from.isoformat(),
-                        to_date=bt_to.isoformat(),
-                    )
+                    result = screener_backtest(symbols=symbols, from_date=bt_from.isoformat(), to_date=bt_to.isoformat())
 
-                    # Summary
                     sm1, sm2, sm3, sm4 = st.columns(4)
                     sm1.metric("Signals", result.total_signals)
                     sm2.metric("Trades", len(result.trades))
-                    sm3.metric("Win Rate", f"{result.win_rate:.0f}%")
+                    sm3.metric("Win Rate", f"{result.win_rate:.0%}")
                     sm4.metric("Profit Factor", f"{result.profit_factor:.2f}")
 
-                    sm5, sm6, sm7, sm8 = st.columns(4)
-                    sm5.metric("Total P&L", f"{result.total_pnl:+,.0f} pts")
-                    sm6.metric("Avg R:R", f"{result.avg_rr_achieved:.1f}")
-                    sm7.metric("Max DD", f"{result.max_drawdown:+,.0f} pts")
-                    sm8.metric("Best Day", f"{result.best_day_pnl:+,.0f}" if hasattr(result, 'best_day_pnl') else "—")
+                    sm5, sm6, sm7 = st.columns(3)
+                    sm5.metric("Total P&L", f"{result.total_pnl:+,.1f} pts")
+                    sm6.metric("Avg R:R", f"{result.avg_rr_achieved:.2f}")
+                    sm7.metric("Max DD", f"{result.max_drawdown:.1f} pts")
 
-                    # Per strategy
                     if result.per_strategy:
                         st.subheader("By Strategy")
-                        strat_rows = []
-                        for name, stats in result.per_strategy.items():
-                            strat_rows.append({
-                                "Strategy": name,
-                                "Trades": stats.get("trades", 0),
-                                "Wins": stats.get("wins", 0),
-                                "WR%": f"{stats.get('win_rate', 0):.0f}%",
-                                "P&L": f"{stats.get('pnl', 0):+,.0f}",
-                                "PF": f"{stats.get('profit_factor', 0):.2f}",
-                            })
+                        strat_rows = [{"Strategy": n, "Trades": s["trades"], "Win%": f"{s['win_rate']:.0%}", "P&L": f"{s['pnl']:+.1f}"}
+                                      for n, s in result.per_strategy.items()]
                         st.dataframe(pd.DataFrame(strat_rows), use_container_width=True, hide_index=True)
 
-                    # Trade log
                     if result.trades:
                         st.subheader("Trade Log")
-                        trade_rows = []
-                        for t in result.trades:
-                            trade_rows.append({
-                                "Time": t.signal.timestamp.strftime("%m-%d %H:%M") if t.signal else "—",
-                                "Symbol": t.signal.symbol if t.signal else "—",
-                                "Strategy": t.signal.strategy if t.signal else "—",
-                                "Side": t.signal.side if t.signal else "—",
-                                "Entry": f"{t.entry_price:.2f}" if hasattr(t, 'entry_price') else "—",
-                                "Exit": f"{t.exit_price:.2f}",
-                                "P&L": f"{t.pnl:+,.1f}",
-                                "Reason": t.exit_reason,
-                            })
+                        trade_rows = [{"Time": t.signal.timestamp.strftime("%m-%d %H:%M"), "Symbol": t.signal.symbol,
+                                       "Strategy": t.signal.strategy, "Side": t.signal.side,
+                                       "Entry": f"{t.signal.entry:.2f}", "Exit": f"{t.exit_price:.2f}",
+                                       "P&L": f"{t.pnl:+.1f}", "Reason": t.exit_reason} for t in result.trades]
                         st.dataframe(pd.DataFrame(trade_rows), use_container_width=True, hide_index=True)
 
                 except Exception as e:
@@ -1346,21 +1450,21 @@ elif page == "Screener":
                     import traceback
                     st.code(traceback.format_exc())
 
-    # ── Strategies Tab ──
+    # ══════════════════════════════════════════════
+    # TAB 4: STRATEGIES
+    # ══════════════════════════════════════════════
     with tab_strategies_tab:
         st.subheader("Strategy Definitions")
         for s in STRATEGIES:
-            status = "🟢 Enabled" if s.enabled else "🔴 Disabled"
-            with st.expander(f"{status} — {s.name} ({s.side})"):
+            status = "🟢" if s.enabled else "🔴"
+            with st.expander(f"{status} {s.name} ({s.side})"):
                 st.markdown(f"**{s.description}**")
-                st.markdown(f"**Side:** {s.side} | **Min R:R:** {s.min_rr} | **Cooldown:** {s.cooldown_bars} bars")
+                st.markdown(f"Side: {s.side} | Min R:R: {s.min_rr} | Cooldown: {s.cooldown_bars} bars")
                 if s.active_window:
-                    st.markdown(f"**Active window:** {s.active_window[0].strftime('%H:%M')} — {s.active_window[1].strftime('%H:%M')}")
-                st.markdown("**Conditions:**")
+                    st.markdown(f"Window: {s.active_window[0].strftime('%H:%M')} — {s.active_window[1].strftime('%H:%M')}")
                 for c in s.conditions:
                     st.markdown(f"- {c.description}")
-                st.markdown(f"**Entry:** {s.entry_rule.method} | **SL:** {s.stoploss_rule.method} ({s.stoploss_rule.params}) | "
-                            f"**Target:** {s.target_rule.method} ({s.target_rule.params})")
+                st.markdown(f"Entry: `{s.entry_rule.method}` | SL: `{s.stoploss_rule.method}` | Target: `{s.target_rule.method}`")
 
 
 # ══════════════════════════════════════════════
@@ -1652,10 +1756,10 @@ elif page == "Straddle Console":
     # ────────────────────────────────
     with tab_monitor:
         if not _active_positions:
-            st.info("No active straddle positions. Register one in the ➕ tab.")
+            st.info("No active options positions. Use the Adaptive tab or Register tab.")
         else:
             pos_options = {
-                f"#{p.id} | {p.underlying} {p.display_strike} [{p.expiry}] {p.status}": p
+                f"#{p.id} | {p.display_name} [{p.expiry}] {p.status}": p
                 for p in _active_positions
             }
             selected_label = st.selectbox(
@@ -1720,64 +1824,94 @@ elif page == "Straddle Console":
                     ce = snap_data.get("ce", {})
                     pe = snap_data.get("pe", {})
 
-                    analysis = analyze_straddle(
-                        underlying=pos.underlying, strike=pos.ce_strike_actual,
-                        expiry=pos.expiry.isoformat(), lot_size=pos.lot_size, lots=pos.lots,
-                        ce_sell_price=pos.ce_sell_price, pe_sell_price=pos.pe_sell_price,
-                        ce_ltp=ce.get("ltp", 0), pe_ltp=pe.get("ltp", 0),
-                        nifty_spot=nifty.get("ltp", 0), nifty_prev_close=nifty.get("prev_close", 0),
-                        vix_current=vix.get("ltp", 0), vix_prev_close=vix.get("prev_close", 0),
-                        candles=[],
-                    )
-
-                    # Track premium for decay chart
-                    decay_key = f"premium_decay_{pos.id}"
-                    if decay_key not in st.session_state:
-                        st.session_state[decay_key] = []
-                    st.session_state[decay_key].append({
-                        "time": datetime.now().strftime("%H:%M"),
-                        "premium": analysis.combined_current,
-                    })
-                    # Keep last 100 data points
-                    st.session_state[decay_key] = st.session_state[decay_key][-100:]
-
-                    # Critical alerts
-                    if analysis.is_underwater:
-                        st.error("🚨 POSITION UNDERWATER — Combined premium > sold. CLOSE immediately.")
-                    elif analysis.stop_triggered:
-                        st.error("🚨 STOP TRIGGERED — Premium at 1.5x sold. Review now.")
-                    if analysis.expiry_tomorrow:
-                        st.warning("⚠️ EXPIRY TOMORROW — Gamma is extreme. Prefer closing over holding.")
-
-                    # Market
+                    # Market header (common to all position types)
                     st.subheader("Market")
-                    m1, m2, m3, m4, m5 = st.columns(5)
+                    m1, m2, m3, m4 = st.columns(4)
                     nifty_chg = nifty.get("ltp", 0) - nifty.get("prev_close", 0)
                     m1.metric("NIFTY", f"{nifty.get('ltp', 0):,.0f}", f"{nifty_chg:+.0f}")
-                    m2.metric("High / Low", f"{nifty.get('high', 0):,.0f} / {nifty.get('low', 0):,.0f}")
+                    m2.metric("H / L", f"{nifty.get('high', 0):,.0f} / {nifty.get('low', 0):,.0f}")
                     vix_chg = vix.get("ltp", 0) - vix.get("prev_close", 0)
                     m3.metric("VIX", f"{vix.get('ltp', 0):.2f}", f"{vix_chg:+.2f}")
-                    m4.metric("VIX Phase", analysis.vix_phase)
-                    m5.metric("Market", analysis.market_phase)
+                    dte = max(0, (pos.expiry - date.today()).days)
+                    m4.metric("DTE", dte)
 
-                    # Legs
-                    st.subheader("Legs")
-                    c1, c2, c3 = st.columns(3)
-                    ce_pnl = pos.ce_sell_price - ce.get("ltp", 0)
-                    pe_pnl = pos.pe_sell_price - pe.get("ltp", 0)
-                    with c1:
-                        st.caption(pos.ce_symbol)
-                        st.metric("CE LTP", f"₹{ce.get('ltp', 0):.2f}", f"sold {pos.ce_sell_price:.2f}")
-                        st.metric("CE P&L", f"{ce_pnl:+.2f} pts",
-                                  delta_color="normal" if ce_pnl >= 0 else "inverse")
-                    with c2:
-                        st.caption(pos.pe_symbol)
-                        st.metric("PE LTP", f"₹{pe.get('ltp', 0):.2f}", f"sold {pos.pe_sell_price:.2f}")
-                        st.metric("PE P&L", f"{pe_pnl:+.2f} pts",
-                                  delta_color="normal" if pe_pnl >= 0 else "inverse")
-                    with c3:
-                        st.caption("Combined")
-                        st.metric("Net P&L", f"₹{analysis.net_pnl_inr:+,.0f}",
+                    st.markdown("---")
+
+                    # ── SPREAD POSITION ──
+                    if pos.is_spread:
+                        info = pos.spread_info
+                        st.subheader(f"{pos.display_name}")
+
+                        sp1, sp2, sp3, sp4 = st.columns(4)
+                        sp1.metric("Strategy", info["type"].replace("_", " "))
+                        sp2.metric("Long Strike", info["long_strike"])
+                        sp3.metric("Short Strike", info["short_strike"])
+                        sp4.metric("Spread Width", f"{info['short_strike'] - info['long_strike']}" if info["type"] == "BULL_CALL_SPREAD"
+                                   else f"{info['long_strike'] - info['short_strike']}")
+
+                        sp5, sp6, sp7, sp8 = st.columns(4)
+                        sp5.metric("Net Debit", f"{info['net_debit']:.1f} pts")
+                        sp6.metric("Max Loss", f"₹{info['max_loss']:,.0f}")
+                        sp7.metric("Max Profit", f"₹{info['max_profit']:,.0f}")
+                        sp8.metric("P&L", f"₹{pos.total_pnl:+,.0f}")
+
+                        # Legs
+                        st.subheader("Legs")
+                        lc1, lc2 = st.columns(2)
+                        with lc1:
+                            st.markdown(f"**Long Leg** (bought)")
+                            st.metric("Symbol", pos.ce_symbol)
+                            st.metric("LTP", f"₹{ce.get('ltp', 0):.2f}", f"paid {pos.ce_sell_price:.2f}")
+                        with lc2:
+                            st.markdown(f"**Short Leg** (sold)")
+                            st.metric("Symbol", pos.pe_symbol)
+                            st.metric("LTP", f"₹{pe.get('ltp', 0):.2f}", f"received {pos.pe_sell_price:.2f}")
+
+                        # Risk gauge
+                        pnl_pct = pos.total_pnl / info["max_loss"] * 100 if info["max_loss"] else 0
+                        if pos.total_pnl > 0:
+                            st.success(f"Profitable: ₹{pos.total_pnl:+,.0f} ({pnl_pct:+.0f}% of max loss)")
+                        elif abs(pos.total_pnl) > info["max_loss"] * 0.5:
+                            st.error(f"At risk: ₹{pos.total_pnl:+,.0f} ({pnl_pct:+.0f}% of max loss)")
+                        else:
+                            st.info(f"P&L: ₹{pos.total_pnl:+,.0f} ({pnl_pct:+.0f}% of max loss)")
+
+                    # ── STRADDLE POSITION ──
+                    else:
+                        analysis = analyze_straddle(
+                            underlying=pos.underlying, strike=pos.ce_strike_actual,
+                            expiry=pos.expiry.isoformat(), lot_size=pos.lot_size, lots=pos.lots,
+                            ce_sell_price=pos.ce_sell_price, pe_sell_price=pos.pe_sell_price,
+                            ce_ltp=ce.get("ltp", 0), pe_ltp=pe.get("ltp", 0),
+                            nifty_spot=nifty.get("ltp", 0), nifty_prev_close=nifty.get("prev_close", 0),
+                            vix_current=vix.get("ltp", 0), vix_prev_close=vix.get("prev_close", 0),
+                            candles=[],
+                        )
+
+                        # Alerts
+                        if analysis.is_underwater:
+                            st.error("🚨 UNDERWATER — Combined premium > sold.")
+                        if analysis.expiry_tomorrow:
+                            st.warning("⚠️ EXPIRY TOMORROW — Gamma risk.")
+
+                        # Legs
+                        st.subheader(f"STRADDLE {pos.display_strike}")
+                        c1, c2, c3 = st.columns(3)
+                        ce_pnl = pos.ce_sell_price - ce.get("ltp", 0)
+                        pe_pnl = pos.pe_sell_price - pe.get("ltp", 0)
+                        with c1:
+                            st.caption(pos.ce_symbol)
+                            st.metric("CE LTP", f"₹{ce.get('ltp', 0):.2f}", f"sold {pos.ce_sell_price:.2f}")
+                            st.metric("CE P&L", f"{ce_pnl:+.2f} pts",
+                                      delta_color="normal" if ce_pnl >= 0 else "inverse")
+                        with c2:
+                            st.caption(pos.pe_symbol)
+                            st.metric("PE LTP", f"₹{pe.get('ltp', 0):.2f}", f"sold {pos.pe_sell_price:.2f}")
+                            st.metric("PE P&L", f"{pe_pnl:+.2f} pts",
+                                      delta_color="normal" if pe_pnl >= 0 else "inverse")
+                        with c3:
+                            st.caption("Combined")
+                            st.metric("Net P&L", f"₹{analysis.net_pnl_inr:+,.0f}",
                                   f"{analysis.net_pnl_pts:+.2f} pts")
                         st.metric("Decay / Delta",
                                   f"{analysis.premium_decayed_pct:.1f}% / {analysis.net_delta:+.2f}",

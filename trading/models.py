@@ -297,6 +297,52 @@ class StraddlePosition(models.Model):
     ACTIVE_STATUSES = ["ACTIVE", "PARTIAL", "HEDGED"]
 
     @property
+    def is_spread(self) -> bool:
+        """True if this is a spread position (bull call, bear put), not a straddle."""
+        if self.management_log:
+            first = self.management_log[0] if self.management_log else {}
+            return first.get("spread_type") is not None
+        return False
+
+    @property
+    def spread_type(self) -> str:
+        """Return spread type or empty string."""
+        if self.management_log:
+            first = self.management_log[0] if self.management_log else {}
+            return first.get("spread_type", "")
+        return ""
+
+    @property
+    def spread_info(self) -> dict:
+        """Return spread details from first management log entry."""
+        if self.management_log:
+            first = self.management_log[0] if self.management_log else {}
+            return {
+                "type": first.get("spread_type", ""),
+                "long_strike": first.get("long_strike", 0),
+                "short_strike": first.get("short_strike", 0),
+                "net_debit": first.get("net_debit", 0),
+                "max_loss": first.get("max_loss", 0),
+                "max_profit": first.get("max_profit", 0),
+            }
+        return {}
+
+    @property
+    def position_type(self) -> str:
+        """Human-readable: STRADDLE, BULL_CALL_SPREAD, BEAR_PUT_SPREAD."""
+        if self.is_spread:
+            return self.spread_type
+        return "STRADDLE"
+
+    @property
+    def display_name(self) -> str:
+        """Compact display: e.g. 'BULL_CALL 23200/23400' or 'STRADDLE 23200'."""
+        if self.is_spread:
+            info = self.spread_info
+            return f"{info['type'].replace('_', ' ')} {info['long_strike']}/{info['short_strike']}"
+        return f"STRADDLE {self.display_strike}"
+
+    @property
     def total_pnl(self) -> float:
         """True P&L including realized losses from rolls."""
         return self.current_pnl_inr + self.realized_pnl
