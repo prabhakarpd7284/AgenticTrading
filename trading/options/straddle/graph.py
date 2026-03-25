@@ -115,10 +115,13 @@ def fetch_market_data_node(state: StraddleState) -> dict:
     logger.info(f"Fetching straddle market data | CE={ce_symbol} | PE={pe_symbol}")
 
     try:
+        # Skip candles to save API budget — market phase defaults to CHOP
+        # which is conservative (no aggressive actions based on phase alone)
         snapshot = _options_data.fetch_straddle_snapshot(
             ce_symbol=ce_symbol, ce_token=ce_token,
             pe_symbol=pe_symbol, pe_token=pe_token,
             date_str=today,
+            include_candles=False,
         )
 
         if not snapshot.get("nifty") or not snapshot["nifty"].get("ltp"):
@@ -392,19 +395,83 @@ def _generate_action_api(analysis_text: str, position_history: str) -> dict:
 
 
 # ──────────────────────────────────────────────
+# Validator helpers
+# ──────────────────────────────────────────────
+def _check_universal_cooldown(position_id: int, cooldown_minutes: int = 30) -> bool:
+    """
+    Check if ANY adjustment was made in the last N minutes.
+    Universal — one cooldown for ALL rules. No exceptions.
+    Returns True if we should WAIT (cooldown active).
+    """
+    if not position_id:
+        return False
+    try:
+        from trading.models import StraddlePosition as _SP
+        pos = _SP.objects.get(id=position_id)
+        for entry in reversed(pos.management_log or []):
+            act = entry.get("action", "")
+            if act in ("CLOSE_CE", "CLOSE_PE", "ROLL_CE", "ROLL_PE", "CLOSE_BOTH", "REENTER"):
+                try:
+                    from datetime import datetime as _dt
+                    adj_time = _dt.strptime(f"{date.today()} {entry.get('time', '00:00')}", "%Y-%m-%d %H:%M")
+                    mins_since = (datetime.now() - adj_time).total_seconds() / 60
+                    return mins_since < cooldown_minutes
+                except Exception:
+                    return False
+            if act == "HOLD":
+                continue  # skip HOLDs, look for actual adjustments
+        return False
+    except Exception:
+        return False
+
+
+def _calc_otm_strike(nifty_spot: float, direction: str, buffer: int) -> int:
+    """
+    Calculate OTM strike that is GUARANTEED to be OTM.
+    direction: 'CE' (strike must be ABOVE spot) or 'PE' (strike must be BELOW spot)
+    """
+    if direction == "CE":
+        strike = int((nifty_spot + buffer) // 50 + 1) * 50
+        # Safety: ensure OTM
+        while strike <= nifty_spot:
+            strike += 50
+        return strike
+    else:
+        strike = int((nifty_spot - buffer) // 50) * 50
+        # Safety: ensure OTM
+        while strike >= nifty_spot:
+            strike -= 50
+        return strike
+
+
+def _adaptive_buffer(itm_pts: float) -> int:
+    """OTM buffer based on how far the tested leg is ITM."""
+    if itm_pts < 200:
+        return 50
+    elif itm_pts < 400:
+        return 100
+    return 150
+
+
+# ──────────────────────────────────────────────
 # Node 4: validate_action (deterministic)
 # ──────────────────────────────────────────────
 def validate_action_node(state: StraddleState) -> dict:
     """
-    Deterministic validation of the LLM's recommended action.
-    No LLM. Hard rules only.
+    Single unified decision engine. No competing rules.
 
-    Rules:
-    1. Low confidence (<0.6) → convert to MONITOR
-    2. Underwater + HOLD → override to CLOSE_BOTH IMMEDIATE
-    3. Expiry tomorrow + ROLL → override to CLOSE_BOTH
-    4. HEDGE_FUTURES without hedge_lots → reject
-    5. CLOSE_BOTH on highly profitable position without urgency → warn but allow
+    Flow (strict priority — first match wins):
+      1. HARD STOP (>1.5x)           → CLOSE_BOTH
+      2. EXPIRY DAY 3PM+             → CLOSE_BOTH
+      3. 0 DTE THETA PROTECTION      → block premature close
+      4. UNIVERSAL COOLDOWN           → HOLD (wait after any adjustment)
+      5. LOW CONFIDENCE (<0.6)        → MONITOR
+      6. HEALTHY (<1.10x)             → check exhausted leg, else LLM decides
+      7. MILD STRESS (1.10-1.30x)    → ROLL tested leg, small buffer
+      8. MODERATE STRESS (1.30-1.50x) → ROLL tested leg, bigger buffer
+      9. EXPIRY + ROLL                → CLOSE_BOTH
+     10. HEDGE without lots           → reject
+     11. DEFAULT                      → approve LLM recommendation
     """
     action_dict = state.get("recommended_action")
     analysis    = state.get("analysis", {})
@@ -421,86 +488,261 @@ def validate_action_node(state: StraddleState) -> dict:
     urgency      = action_dict.get("urgency", "MONITOR")
     confidence   = float(action_dict.get("confidence", 0.0))
     is_underwater = analysis.get("is_underwater", False)
+    stop_triggered = analysis.get("stop_triggered", False)
+    is_expiry_day = analysis.get("is_expiry_day", False)
     expiry_tomorrow = analysis.get("expiry_tomorrow", False)
     net_pnl_inr  = analysis.get("net_pnl_inr", 0.0)
+    nifty_spot   = analysis.get("nifty_spot", 0)
+    position_id  = state.get("position_id")
 
-    override_action = None
+    # Extract position data
+    ce_sell = analysis.get("ce_sell_price", 0)
+    pe_sell = analysis.get("pe_sell_price", 0)
+    ce_ltp  = analysis.get("ce_ltp", 0)
+    pe_ltp  = analysis.get("pe_ltp", 0)
+    pe_itm  = analysis.get("pe_itm_by", 0)
+    ce_itm  = analysis.get("ce_itm_by", 0)
+    combined_sold    = analysis.get("combined_sold", 1)
+    combined_current = analysis.get("combined_current", 0)
+    severity = combined_current / combined_sold if combined_sold > 0 else 2.0
 
-    # Rule 1: Low confidence → MONITOR
-    if confidence < 0.6:
-        approved = True
-        reason   = f"Low confidence ({confidence:.2f}) — converted to MONITOR"
-        override_action = "MONITOR"
-        action_dict["action"]  = "HOLD"
+    ce_decayed_pct = ((ce_sell - ce_ltp) / ce_sell * 100) if ce_sell > 0 else 0
+    pe_decayed_pct = ((pe_sell - pe_ltp) / pe_sell * 100) if pe_sell > 0 else 0
+
+    # Get actual strikes from position symbols (CE and PE may differ after rolls)
+    _ce_strike = state.get("strike", 0)
+    _pe_strike = state.get("strike", 0)
+    if position_id:
+        try:
+            from trading.models import StraddlePosition as _SP
+            _pos = _SP.objects.get(id=position_id)
+            _ce_strike = _pos.ce_strike_actual
+            _pe_strike = _pos.pe_strike_actual
+        except Exception:
+            pass
+
+    def _approve(reason, override=None, modified_action=None):
+        if modified_action:
+            action_dict.update(modified_action)
+        result = {"action_approved": True,
+                  "validation_result": ActionValidation(
+                      approved=True, reason=reason, override_action=override).model_dump()}
+        if modified_action:
+            result["recommended_action"] = action_dict
+        return result
+
+    def _make_roll(leg: str, new_strike: int, reason: str):
+        roll_action = f"ROLL_{leg}"
+        action_dict["action"] = roll_action
+        action_dict["urgency"] = "IMMEDIATE"
+        action_dict["roll_to_strike"] = new_strike
+        if leg == "CE":
+            action_dict["ce_action"] = "CLOSE"
+            action_dict["pe_action"] = "HOLD"
+        else:
+            action_dict["ce_action"] = "HOLD"
+            action_dict["pe_action"] = "CLOSE"
+        logger.warning(f"Validator: {reason}")
+        _audit("RISK_REJECT", symbol=state.get("underlying", "NIFTY"),
+               details={"rule": "unified_adjustment", "action": roll_action, "new_strike": new_strike})
+        return _approve(reason, override=roll_action, modified_action=action_dict)
+
+    def _make_close_both(reason: str):
+        action_dict["action"] = "CLOSE_BOTH"
+        action_dict["urgency"] = "IMMEDIATE"
+        action_dict["ce_action"] = "CLOSE"
+        action_dict["pe_action"] = "CLOSE"
+        logger.warning(f"Validator: {reason}")
+        _audit("RISK_REJECT", symbol=state.get("underlying", "NIFTY"),
+               details={"rule": "unified_close", "reason": reason[:80]})
+        return _approve(reason, override="CLOSE_BOTH", modified_action=action_dict)
+
+    # ════════════════════════════════════════════════════
+    # STEP 1: HARD STOPS (override everything, no cooldown)
+    # ════════════════════════════════════════════════════
+
+    if stop_triggered:
+        return _make_close_both("HARD STOP: Combined premium > 1.5× sold.")
+
+    if is_expiry_day and datetime.now().hour >= 15:
+        return _make_close_both("EXPIRY DAY 3:00 PM+ — must exit before 3:15 PM.")
+
+    # ════════════════════════════════════════════════════
+    # STEP 2: 0 DTE THETA PROTECTION (block premature close)
+    # ════════════════════════════════════════════════════
+
+    if is_expiry_day and action == "CLOSE_BOTH" and not is_underwater:
+        now = datetime.now()
+        if now.hour < 14 or (now.hour == 14 and now.minute < 30):
+            pnl_pts = analysis.get("net_pnl_pts", 0)
+            decay_pct = analysis.get("premium_decayed_pct", 0)
+            if pnl_pts >= 0 and decay_pct < 70:
+                reason = (f"0 DTE theta protection: HOLD. Profitable (+{pnl_pts:.1f} pts, "
+                          f"{decay_pct:.0f}% decayed). Let theta work until 2:30 PM.")
+                action_dict["action"] = "HOLD"
+                action_dict["urgency"] = "MONITOR"
+                logger.info(f"Validator: {reason}")
+                return _approve(reason, override="HOLD")
+
+    # ════════════════════════════════════════════════════
+    # STEP 3: UNIVERSAL COOLDOWN (one cooldown for ALL rules)
+    # ════════════════════════════════════════════════════
+
+    on_cooldown = _check_universal_cooldown(position_id, cooldown_minutes=30)
+
+    # If on cooldown AND not in critical danger → HOLD, wait
+    if on_cooldown and severity < 1.4:
+        reason = f"Cooldown active (last adjustment <30 min ago). Severity {severity:.2f}x — safe to wait."
+        action_dict["action"] = "HOLD"
         action_dict["urgency"] = "MONITOR"
         logger.info(f"Validator: {reason}")
-        _audit("RISK_APPROVE", symbol=state.get("underlying", "NIFTY"),
-               details={"rule": "low_confidence", "override": "MONITOR"})
-        return {
-            "action_approved": True,
-            "validation_result": ActionValidation(
-                approved=True, reason=reason, override_action="HOLD/MONITOR"
-            ).model_dump(),
-            "recommended_action": action_dict,
-        }
+        return _approve(reason, override="HOLD (cooldown)")
 
-    # Rule 2: Underwater + HOLD → override to CLOSE_BOTH IMMEDIATE
-    if is_underwater and action == "HOLD":
-        reason = "Position is underwater. Overriding HOLD → CLOSE_BOTH IMMEDIATE (hard stop rule)"
-        action_dict["action"]  = "CLOSE_BOTH"
-        action_dict["urgency"] = "IMMEDIATE"
-        action_dict["ce_action"] = "CLOSE"
-        action_dict["pe_action"] = "CLOSE"
-        logger.warning(f"Validator override: {reason}")
-        _audit("RISK_REJECT", symbol=state.get("underlying", "NIFTY"),
-               details={"rule": "underwater_hold_override", "original": action})
-        return {
-            "action_approved": True,
-            "validation_result": ActionValidation(
-                approved=True, reason=reason, override_action="CLOSE_BOTH"
-            ).model_dump(),
-            "recommended_action": action_dict,
-        }
+    # ════════════════════════════════════════════════════
+    # STEP 4: LOW CONFIDENCE → MONITOR
+    # ════════════════════════════════════════════════════
 
-    # Rule 3: Expiry tomorrow + ROLL → override to CLOSE_BOTH
-    if expiry_tomorrow and action == "ROLL":
-        reason = "Cannot ROLL on expiry day. Overriding → CLOSE_BOTH IMMEDIATE"
-        action_dict["action"]  = "CLOSE_BOTH"
-        action_dict["urgency"] = "IMMEDIATE"
-        action_dict["ce_action"] = "CLOSE"
-        action_dict["pe_action"] = "CLOSE"
-        logger.warning(f"Validator override: {reason}")
-        _audit("RISK_REJECT", symbol=state.get("underlying", "NIFTY"),
-               details={"rule": "expiry_roll_override"})
-        return {
-            "action_approved": True,
-            "validation_result": ActionValidation(
-                approved=True, reason=reason, override_action="CLOSE_BOTH"
-            ).model_dump(),
-            "recommended_action": action_dict,
-        }
+    if confidence < 0.6 and not is_underwater:
+        reason = f"Low confidence ({confidence:.2f}) — MONITOR."
+        action_dict["action"] = "HOLD"
+        action_dict["urgency"] = "MONITOR"
+        logger.info(f"Validator: {reason}")
+        return _approve(reason, override="HOLD/MONITOR")
 
-    # Rule 4: HEDGE without lots
+    # ════════════════════════════════════════════════════
+    # STEP 5: POSITION HEALTH → SINGLE ADJUSTMENT DECISION
+    # ════════════════════════════════════════════════════
+    #
+    # Severity thresholds:
+    #   < 1.10  → HEALTHY: check for exhausted legs, else let LLM decide
+    #   1.10-1.30 → MILD STRESS: roll tested leg with small buffer
+    #   1.30-1.50 → MODERATE STRESS: roll tested leg with bigger buffer
+    #   ≥ 1.50  → already caught by hard stop above
+
+    if not is_expiry_day and nifty_spot > 0 and not on_cooldown:
+
+        # ── HEALTHY (<1.10x) — proactive maintenance ──
+        if severity < 1.10:
+            # Check if any leg is exhausted (>70% decayed, >300 pts from action)
+            ce_dist = abs(_ce_strike - nifty_spot)
+            pe_dist = abs(_pe_strike - nifty_spot)
+
+            if ce_decayed_pct > 70 and ce_dist > 300:
+                new_strike = _calc_otm_strike(nifty_spot, "CE", 150)
+                return _make_roll("CE",  new_strike,
+                    f"CE EXHAUSTED: {ce_decayed_pct:.0f}% decayed, CE@{_ce_strike} is "
+                    f"{ce_dist:.0f} pts from NIFTY. Rolling → {new_strike} for fresh premium.")
+
+            if pe_decayed_pct > 70 and pe_dist > 300:
+                new_strike = _calc_otm_strike(nifty_spot, "PE", 150)
+                return _make_roll("PE", new_strike,
+                    f"PE EXHAUSTED: {pe_decayed_pct:.0f}% decayed, PE@{_pe_strike} is "
+                    f"{pe_dist:.0f} pts from NIFTY. Rolling → {new_strike} for fresh premium.")
+
+            # No exhaustion → let LLM recommendation pass through (handled at end)
+
+        # ── MILD STRESS (1.10-1.30x) — roll tested leg ──
+        elif severity < 1.30:
+            tested = "PE" if pe_itm > ce_itm else "CE"
+            itm_pts = pe_itm if tested == "PE" else ce_itm
+            if itm_pts > 50:  # only act if meaningfully ITM
+                buffer = _adaptive_buffer(itm_pts)
+                new_strike = _calc_otm_strike(nifty_spot, tested, buffer)
+                return _make_roll(tested, new_strike,
+                    f"Mild stress ({severity:.2f}x). {tested} is {itm_pts:.0f} pts ITM. "
+                    f"Rolling → {new_strike} ({buffer} buffer).")
+
+        # ── MODERATE STRESS (1.30-1.50x) — roll tested leg with bigger buffer ──
+        elif severity < 1.50:
+            tested = "PE" if pe_itm > ce_itm else "CE"
+            itm_pts = pe_itm if tested == "PE" else ce_itm
+            if itm_pts > 50:
+                buffer = _adaptive_buffer(itm_pts) + 50  # extra safety
+                new_strike = _calc_otm_strike(nifty_spot, tested, buffer)
+                return _make_roll(tested, new_strike,
+                    f"Moderate stress ({severity:.2f}x). {tested} is {itm_pts:.0f} pts ITM. "
+                    f"Rolling → {new_strike} ({buffer} buffer).")
+            else:
+                return _make_close_both(
+                    f"Moderate stress ({severity:.2f}x) but no clear tested leg. Closing both.")
+
+    # ════════════════════════════════════════════════════
+    # STEP 6: REMAINING GUARDS
+    # ════════════════════════════════════════════════════
+
+    if expiry_tomorrow and action in ("ROLL", "ROLL_CE", "ROLL_PE"):
+        return _make_close_both("Cannot ROLL on expiry day. Closing both.")
+
     if action == "HEDGE_FUTURES" and action_dict.get("hedge_lots", 0) == 0:
-        reason = "HEDGE_FUTURES action requires hedge_lots > 0. Rejected."
-        logger.error(f"Validator rejected: {reason}")
-        return {
-            "action_approved": False,
-            "validation_result": ActionValidation(
-                approved=False, reason=reason
-            ).model_dump(),
-        }
+        reason = "HEDGE_FUTURES requires hedge_lots > 0. Rejected."
+        logger.error(f"Validator: {reason}")
+        return {"action_approved": False,
+                "validation_result": ActionValidation(approved=False, reason=reason).model_dump()}
 
-    # All clear
-    reason = f"Action {action}/{urgency} approved. Confidence: {confidence:.2f}"
-    logger.info(f"Validator approved: {reason}")
+    # ════════════════════════════════════════════════════
+    # STEP 7: APPROVE LLM RECOMMENDATION
+    # ════════════════════════════════════════════════════
+
+    reason = f"Approved: {action}/{urgency}. Confidence: {confidence:.2f}. Severity: {severity:.2f}x."
+    logger.info(f"Validator: {reason}")
     _audit("RISK_APPROVE", symbol=state.get("underlying", "NIFTY"),
-           details={"action": action, "urgency": urgency, "confidence": confidence})
-
+           details={"action": action, "urgency": urgency, "confidence": confidence, "severity": round(severity, 2)})
     return {
         "action_approved": True,
         "validation_result": ActionValidation(approved=True, reason=reason).model_dump(),
     }
+
+
+# ──────────────────────────────────────────────
+# Execution helpers (DRY — shared by ROLL_CE, ROLL_PE, REENTER)
+# ──────────────────────────────────────────────
+def _execute_roll_leg(state: dict, leg: str, roll_strike: int, snapshot: dict,
+                      qty: int, orders: list, actions_taken: list):
+    """Close a leg and sell a new one at roll_strike. Used by ROLL_CE/ROLL_PE."""
+    from trading.options.data_service import find_option_token
+    from trading.utils.expiry_utils import iso_to_angel
+
+    leg_lower = leg.lower()
+    # Step 1: Close current leg
+    ltp = snapshot.get(leg_lower, {}).get("ltp", 0)
+    r1 = _broker.place_order(
+        symbol=state.get(f"{leg_lower}_symbol", ""), side="BUY", quantity=qty,
+        price=ltp, product_type="CARRYFORWARD", exchange="NFO",
+        symbol_token=state.get(f"{leg_lower}_token", ""),
+    )
+    orders.append(r1)
+    actions_taken.append(f"CLOSED_{leg} @ {ltp:.2f}")
+
+    # Step 2: Sell new leg at roll strike
+    exp_fmt = iso_to_angel(state.get("expiry", ""))
+    if exp_fmt:
+        _execute_sell_new_leg(state, leg, roll_strike, qty, orders, actions_taken, exp_fmt)
+
+
+def _execute_sell_new_leg(state: dict, leg: str, strike: int, qty: int,
+                          orders: list, actions_taken: list, exp_fmt: str = None):
+    """Sell a new option leg at the given strike."""
+    from trading.options.data_service import find_option_token
+    from trading.utils.expiry_utils import iso_to_angel
+
+    if not exp_fmt:
+        exp_fmt = iso_to_angel(state.get("expiry", ""))
+    if not exp_fmt:
+        return
+
+    result = find_option_token(state.get("underlying", "NIFTY"), strike, exp_fmt, leg)
+    if result:
+        new_sym, new_tok = result
+        new_ltp = _options_data.fetch_option_ltp(new_sym, new_tok).get("ltp", 0)
+        if new_ltp > 0:
+            r = _broker.place_order(
+                symbol=new_sym, side="SELL", quantity=qty,
+                price=new_ltp, product_type="CARRYFORWARD", exchange="NFO",
+                symbol_token=new_tok,
+            )
+            orders.append(r)
+            actions_taken.append(f"SOLD_NEW_{leg} {strike} @ {new_ltp:.2f}")
+            logger.info(f"Sold new {leg}@{strike}: {new_sym} @ {new_ltp:.2f}")
 
 
 # ──────────────────────────────────────────────
@@ -530,8 +772,9 @@ def execute_action_node(state: StraddleState) -> dict:
     qty           = lot_size * lots
     snapshot      = state.get("market_snapshot", {})
 
-    # ── Close CE ──
-    if action in ("CLOSE_BOTH", "CLOSE_CE") or action_dict.get("ce_action") == "CLOSE":
+    # ── Close CE (skip if ROLL handles it) ──
+    if action in ("CLOSE_BOTH", "CLOSE_CE") or \
+       (action_dict.get("ce_action") == "CLOSE" and action not in ("ROLL_CE", "ROLL_PE", "REENTER")):
         ce_ltp = snapshot.get("ce", {}).get("ltp", 0)
         result = _broker.place_order(
             symbol       = state.get("ce_symbol", ""),
@@ -546,8 +789,9 @@ def execute_action_node(state: StraddleState) -> dict:
         actions_taken.append(f"CLOSED_CE @ {ce_ltp:.2f}")
         logger.info(f"CE closed: {result.get('message', '')}")
 
-    # ── Close PE ──
-    if action in ("CLOSE_BOTH", "CLOSE_PE") or action_dict.get("pe_action") == "CLOSE":
+    # ── Close PE (skip if ROLL handles it) ──
+    if action in ("CLOSE_BOTH", "CLOSE_PE") or \
+       (action_dict.get("pe_action") == "CLOSE" and action not in ("ROLL_PE", "ROLL_CE", "REENTER")):
         pe_ltp = snapshot.get("pe", {}).get("ltp", 0)
         result = _broker.place_order(
             symbol       = state.get("pe_symbol", ""),
@@ -578,6 +822,27 @@ def execute_action_node(state: StraddleState) -> dict:
         orders.append(result)
         actions_taken.append(f"HEDGE_FUTURES {hedge_side} {hedge_lots}L @ {nifty_ltp:.2f}")
         logger.info(f"Futures hedge: {result.get('message', '')}")
+
+    # ── Roll tested leg (close + sell at new strike) ──
+    if action in ("ROLL_PE", "ROLL_CE"):
+        roll_strike = action_dict.get("roll_to_strike", 0)
+        nifty_ltp   = snapshot.get("nifty", {}).get("ltp", 0)
+
+        if not roll_strike:
+            from trading.options.data_service import find_atm_strike
+            roll_strike = find_atm_strike(nifty_ltp)
+
+        leg = "PE" if action == "ROLL_PE" else "CE"
+        _execute_roll_leg(state, leg, roll_strike, snapshot, qty, orders, actions_taken)
+
+    # ── Re-enter: close both + sell new ATM straddle ──
+    if action == "REENTER":
+        nifty_ltp = snapshot.get("nifty", {}).get("ltp", 0)
+        from trading.options.data_service import find_atm_strike
+        new_strike = find_atm_strike(nifty_ltp)
+
+        for leg in ("CE", "PE"):
+            _execute_sell_new_leg(state, leg, new_strike, qty, orders, actions_taken)
 
     success = all(o.get("success", False) for o in orders) if orders else True
 
@@ -613,9 +878,9 @@ def journal_action_node(state: StraddleState) -> dict:
         logger.warning("No position_id — cannot journal straddle action")
         return {"journal_id": None}
 
-    analysis      = state.get("analysis", {})
-    action_dict   = state.get("recommended_action", {})
-    exec_result   = state.get("execution_result", {})
+    analysis      = state.get("analysis") or {}
+    action_dict   = state.get("recommended_action") or {}
+    exec_result   = state.get("execution_result") or {}
     action        = action_dict.get("action", "HOLD")
 
     try:
@@ -637,23 +902,103 @@ def journal_action_node(state: StraddleState) -> dict:
         elif action in ("CLOSE_CE", "CLOSE_PE") and exec_result.get("success"):
             pos.status       = StraddlePosition.Status.PARTIAL
             pos.action_taken = action
+        elif action in ("ROLL_PE", "ROLL_CE") and exec_result.get("success"):
+            # Position stays ACTIVE — we closed one leg and sold a new one
+            pos.status       = StraddlePosition.Status.ACTIVE
+            pos.action_taken = action
+
+            # Track realized loss from the closed leg
+            qty = pos.lot_size * pos.lots
+            for act in exec_result.get("actions_taken", []):
+                if "CLOSED_PE @" in act:
+                    close_price = float(act.split("@")[1].strip())
+                    roll_loss = (close_price - pos.pe_sell_price) * qty  # positive = loss (bought higher than sold)
+                    pos.realized_pnl -= roll_loss  # subtract because closing short at higher price = loss
+                    logger.info(f"Roll PE realized: closed@{close_price:.2f} sold@{pos.pe_sell_price:.2f} = {-roll_loss:+,.0f} INR")
+                elif "CLOSED_CE @" in act:
+                    close_price = float(act.split("@")[1].strip())
+                    roll_loss = (close_price - pos.ce_sell_price) * qty
+                    pos.realized_pnl -= roll_loss
+                    logger.info(f"Roll CE realized: closed@{close_price:.2f} sold@{pos.ce_sell_price:.2f} = {-roll_loss:+,.0f} INR")
+
+            # Update the rolled leg's symbol/token/sell price + strike
+            from trading.options.data_service import find_atm_strike, find_option_token
+            from trading.utils.expiry_utils import iso_to_angel
+            nifty_ltp = (state.get("market_snapshot") or {}).get("nifty", {}).get("ltp", 0)
+            new_strike = find_atm_strike(nifty_ltp) if nifty_ltp else pos.strike
+            expiry_angel = iso_to_angel(state.get("expiry", ""))
+
+            for act in exec_result.get("actions_taken", []):
+                if "SOLD_NEW_PE" in act and expiry_angel:
+                    parts = act.split("@")
+                    if len(parts) == 2:
+                        pos.pe_sell_price = float(parts[1].strip())
+                    # Update symbol + token to new strike
+                    new_pe = find_option_token(pos.underlying, new_strike, expiry_angel, "PE")
+                    if new_pe:
+                        pos.pe_symbol = new_pe[0]
+                        pos.pe_token = new_pe[1]
+                    pos.strike = new_strike
+                elif "SOLD_NEW_CE" in act and expiry_angel:
+                    parts = act.split("@")
+                    if len(parts) == 2:
+                        pos.ce_sell_price = float(parts[1].strip())
+                    new_ce = find_option_token(pos.underlying, new_strike, expiry_angel, "CE")
+                    if new_ce:
+                        pos.ce_symbol = new_ce[0]
+                        pos.ce_token = new_ce[1]
+                    pos.strike = new_strike
+        elif action == "REENTER" and exec_result.get("success"):
+            # Close current position, create a new one
+            pos.status       = StraddlePosition.Status.CLOSED
+            pos.action_taken = action
+            pos.closed_at    = datetime.now()
+            # The re-entry creates a new StraddlePosition (done below)
         elif action == "HEDGE_FUTURES" and exec_result.get("success"):
             pos.status       = StraddlePosition.Status.HEDGED
             pos.action_taken = action
 
-        # Append to management log
+        # Append to management log — enriched with premium tracking
+        actions_taken = exec_result.get("actions_taken", [])
+        premium_collected = 0
+        premium_paid = 0
+        for act in actions_taken:
+            if act.startswith("SOLD_NEW_") and "@" in act:
+                try:
+                    premium_collected += float(act.split("@")[1].strip()) * pos.lot_size * pos.lots
+                except (ValueError, IndexError):
+                    pass
+            elif act.startswith("CLOSED_") and "@" in act:
+                try:
+                    premium_paid += float(act.split("@")[1].strip()) * pos.lot_size * pos.lots
+                except (ValueError, IndexError):
+                    pass
+
         log_entry = {
             "time":     datetime.now().strftime("%H:%M"),
             "action":   action,
             "urgency":  action_dict.get("urgency", "MONITOR"),
             "nifty":    analysis.get("nifty_spot", 0),
-            "pnl_inr":  analysis.get("net_pnl_inr", 0),
+            "pnl_inr":  pos.total_pnl,
+            "realized_pnl": pos.realized_pnl,
+            "ce_strike": pos.strike,  # current CE strike (may differ from PE after rolls)
+            "pe_strike": pos.strike,
+            "ce_sell":  pos.ce_sell_price,
+            "pe_sell":  pos.pe_sell_price,
+            "ce_ltp":   pos.ce_current_price,
+            "pe_ltp":   pos.pe_current_price,
+            "premium_collected": premium_collected,
+            "premium_paid":      premium_paid,
+            "exec":     actions_taken,
             "note":     action_dict.get("reasoning", "")[:100],
             "executed": exec_result.get("success", False),
         }
         if pos.management_log is None:
             pos.management_log = []
         pos.management_log.append(log_entry)
+        # Keep log bounded — retain last 100 entries to prevent DB bloat
+        if len(pos.management_log) > 100:
+            pos.management_log = pos.management_log[-100:]
 
         pos.save()
         logger.info(f"Straddle journal updated: ID={position_id} | action={action} | P&L={pos.current_pnl_inr:+,.0f}")
