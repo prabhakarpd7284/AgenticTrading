@@ -1756,9 +1756,10 @@ elif page == "Straddle Console":
                     )
                 else:
                     dte = max(0, (pos.expiry - date.today()).days)
+                    dte_val = max(0, (pos.expiry - date.today()).days)
                     st.info(
                         f"**#{pos.id} STRADDLE {pos.display_strike}** | "
-                        f"Expiry: {pos.expiry} (DTE={dte}) | "
+                        f"Expiry: {pos.expiry} (DTE={dte_val}) | "
                         f"CE sold@{pos.ce_sell_price:.0f} PE sold@{pos.pe_sell_price:.0f} | "
                         f"P&L: ₹{pos.total_pnl:+,.0f} (real: ₹{pos.realized_pnl:+,.0f})"
                     )
@@ -1968,11 +1969,19 @@ elif page == "Straddle Console":
                 "Select Position", list(pos_opts.keys()), key="analyze_pos_select"
             )
             pos = pos_opts[sel_label]
-            st.caption(
-                f"{pos.underlying} {pos.display_strike}  |  Expiry {pos.expiry}  |  "
-                f"{pos.lot_size} x {pos.lots} lot(s)  |  "
-                f"CE sold @ {pos.ce_sell_price}  |  PE sold @ {pos.pe_sell_price}"
-            )
+            if pos.is_spread:
+                info = pos.spread_info
+                st.caption(
+                    f"{pos.display_name}  |  Expiry {pos.expiry}  |  "
+                    f"{pos.lot_size} x {pos.lots} lot(s)  |  "
+                    f"Net debit: {info.get('net_debit',0):.1f} pts"
+                )
+            else:
+                st.caption(
+                    f"STRADDLE {pos.display_strike}  |  Expiry {pos.expiry}  |  "
+                    f"{pos.lot_size} x {pos.lots} lot(s)  |  "
+                    f"CE sold @ {pos.ce_sell_price}  |  PE sold @ {pos.pe_sell_price}"
+                )
 
             if st.button(
                 "🤖 Run Full Analysis + LLM Recommendation",
@@ -2398,10 +2407,10 @@ elif page == "Straddle Console":
             rows = []
             for p in all_positions:
                 rows.append({
-                    "ID": p.id, "Underlying": p.underlying, "Strike": p.display_strike,
+                    "ID": p.id, "Type": p.position_type.replace("_", " "),
+                    "Position": p.display_name,
                     "Expiry": str(p.expiry), "Lots": p.lots,
-                    "CE Sold": p.ce_sell_price, "PE Sold": p.pe_sell_price,
-                    "Status": p.status, "Action": p.action_taken,
+                    "Status": p.status,
                     "Realized": f"{p.realized_pnl:+,.0f}",
                     "Unrealized": f"{p.current_pnl_inr:+,.0f}",
                     "Total P&L": f"{p.total_pnl:+,.0f}",
@@ -2730,12 +2739,10 @@ elif page == "Risk Control":
     # Options risk at play
     opt_risk = 0
     for pos in StraddlePosition.objects.filter(status__in=["ACTIVE", "PARTIAL", "HEDGED"]):
-        # Check if spread (capped) or straddle
-        is_spread = pos.management_log and pos.management_log[0].get("spread_type")
-        if is_spread:
-            opt_risk += pos.management_log[0].get("max_loss", 6750)
+        if pos.is_spread:
+            opt_risk += pos.spread_info.get("max_loss", 6750)
         else:
-            opt_risk += pos.combined_sell_pts * pos.lot_size * pos.lots * 0.3  # 1.3x stop estimate
+            opt_risk += pos.combined_sell_pts * pos.lot_size * pos.lots * 0.3
     pr2.metric("Options Risk", f"₹{opt_risk:,.0f}",
                f"{opt_risk/risk['capital']*100:.1f}% of capital")
 
