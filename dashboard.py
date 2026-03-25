@@ -1917,21 +1917,21 @@ elif page == "Straddle Console":
                                   f"{analysis.premium_decayed_pct:.1f}% / {analysis.net_delta:+.2f}",
                                   analysis.delta_bias)
 
-                    # Health
-                    st.subheader("Health")
-                    h1, h2, h3, h4 = st.columns(4)
-                    h1.metric("Tested Leg", analysis.nearest_itm_leg)
-                    h2.metric("PE ITM by", f"{analysis.pe_itm_by:.0f} pts")
-                    h3.metric("DTE", analysis.days_to_expiry)
-                    h4.metric("Stop", "🚨 YES" if analysis.stop_triggered else "✅ No")
+                        # Health (straddle only)
+                        st.subheader("Health")
+                        h1, h2, h3, h4 = st.columns(4)
+                        h1.metric("Tested Leg", analysis.nearest_itm_leg)
+                        h2.metric("PE ITM by", f"{analysis.pe_itm_by:.0f} pts")
+                        h3.metric("DTE", analysis.days_to_expiry)
+                        h4.metric("Stop", "🚨 YES" if analysis.stop_triggered else "✅ No")
 
-                    with st.expander("📊 Expiry Scenarios"):
-                        rows = [
-                            {"Scenario": s.label, "NIFTY": f"{s.nifty_level:,.0f}",
-                             "P&L (INR)": f"{s.net_pnl_inr:+,.0f}"}
-                            for s in analysis.scenarios
-                        ]
-                        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+                        with st.expander("📊 Expiry Scenarios"):
+                            rows = [
+                                {"Scenario": s.label, "NIFTY": f"{s.nifty_level:,.0f}",
+                                 "P&L (INR)": f"{s.net_pnl_inr:+,.0f}"}
+                                for s in analysis.scenarios
+                            ]
+                            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
                 except Exception as e:
                     st.error(f"Analysis error: {e}")
