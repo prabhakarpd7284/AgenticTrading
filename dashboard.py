@@ -531,45 +531,59 @@ elif page == "Intraday Agent":
                             f"P&L: :{color}[**{d.get('pnl', 0):+,.0f} INR**]"
                         )
 
-                # ── Straddle ──
-                if straddle_cycles or straddle_regs:
-                    st.subheader("Straddle")
+                # ── Options (Straddles + Spreads) ──
+                opt_decisions = [e for e in events if e["type"] == "OPTIONS_DECISION"]
+                opt_spreads = [e for e in events if e["type"] == "OPTIONS_SPREAD"]
 
-                    # Registration info
+                if straddle_cycles or straddle_regs or opt_decisions or opt_spreads:
+                    st.subheader("Options")
+
+                    # Adaptive engine decision
+                    for e in opt_decisions:
+                        d = e["data"]
+                        emoji = {"STRADDLE": "📊", "BEAR_PUT_SPREAD": "📉", "BULL_CALL_SPREAD": "📈",
+                                 "0DTE_THETA": "⏱", "SKIP": "⏭"}.get(d.get("strategy", ""), "📋")
+                        st.markdown(f"{e['time']} | {emoji} **{d.get('strategy', '?')}** | "
+                                    f"VIX: {d.get('vix', 0):.0f} | DTE: {d.get('dte', '?')} | "
+                                    f"{d.get('reason', '')[:60]}")
+
+                    # Spread registration
+                    for e in opt_spreads:
+                        d = e["data"]
+                        st.success(
+                            f"{e['time']} | #{d.get('position_id')} {d.get('strategy', '')} "
+                            f"{d.get('long_strike', '')}/{d.get('short_strike', '')} | "
+                            f"Max loss: ₹{d.get('max_loss', 0):,.0f} | Max profit: ₹{d.get('max_profit', 0):,.0f}"
+                        )
+
+                    # Straddle registration
                     for e in straddle_regs:
                         d = e["data"]
                         st.info(
-                            f"{e['time']} | Registered #{d.get('position_id')} "
-                            f"NIFTY {d.get('strike')} [{d.get('expiry')}] | "
-                            f"CE@{d.get('ce_premium', 0):.1f} + PE@{d.get('pe_premium', 0):.1f} = "
-                            f"{d.get('combined', 0):.1f} pts"
+                            f"{e['time']} | #{d.get('position_id')} Straddle @{d.get('strike')} | "
+                            f"Premium: {d.get('combined', 0):.0f} pts | DTE: {d.get('dte', '?')}"
                         )
 
+                    # Latest cycle status
                     if straddle_cycles:
                         latest = straddle_cycles[-1]["data"]
                         sc1, sc2, sc3 = st.columns(3)
                         sc1.metric("Position",
                                    f"#{latest.get('position_id','?')} {latest.get('underlying','?')} {latest.get('strike','?')}")
                         total_str_pnl = latest.get('pnl', 0)
-                        realized = latest.get('realized', 0)
-                        unrealized = latest.get('unrealized', total_str_pnl)
-                        sc2.metric("Total P&L", f"{total_str_pnl:+,.0f} INR",
-                                   f"open: {unrealized:+,.0f} | rolls: {realized:+,.0f}")
-                        sc3.metric("Last Action", latest.get("action", "?"))
+                        sc2.metric("P&L", f"{total_str_pnl:+,.0f} INR")
+                        sc3.metric("Action", latest.get("action", "?"))
 
-                        # Show action history (all cycles, not just last 5)
-                        with st.expander(f"Straddle History ({len(straddle_cycles)} cycles)", expanded=True):
+                        with st.expander(f"Options Cycle Log ({len(straddle_cycles)} cycles)"):
                             str_rows = []
                             for e in straddle_cycles:
                                 d = e["data"]
-                                pnl = d.get("pnl", 0)
-                                executed = d.get("executed", [])
                                 str_rows.append({
                                     "Time": e["time"],
                                     "Action": d.get("action", "?"),
                                     "Strike": d.get("strike", "?"),
-                                    "P&L": f"{pnl:+,.0f}",
-                                    "Executed": " | ".join(executed) if executed else "-",
+                                    "P&L": f"{d.get('pnl', 0):+,.0f}",
+                                    "Reason": d.get("reason", "")[:50],
                                 })
                             st.dataframe(pd.DataFrame(str_rows), use_container_width=True, hide_index=True)
 
