@@ -469,7 +469,7 @@ elif page == "Intraday Agent":
                 p1, p2, p3, p4 = st.columns(4)
                 p1.metric("Equity (open)", f"{eq_unrealized:+,.0f}", f"{last_hb['data'].get('open_equity', 0)} positions" if last_hb else "")
                 p2.metric("Equity (closed)", f"{eq_realized:+,.0f}", f"{len(exits)} exits" if exits else "")
-                p3.metric("Straddle", f"{str_pnl:+,.0f}", f"{len(straddle_cycles)} cycles")
+                p3.metric("Options", f"{str_pnl:+,.0f}", f"{len(straddle_cycles)} cycles")
                 p4.metric("DAY TOTAL", f"{total_est:+,.0f}")
 
                 st.markdown("---")
@@ -593,7 +593,7 @@ elif page == "Intraday Agent":
                     st.subheader("Day Review")
                     r1, r2, r3, r4 = st.columns(4)
                     r1.metric("Equity P&L", f"{dr.get('equity_pnl', 0):+,.0f}")
-                    r2.metric("Straddle P&L", f"{dr.get('straddle_pnl', 0):+,.0f}")
+                    r2.metric("Options P&L", f"{dr.get('straddle_pnl', 0):+,.0f}")
                     r3.metric("Total P&L", f"{dr.get('total_pnl', 0):+,.0f}")
                     r4.metric("Return", f"{dr.get('return_pct', 0):+.2f}%")
 
