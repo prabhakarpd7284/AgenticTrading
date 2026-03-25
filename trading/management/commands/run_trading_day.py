@@ -275,7 +275,7 @@ class Command(BaseCommand):
                 system_prompt, user_prompt = build_premarket_prompt(self._equity_state)
                 analysis = _call_llm(system_prompt, user_prompt)
                 self._equity_state.premarket_analysis = analysis
-                self._log(f"LLM premarket analysis: {analysis[:200]}...")
+                self._log(f"LLM premarket analysis: {analysis}...")
             except Exception as e:
                 self._log(f"LLM analysis failed (non-fatal): {e}", style="WARNING")
 
@@ -678,13 +678,18 @@ class Command(BaseCommand):
                 pos.ce_current_price = ce_data.get("ltp", pos.ce_current_price)
                 pos.pe_current_price = pe_data.get("ltp", pos.pe_current_price)
 
-                # Compute spread P&L: long leg value - short leg value - net debit
+                # Compute spread P&L: (long_value - short_value - net_debit) × lots
+                # CE fields = long leg, PE fields = short leg
                 first_log = pos.management_log[0]
                 net_debit = first_log.get("net_debit", 0)
-                long_ltp = pos.ce_current_price  # CE is long leg for bull call
-                short_ltp = pos.pe_current_price  # PE is short leg (reused fields)
+                max_loss = first_log.get("max_loss", net_debit * pos.lot_size * pos.lots)
+                max_profit = first_log.get("max_profit", (200 - net_debit) * pos.lot_size * pos.lots)
+                long_ltp = pos.ce_current_price
+                short_ltp = pos.pe_current_price
                 spread_value = long_ltp - short_ltp
-                pos.current_pnl_inr = (spread_value - net_debit) * pos.lot_size * pos.lots
+                raw_pnl = (spread_value - net_debit) * pos.lot_size * pos.lots
+                # Clamp to defined risk bounds
+                pos.current_pnl_inr = max(-max_loss, min(max_profit, raw_pnl))
                 pos.save(update_fields=["ce_current_price", "pe_current_price",
                                          "current_pnl_inr", "last_updated"])
 
@@ -1394,12 +1399,13 @@ class Command(BaseCommand):
             strike=decision.long_strike,
             expiry=expiry,
             lot_size=75, lots=decision.lots,
-            ce_symbol=long_sym if leg_type == "CE" else short_sym,
-            ce_token=long_tok if leg_type == "CE" else short_tok,
-            ce_sell_price=long_ltp if leg_type == "CE" else short_ltp,
-            pe_symbol=short_sym if leg_type == "PE" else long_sym,
-            pe_token=short_tok if leg_type == "PE" else long_tok,
-            pe_sell_price=short_ltp if leg_type == "PE" else long_ltp,
+            # CE fields = LONG leg, PE fields = SHORT leg (regardless of option type)
+            ce_symbol=long_sym,
+            ce_token=long_tok,
+            ce_sell_price=long_ltp,
+            pe_symbol=short_sym,
+            pe_token=short_tok,
+            pe_sell_price=short_ltp,
             trade_date=date.today(),
             management_log=[{
                 "time": datetime.now().strftime("%H:%M"),
