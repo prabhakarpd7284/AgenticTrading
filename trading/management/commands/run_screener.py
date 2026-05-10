@@ -116,7 +116,9 @@ class Command(BaseCommand):
         return list(SCREENER_UNIVERSE)
 
     def _run_backtest(self, symbols, strategies, options):
-        from trading.screener.backtest import run_backtest
+        from trading.backtester.compat import run_screener_backtest
+        from trading.backtester.report import ReportFormatter
+        from trading.backtester.types import PnLMode
 
         from_date = options.get("from_date")
         to_date = options.get("to_date")
@@ -125,23 +127,12 @@ class Command(BaseCommand):
             self.stderr.write("Backtest requires --from and --to dates")
             return
 
-        self.stdout.write(f"\nBacktest: {len(symbols)} symbols, {from_date} → {to_date}\n")
+        self.stdout.write(f"\nBacktest (v2 engine): {len(symbols)} symbols, {from_date} → {to_date}\n")
         self.stdout.write(f"Strategies: {len(strategies)}\n")
 
-        result = run_backtest(symbols, from_date, to_date, strategies)
-        self.stdout.write(f"\n{result.summary()}\n")
-
-        # Show individual trades
-        if result.trades:
-            self.stdout.write(f"\n── Trades ──\n")
-            for t in result.trades[:50]:  # cap at 50
-                arrow = "✓" if t.pnl > 0 else "✗"
-                self.stdout.write(
-                    f"  {arrow} {t.signal.symbol} {t.signal.strategy} | "
-                    f"{t.signal.side} @ {t.signal.entry:.2f} → "
-                    f"Exit {t.exit_price:.2f} ({t.exit_reason}) | "
-                    f"P&L: {t.pnl:+.2f} pts\n"
-                )
+        stats = run_screener_backtest(symbols, from_date, to_date, strategies)
+        fmt = ReportFormatter("Screener Backtest", PnLMode.POINTS)
+        self.stdout.write(f"\n{fmt.cli_summary(stats, {'from_date': from_date, 'to_date': to_date})}\n")
 
         # Send to Telegram if enabled
         if options.get("telegram"):
@@ -210,17 +201,21 @@ class Command(BaseCommand):
 
         engine.add_output_handler(cli_handler)
 
+        # Persist every signal to SignalLog for monthly feedback report
+        engine.add_output_handler(lambda sig: sig.persist("SCREENER"))
+
         # Telegram handler
         telegram = None
         if options["telegram"]:
             telegram = TelegramAlertService()
             if telegram.is_configured:
+                telegram.set_engine(engine)  # enables chart rendering
                 if options["digest"]:
                     engine.add_output_handler(telegram.buffer_for_digest)
                     self.stdout.write("Telegram: DIGEST mode\n")
                 else:
                     engine.add_output_handler(telegram.send_signal)
-                    self.stdout.write("Telegram: LIVE alerts\n")
+                    self.stdout.write("Telegram: LIVE alerts (with charts)\n")
                 telegram.send_status(
                     f"Screener started\n"
                     f"Symbols: {len(symbols)}\n"
@@ -262,12 +257,12 @@ class Command(BaseCommand):
         signal.signal(signal.SIGTERM, shutdown)
 
         # Start streaming
-        tick_stream._running = True
-        tick_stream._resolve_tokens()
         if options["poll_only"]:
+            tick_stream._running = True
+            tick_stream._resolve_tokens()
             tick_stream._start_polling()
         else:
-            tick_stream.start()
+            tick_stream.start()  # websocket first, polling fallback
 
         self.stdout.write(f"\nScreener running ({tick_stream.mode})... Press Ctrl+C to stop.\n\n")
 

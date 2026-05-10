@@ -443,6 +443,96 @@ class TraderNote(models.Model):
         return f"Note: {self.symbol} ({len(self.note)} chars)"
 
 
+class SignalLog(models.Model):
+    """
+    Persists every signal fired by any screener/scanner for post-hoc analysis.
+
+    Enables the monthly feedback report to answer: "This stock moved X% —
+    how much of that did AlphaDesk capture?" by recording every opportunity
+    the system detected, whether or not it was acted upon.
+    """
+
+    class Source(models.TextChoices):
+        SCREENER = "SCREENER"       # Intraday ScreenerEngine
+        OK_SCANNER = "OK_SCANNER"   # Swing cycle scanner
+        PREMARKET = "PREMARKET"     # Premarket scanner
+
+    class Outcome(models.TextChoices):
+        PENDING = "PENDING"         # No action yet
+        TRADED = "TRADED"           # Converted to a TradeJournal entry
+        REJECTED = "REJECTED"       # Risk engine blocked it
+        SKIPPED = "SKIPPED"         # Skipped (capital/regime/user)
+        EXPIRED = "EXPIRED"         # Window passed without action
+
+    # Signal identity
+    symbol = models.CharField(max_length=30, db_index=True)
+    signal_date = models.DateField(db_index=True)
+    signal_time = models.DateTimeField()
+    source = models.CharField(max_length=16, choices=Source.choices)
+    strategy = models.CharField(max_length=40)
+    side = models.CharField(max_length=5)           # BUY | SELL
+    entry_price = models.FloatField()
+    stoploss = models.FloatField()
+    target = models.FloatField()
+    confidence = models.FloatField(default=0.0)
+    risk_reward = models.FloatField(default=0.0)
+    reasons = models.JSONField(default=list)
+    indicators = models.JSONField(default=dict)
+
+    # Outcome tracking
+    outcome = models.CharField(
+        max_length=10, choices=Outcome.choices, default=Outcome.PENDING
+    )
+    outcome_reason = models.TextField(blank=True, default="")
+    trade_journal = models.ForeignKey(
+        TradeJournal, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="signal_logs",
+    )
+
+    # Post-hoc price movement (filled by EOD enrichment)
+    eod_price = models.FloatField(null=True, blank=True)
+    max_favorable_move = models.FloatField(
+        null=True, blank=True,
+        help_text="Best intraday price move in signal direction after entry",
+    )
+    max_adverse_move = models.FloatField(
+        null=True, blank=True,
+        help_text="Worst intraday price move against signal direction",
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-signal_time"]
+        indexes = [
+            models.Index(fields=["signal_date", "symbol"]),
+            models.Index(fields=["source", "signal_date"]),
+            models.Index(fields=["outcome"]),
+        ]
+
+    def __str__(self):
+        return (
+            f"[{self.source}] {self.side} {self.symbol} @ {self.entry_price:.2f} "
+            f"({self.strategy}) [{self.outcome}]"
+        )
+
+    @property
+    def target_points(self) -> float:
+        return abs(self.target - self.entry_price)
+
+    @property
+    def risk_points(self) -> float:
+        return abs(self.entry_price - self.stoploss)
+
+    @property
+    def hypothetical_pnl_per_unit(self) -> float | None:
+        """P&L per share if the signal had been taken and held to max favorable.
+        Always positive — max_favorable_move is already direction-aware."""
+        if self.max_favorable_move is None:
+            return None
+        return self.max_favorable_move
+
+
 class SystemControl(models.Model):
     """
     Global system control flags.
