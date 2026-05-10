@@ -1,0 +1,13 @@
+# Default
+*                                @prabhakarpd7284
+
+# Risk + order path — extra eyes required
+backend/apps/orders/             @prabhakarpd7284
+backend/apps/orders/services/    @prabhakarpd7284
+backend/apps/agents_core/        @prabhakarpd7284
+plugins/                         @prabhakarpd7284
+
+# Infra
+infra/                           @prabhakarpd7284
+.github/workflows/               @prabhakarpd7284
+docker/                          @prabhakarpd7284
