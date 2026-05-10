@@ -1,6 +1,8 @@
 # The AlphaDesk Mind Palace
 
-_Close your eyes. You're standing outside a 6-story glass tower in Mumbai's BKC district. The sign above the entrance reads **ALPHADESK**. Each floor is a timeframe. Each room is a brain. Each object is a number you must never forget. Walk with me._
+_Close your eyes. You're standing outside an 8-story glass tower in Mumbai's BKC district. The sign above the entrance reads **ALPHADESK**. Each floor is a timeframe. Each room is a brain. Each object is a number you must never forget. Walk with me._
+
+> **Last updated:** 2026-05 — added Floor 7 (Pyramid Room), the Library (Feedback Archive on Floor 6.5), v2 backend wing, BFO/SENSEX pipes in the basement.
 
 ---
 
@@ -308,20 +310,172 @@ The **big red button** on the Risk Control page: `PAUSE AI TRADING`. Writes to `
 
 ### Station B: React Frontend (AlphaDesk SPA)
 
-The newer, sleeker interface. JWT auth, WebSocket real-time updates:
+The newer, sleeker interface. JWT auth, WebSocket real-time updates. Vite + React 18 + TanStack Query + Tailwind:
 
 ```
-/pulse ──────── Market Pulse (regime, VIX, indices, sector heatmap)
-/rotation ───── Sector drill-in
-/shortlist ──── Filtered watchlist
-/setup/:symbol ─ Single-stock analysis + @RiskGuard breakdown
-/dashboard ──── Capital, equity curve (live WebSocket MTM), AI activity feed
-/positions ──── Open equity + straddles + closed history (live tick updates)
-/agents ─────── Agent console (start runs, watch live event stream)
-/strategies ─── Strategy library
-/backtester ─── Historical testing
-/brokers ────── Angel One API key linking
+The Cascade (pre-trade)
+  /pulse ────────── Market Pulse — Stages 1+2 (regime, VIX, indices, sector heatmap)
+  /rotation ─────── Stage 3 — sector drill-in
+  /shortlist ────── Stage 4 — filtered watchlist
+  /setup/:symbol ── Stage 5 — single-stock setup preview + @RiskGuard breakdown
+
+Operational
+  /dashboard ────── Capital, equity curve (live WebSocket MTM), AI activity
+  /positions ────── Open equity + straddles + closed (live tick updates)
+  /agents ───────── Agent console (start runs, watch live token stream)
+  /strategies ───── Strategy library
+  /backtester ───── Historical testing
+  /brokers ──────── Angel One API key linking
+
+Strategies
+  /pyramid ──────── Pyramid options strategy (Floor 7) — backtest + Go Live
+  /swing-scanner ── Oliver Kell cycle scanner UI
+
+Post-trade feedback (the Library on Floor 6.5)
+  /monthly ──────── Monthly Feedback Report:
+                      • Headline P&L + YTD bar chart
+                      • Equity curve + drawdown
+                      • Capture Rate Matrix per stock
+                      • Signal Audit (outcomes + by-strategy)
+                      • Risk Rejections w/ hindsight
+                      • Time-of-day + day-of-week + sector analytics
+                      • Benchmark vs NIFTY50 (alpha)
+                      • AI-generated lessons
 ```
+
+**Live index ticker** lives in the page header on `/pyramid` (NIFTY · BANKNIFTY · SENSEX with live LTP and % change), driven by `useMarketPulse()` and refreshed every 15s during market hours.
+
+**Single source of truth** for index metadata — `frontend/src/lib/market-config.ts` — holds lot sizes, expiry weekdays, Angel One tokens, exchange (NSE/BSE), and monthly-only flag. Every page imports from here; never hardcode 65 / 30 / 20.
+
+---
+
+## Floor 6.5 — THE LIBRARY (Post-Trade Feedback Archive)
+
+A mezzanine between Floor 6 (Bridge) and Floor 7. Quiet, lined with leather-bound ledgers. This room exists for one reason: **close the learning loop**. The Cascade (Floors 2-3) answers _"what should I trade today?"_. The Library answers _"how well did I trade vs what the market actually offered?"_
+
+### The SignalLog Ledger
+
+A tall shelf of bound volumes — one per trading day. Every signal fired by **any** screener/scanner/premarket detector is recorded here, regardless of whether @RiskGuard approved it or the trader skipped it.
+
+| Field | Why it matters |
+|-------|---------------|
+| `source` | SCREENER (intraday) · OK_SCANNER (swing cycles) · PREMARKET (basket) |
+| `strategy` | Which detector fired (ORB_LONG, VWAP_RECLAIM, WEDGE_POP, etc.) |
+| `entry/sl/target/confidence/risk_reward` | The trade plan as it existed at signal time |
+| `outcome` | PENDING → TRADED / REJECTED / SKIPPED / EXPIRED |
+| `eod_price` + `max_favorable_move` + `max_adverse_move` | **Filled by the EOD enrichment job** — what would have happened |
+| `trade_journal` FK | Links to the actual TradeJournal row if we took the trade |
+
+_Without this ledger, every signal that didn't become a trade was lost forever. Now we have a record of every opportunity AlphaDesk noticed but didn't act on._
+
+### The Enrichment Clerk
+
+Every evening at market close, `python manage.py enrich_signals` runs. It walks the day's SignalLog entries, fetches intraday candles from Angel One, and stamps each signal with what the market actually did after the signal fired. Unactioned signals get marked EXPIRED. Risk-rejected signals get linked to their TradeJournal entry.
+
+### The Monthly Feedback Report
+
+The librarian's masterpiece. Open `/monthly` in the React UI to see:
+
+| Section | Question it answers |
+|---------|---------------------|
+| **Month summary** | What did I earn this month? Win rate, capital deployed, asset-class split |
+| **YTD strip** | 12-month bar chart — best/worst month, capital base, total P&L |
+| **Equity curve + drawdown** | Day-by-day cumulative P&L with peak-to-trough drawdown |
+| **Capture Rate Matrix** | Per stock: market moved X%, signals fired Y, captured Z% — sorted by potential |
+| **Signal Audit** | Outcomes (TRADED/REJECTED/SKIPPED/EXPIRED), by source, by strategy with win-rate + avg R:R |
+| **Risk Rejections** | What @RiskGuard blocked + would it have been profitable in hindsight? |
+| **Analytics** | Time-of-day heatmap (which hour wins), day-of-week, sector attribution |
+| **Benchmark** | Portfolio % vs NIFTY50 % → alpha |
+| **Lessons** | AI-generated bullets: "Strategy X has 75% WR — lean in", "Risk gate Y blocked 4 winners" |
+
+Backend: `backend/apps/portfolio/services/monthly_report.py` builds the full payload from `Position`, `TradeJournal`, `SignalLog`, `AuditLog`, and the `Candle` table. Cached 120s.
+
+_The Library is what makes this trading desk a learning system instead of a one-way pipe. Every month, it tells you what worked, what didn't, and what your @RiskGuard let through that it shouldn't have (or blocked that it shouldn't have)._
+
+---
+
+## Floor 7 — THE PYRAMID ROOM (Aggressive Options Pyramiding)
+
+A small, focused room on the 7th floor. One desk, three giant screens. The sign on the door reads:
+
+> **PYRAMID STRATEGY**
+> _Aggressive momentum pyramiding on options_
+
+This room is where small initial bets become big winning ones — by adding to winners only when structure confirms it.
+
+### The Three Underlyings
+
+A live ticker runs across the top of the room, always visible:
+
+```
+NIFTY 50    24,265   +0.42%
+BANK NIFTY  55,140   +0.18%
+SENSEX      80,210   +0.31%
+```
+
+(Sourced from `useMarketPulse()` → `quotes.indices_in`. Index metadata — lot sizes, expiry days, exchange — comes from `frontend/src/lib/market-config.ts`, the single source of truth.)
+
+### The Strategy Engine
+
+`trading/pyramid/strategy.py` — pure deterministic Python, no LLM. Processes 5-minute option candles bar-by-bar.
+
+**Entry (initial)**:
+- close > EMA5 (price above fast trend)
+- close > BB middle (above mean)
+- RSI > RSI_EMA3 (momentum up)
+- RSI > 50 (bullish zone)
+- RSI > RSI_WMA21 (above slow trend)
+- SL distance ≤ `max_risk_pct_of_price` (default 50% — wide enough for SENSEX premiums)
+
+**Sizing**: `init_lots = max_risk / (risk_per_lot × lot_size)` where `max_risk = capital × initial_risk_pct`.
+
+**Pyramid adds (up to 5)**:
+- Unrealized profit > `min_profit_to_pyramid × current_lots`
+- Higher-low pivot above current avg entry
+- Price still above EMA5
+- RSI > 45 (not bearish)
+- Cooldown: 5 bars since last add
+
+**Trail SL**:
+- Activates after +1R profit
+- Method 1: floor of last 3 completed candle lows (ratchet up only)
+- Method 2: higher-low detection (strongest signal)
+
+**Exits**:
+- Trail SL hit
+- EOD at 15:20 IST
+
+### The Three Indices, The Three Lot Sizes (Jan 2026+)
+
+| Index | Lot | Weekly expiry | Exchange | Notes |
+|-------|-----|---------------|----------|-------|
+| NIFTY | **65** | Tuesday | NSE (NFO) | Was 75 before Jan 2026 — NSE circular FAOP70616 |
+| BANKNIFTY | **30** | Last Tuesday (monthly only) | NSE (NFO) | No weekly contracts |
+| SENSEX | **20** | Thursday | BSE (BFO) | Different segment from NIFTY/BANKNIFTY |
+
+When the user clicks NIFTY/BANKNIFTY/SENSEX in the UI, lot size and next expiry auto-populate. The expiry computation respects the post-Sep-2025 SEBI standardisation (NSE→Tuesday, BSE→Thursday).
+
+### The KPI Wall
+
+Above the desk, nine large dials:
+
+| KPI | Formula |
+|-----|---------|
+| Total P&L | Sum of all leg P&Ls in INR |
+| P&L (points) | Same in option points |
+| **Capital Deployed** | avg_entry × total_lots × lot_size — premium paid |
+| **ROI** | total_pnl / capital_deployed × 100 |
+| **Initial Risk** | (entry₀ − sl₀) × lots₀ × lot_size — max loss on first entry |
+| Peak Unrealized | Best mark-to-market gain |
+| Final / Peak Lots | Where the position landed vs how big it got |
+| Pyramids | Number of add-ons (0..5) |
+| Avg Entry | Weighted-average fill price |
+
+### The Live Mode (planned)
+
+A "Go Live" button next to "Run Backtest" — when clicked, spawns a `PyramidExecutor` that monitors live candles, places real orders via `BrokerService.place_order(exchange="NFO"|"BFO", product_type="CARRYFORWARD")`, and persists to a `PyramidPosition` model. Same paper/live toggle as the rest of the system. Status broadcasts via `ws/pyramid/{position_id}/`.
+
+_The pyramid room is where AlphaDesk admits that asymmetric returns require asymmetric position sizing. Most days you take a small loss or small win. The pyramid days are where the year is made — but only if the structure confirms every add._
 
 ---
 
@@ -387,6 +541,31 @@ Before planning a trade:
 
 _The AI learns from its own history. If it lost 3 times on HDFCBANK with the same setup, it sees that. "Don't repeat losing patterns."_
 
+### Corridor 6: The Feedback Loop (every signal → Library → next month's planning)
+
+```
+Floor 3/5 (Trading Floor / Screener)
+  signal fires
+    ↓
+  SignalLog.objects.create(...)        [non-blocking, every signal]
+    ↓
+  EOD: enrich_signals command
+    fetches intraday candles
+    → max_favorable_move, max_adverse_move, eod_price filled
+    → outcome PENDING → EXPIRED (if no trade)
+    → trade_journal FK linked (if there was a trade)
+    ↓
+  Floor 6.5 (Library) — Monthly Feedback Report
+    capture_matrix per stock: market move % vs P&L captured
+    signal_audit: by outcome, by source, by strategy
+    rejections: what @RiskGuard blocked + would it have profited?
+    lessons: AI insights from the month
+    ↓
+  Trader reads /monthly → adjusts thresholds, disables weak strategies, promotes strong ones
+```
+
+_This corridor is what turns AlphaDesk from a one-way trade pipe into a learning system. Every signal — taken or not — leaves a paper trail. At month-end, the trader sees not just "what I earned" but "what I left on the table" and "what gates blocked winners". The RAG loop (Corridor 5) is short-term memory; the feedback loop (Corridor 6) is long-term pattern recognition._
+
 ---
 
 ## The Basement — THE DATA PIPES (Angel One SmartAPI)
@@ -400,18 +579,68 @@ Below the vault, a machine room hums. `BrokerClient` — a process-wide singleto
 - **2-retry backoff** on candle fetches
 
 ### Key Tokens (engraved on the pipes)
-| Instrument | Token |
-|-----------|-------|
-| NIFTY | 99926000 |
-| BANKNIFTY | 99926009 |
-| India VIX | 99926017 |
+| Instrument | Token | Exchange |
+|-----------|-------|----------|
+| NIFTY | 99926000 | NSE (NFO for options) |
+| BANKNIFTY | 99926009 | NSE (NFO for options) |
+| SENSEX | 99919000 | BSE (BFO for options) |
+| India VIX | 99926017 | NSE |
+
+### The Two Option Segments
+
+A pivotal detail: NIFTY and BANKNIFTY options trade on **NSE's NFO segment**. SENSEX options trade on **BSE's BFO segment**. The symbol formats differ:
+
+| Exchange | Format | Example |
+|----------|--------|---------|
+| NFO | `{NAME}{DDMMMYY}{STRIKE}{TYPE}` | `NIFTY13MAY2624200CE` |
+| BFO | `{NAME}{YMMDD}{STRIKE}{TYPE}` | `SENSEX2650778000CE` (Y=26, M=5, DD=07) |
+
+`ticker_service` indexes both segments under `_nfo_by_key`. Option lookup matches by **strike from the instrument's `strike` metadata field** (in paisa: 78000 → 7800000.0) and **expiry date from `expiry` metadata** — never by substring search on the symbol (which would false-positive across the BFO date encoding).
 
 ### Data Methods
 - `ltpData` → single LTP (cached)
 - `getMarketData(mode, tokens)` → batch OHLC/FULL/LTP (50 at a time)
-- `getCandleData` → OHLCV candles (1m through 1d)
+- `getCandleData` → OHLCV candles (1m through 1d). For BSE options, pass `exchange="BFO"`.
 - `optionGreek` → real IV/delta/gamma (market hours only)
 - `rmsLimit` → real margin/capital from broker
+
+---
+
+## The Annex — THE V2 BACKEND WING (Multi-Tenant API)
+
+Adjacent to the main tower, connected by a glass walkway, sits a newer building: the v2 backend. Same address, different architecture. Built for multi-tenant operation, async order execution, and clean app-by-app boundaries.
+
+### The Floor Plan (`backend/apps/`)
+
+| App | Responsibility |
+|-----|----------------|
+| `accounts`, `tenants` | Auth + tenant scoping; JWT carries `tenant_id` claim |
+| `broker` | Broker connection records (paper / Angel One / Zerodha) |
+| `portfolio` | Portfolios, positions, snapshots, **monthly feedback report** |
+| `orders` | Order placement with outbox pattern, idempotency, async fills |
+| `market_data` | Symbols, candles, market pulse, sector rotation, shortlist |
+| `strategies` | Strategy registry + plugin discovery (entry-points) |
+| `agents_core` | Agent run logs + WebSocket consumer for live event stream |
+| `rag` | Retriever / Embedder / VectorStore interfaces + registry |
+| `journals` | Journal entries linked to portfolio + agent_run + order |
+| `notifications` | Alert delivery (in-app, email, Telegram, webhook) |
+| `legacy` | Bridge endpoints into the existing `trading/` app — pyramid view, screener, straddle |
+| `billing` | Plans, subscriptions, entitlements |
+| `common` | Middleware, tenancy mixin, db_router, permission classes |
+
+### The DB Router
+
+A clever piece of plumbing: `apps.common.db_router.LegacyRouter` pins all `trading.*` ORM operations to the `legacy` SQLite alias, while the v2 stack runs on Postgres. Result: the React UI shows **real numbers from 700+ existing TradeJournal rows immediately**, without a schema migration. In dev, both DBs are the same SQLite file (single process). In prod, the legacy app runs on its own port (8001) and the v2 app runs on 8000 (Postgres).
+
+### The Outbox Pattern
+
+`POST /api/v1/orders/` doesn't talk to the broker directly. It writes an `Order` row + an `OutboxEvent` row in a single transaction (status=QUEUED), responds 202, and returns. A Celery worker picks up the OutboxEvent and routes the order through `BrokerService.place_order()`. Failures are retryable, and idempotency keys prevent duplicate fills.
+
+### The WebSocket Bus
+
+`/ws/ticks/` — live LTP fan-out. Frontend subscribes to symbols, backend filters by per-tenant subscription set.
+`/ws/agent/{run_id}/` — live token stream from a running agent.
+Auth is via JWT in the `Sec-WebSocket-Protocol` subprotocol header (the only way browsers can pass auth on WS).
 
 ---
 
@@ -454,6 +683,10 @@ When you need to recall something fast, picture:
 | Theta decay | An **ice cube** melting — every minute that passes without NIFTY moving is money in your pocket |
 | The 3 floors of decision | **Swing (weeks) → Premarket (day) → Intraday (minutes)** — telescope → binoculars → microscope |
 | The audit trail | A **CCTV camera** in every room — nothing happens unrecorded |
+| Pyramid sizing | A **stack of poker chips** doubling at each higher-low confirmation — not on hope, on structure |
+| The Library (Floor 6.5) | A **leather-bound monthly ledger** — every signal recorded, every rejection reviewed in hindsight |
+| BFO vs NFO | Two **different colored pipes** in the basement — orange for NFO (NIFTY/BANKNIFTY), blue for BFO (SENSEX) |
+| The market-config seam | A single **brass plaque** on the wall: NIFTY=65, BANKNIFTY=30, SENSEX=20 — never written elsewhere |
 
 ---
 
@@ -479,7 +712,11 @@ _15:15_ — Intraday monitor stops. Trade Manager closes any remaining positions
 
 _15:30_ — Daily review. P&L tallied. TradeJournal updated. PortfolioSnapshot saved. AuditLog complete.
 
+_15:35_ — `enrich_signals` runs. The Librarian (Floor 6.5) walks the day's SignalLog entries, fetches intraday candles, and stamps each with what the market actually did. Skipped signals get marked EXPIRED with their max_favorable_move recorded. Risk-rejected signals get linked to their TradeJournal entry. The Library now has a complete record of every opportunity — taken or not.
+
 _Evening_ — Swing scanner runs. The wheel rotates. Tomorrow's universe narrows.
+
+_End of month_ — You climb to the Library (Floor 6.5). Open `/monthly` in the React UI. The Capture Rate Matrix tells you which stocks moved without you. The Risk Rejections card tells you what @RiskGuard blocked that would have made money. The lessons panel suggests which strategies to lean into and which to disable. You adjust thresholds. The system gets a little smarter.
 
 _You take the elevator down, walk past the vault. The daily loss is within 3%. The capital is intact. @RiskGuard nods. You leave the building. Come back tomorrow._
 

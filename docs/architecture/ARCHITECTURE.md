@@ -1,8 +1,10 @@
 # AlphaDesk — System Architecture
 
-Status: **Draft v1** (2026-04)
+Status: **v2** (2026-05) — implemented (in dev), prod target
 Owner: Platform Eng
 Audience: engineering, infra, security, investor due-diligence
+
+> **Reading order:** This is the formal spec. For the spatial mental model see `docs/MIND_PALACE.md`. For onboarding setup see `README.md`. For per-app details see `docs/architecture/BACKEND_STRUCTURE.md`.
 
 ---
 
@@ -22,26 +24,27 @@ Audience: engineering, infra, security, investor due-diligence
                               ▼
 ┌──────────────────────────────────────────────────────────────┐
 │           API Edge — ALB + WAF + Cognito authorizer           │
-└──────────────┬─────────────────────────────┬──────────────────┘
-               │                             │
-               ▼                             ▼
-   ┌─────────────────────┐        ┌────────────────────────┐
-   │ Django REST (Uvicorn)│◀──────▶│ Django Channels (WS)   │
-   │  ECS Fargate task    │        │ ECS Fargate task       │
-   └─────────┬────────────┘        └──────────┬─────────────┘
-             │                                │
-             ▼                                │
-   ┌────────────────────┐                     │
-   │ Celery workers     │◀────── Redis ──────▶│
-   │ + beat (ECS)       │                     │
-   └─┬──────────────────┘                     │
-     │                                        │
-     ▼                                        │
- ┌───────────────┐   ┌────────────┐   ┌──────────────────┐
- │ RDS Postgres  │   │ S3 (audit, │   │ Angel One / Zerodha │
- │ (pgvector)    │   │  exports)  │   │ Kite / Fyers APIs   │
- └───────────────┘   └────────────┘   └──────────────────┘
+└──┬──────────────────────────────────────┬────────────────────┘
+   │                                      │
+   ▼                                      ▼
+┌─────────────────────────┐     ┌─────────────────────────┐
+│  v2 Django REST + WS    │     │  Legacy bridge (Django)  │
+│  (ECS Fargate, port 8k) │     │  (ECS Fargate, port 8001)│
+│  Postgres + Redis       │     │  SQLite (read-mostly)    │
+│  Multi-tenant, JWT      │     │  TradeJournal, AuditLog, │
+│  Outbox + Celery worker │     │  SignalLog, Straddle,    │
+└─┬───────────────────────┘     │  Pyramid view, screener  │
+  │                              └────────────┬────────────┘
+  │ DB router (apps.common.db_router)         │
+  └─────────────────┬───────────────────────────┘
+                    ▼
+         ┌────────────────────────┐
+         │ Angel One / BSE feeds  │
+         │ Telegram alerts        │
+         └────────────────────────┘
 ```
+
+The system runs as **two cooperating Django processes** in production. The v2 stack owns auth, tenants, orders, positions, and the monthly report. The legacy bridge owns 700+ rows of TradeJournal data, the screener engine, the straddle/pyramid management commands, and direct broker connectivity. The frontend talks to both — v2 by default, legacy via `/api/v1/legacy/*` (proxied in dev, separate ALB target group in prod).
 
 ## 2. Logical components
 
@@ -56,19 +59,36 @@ Audience: engineering, infra, security, investor due-diligence
 
 | App | Responsibility |
 |-----|----------------|
-| `accounts` | Users, passwords, MFA, sessions |
-| `tenants` | Organization / workspace isolation (row-level) |
+| `accounts` | Users, passwords, MFA, sessions, JWT obtain/refresh with tenant_id claim |
+| `tenants` | Organization / workspace isolation (row-level via TenantModel mixin) |
 | `broker` | Broker account links, credential vault, token refresh |
-| `market_data` | Symbol master, LTP, candles, VIX, options chain cache |
-| `portfolio` | Holdings, capital, snapshots, P&L |
-| `orders` | Order DSL, validation, execution, outbox pattern |
-| `strategies` | Strategy definitions (DSL + Python plugins), backtests |
-| `agents_core` | Agent base classes, registry, LangGraph builder |
-| `rag` | Retriever/Embedder/VectorStore interfaces + registry |
-| `journals` | Immutable decision journal |
-| `audit` | Security audit log (non-blocking) |
+| `market_data` | Symbol master, candles, **MarketPulseView**, **SectorRotationView**, **ShortlistView** |
+| `portfolio` | Portfolios, Positions, Snapshots, **MonthlyReportView** (capture matrix, signal audit, rejections, equity curve, analytics, benchmark, lessons) |
+| `orders` | Order model, outbox + idempotency, async fills via Celery |
+| `strategies` | Strategy definitions, plugin discovery via entry-points |
+| `agents_core` | AgentRun, AgentStep, WebSocket consumer for live token streams |
+| `rag` | Retriever/Embedder/VectorStore interfaces + registry, pgvector backend |
+| `journals` | JournalEntry linked to portfolio + agent_run + order |
 | `notifications` | Email, Telegram, in-app, webhooks |
-| `billing` | Stripe / Razorpay, plan enforcement, entitlements |
+| `billing` | Plan / Subscription / entitlements, Razorpay |
+| `legacy` | **Bridge** to legacy `trading/` app — pyramid view, screener view, straddle endpoints |
+| `common` | Middleware (tenant resolution), TenantModel base, db_router (legacy alias) |
+
+### 2.2b Legacy app (`trading/`) — read-mostly + strategy engine
+
+The legacy Django app is preserved verbatim. It owns:
+- `models.py` — TradeJournal, StraddlePosition, AuditLog, **SignalLog** (NEW), WatchlistEntry, PortfolioSnapshot, SystemControl
+- `services/` — **broker_service** (paper + live, NSE/NFO/BFO), **risk_engine** (10-criteria), **ticker_service** (symbol master with NFO + BFO indexing), **data_service** (candles + intraday cache)
+- `agents/planner.py` — @DirectionalTrader (LLM)
+- `graph/trading_graph.py` — Equity LangGraph workflow
+- `options/straddle/` — Short straddle lifecycle (LangGraph)
+- **`pyramid/`** (NEW) — Pure-Python pyramid options strategy
+- **`screener/`** (NEW) — Live intraday opportunity detector
+- **`swing/`** (NEW) — Oliver Kell daily/weekly cycle scanner
+- **`basket/`** (NEW) — Premarket basket builder
+- **`backtester/`** (NEW) — Generic v2 backtest engine
+
+The DB router (`apps.common.db_router.LegacyRouter`) pins `trading.*` ORM ops to the `legacy` SQLite alias when configured. In dev it's a single SQLite file; in prod each Django process runs against its own DB.
 
 ### 2.3 Agentic RAG plugin system
 See `ADR-0002`. Strategies and retrievers are loaded from entry-points. A strategy
@@ -76,10 +96,13 @@ ships as a package implementing `AlphaStrategy`, a retriever ships as `Retriever
 Core never imports a strategy directly.
 
 ### 2.4 Real-time layer
-Channels + Redis pub/sub + ASGI. See `ADR-0003`. Three channel groups:
-- `tenant.{id}.ticks` — market data fan-out
+Channels + Redis pub/sub + ASGI. See `ADR-0003`. Channel groups:
+- `tenant.{id}.ticks` — market data fan-out (per-tenant subscription set)
 - `tenant.{id}.pnl`   — P&L updates (1s throttle)
 - `tenant.{id}.agent.{run_id}` — streamed tokens from a running agent
+- `pyramid.{position_id}` — pyramid execution status (planned)
+
+WebSocket auth: JWT in `Sec-WebSocket-Protocol` subprotocol header (the only browser-supported way to pass auth on WS).
 
 ### 2.5 Execution layer
 Saga + Outbox. See `ADR-0004`. Orders never go directly to the broker from a web request —
@@ -88,18 +111,54 @@ and auditable.
 
 ## 3. Data model highlights
 
+### v2 (Postgres, multi-tenant)
+
 ```
 User ──owns──▶ Membership ──of──▶ Tenant ──has──▶ Portfolio
                                       │             │
                                       ├─▶ BrokerLink
                                       ├─▶ Strategy ──▶ Backtest
-                                      ├─▶ Position ──▶ Trade ──▶ Journal
+                                      ├─▶ Position (with exit_price, realized_pnl, exchange)
+                                      ├─▶ Order ──▶ OutboxEvent
                                       ├─▶ AgentRun ──▶ AgentStep
-                                      └─▶ AuditEvent
+                                      └─▶ JournalEntry, AuditEvent
 ```
 
-All tenant-owned tables have `tenant_id` indexed; DRF permission class enforces
-`queryset.filter(tenant_id=request.tenant_id)`.
+All tenant-owned tables have `tenant_id` indexed via `TenantModel`; DRF permission class enforces `queryset.filter(tenant=request.tenant)`.
+
+### Legacy (SQLite, single-user)
+
+```
+TradeJournal ──┐
+              ├──▶ AuditLog (LLM prompts, risk decisions, executions)
+SignalLog ────┤    [NEW] Every screener/scanner signal — outcome tracked
+              │
+StraddlePosition (CE + PE legs, management_log JSONField)
+WatchlistEntry (premarket scans + outcome: WATCHING/TRIGGERED/TRADED/SKIPPED)
+PortfolioSnapshot (point-in-time capital + day_pnl)
+SystemControl (PAUSE_AI flag, FORCE_CLOSE_ALL, etc.)
+```
+
+### The Feedback Loop (cross-cutting)
+
+```
+Screener/Scanner fires → SignalLog row (PENDING)
+                            ↓
+                 enrich_signals (EOD job)
+                  → fetches candles
+                  → max_favorable_move + max_adverse_move + eod_price
+                  → outcome: TRADED / REJECTED / SKIPPED / EXPIRED
+                  → trade_journal FK linked
+                            ↓
+              MonthlyReportView aggregates:
+                  • Capture rate per stock
+                  • Signal audit (by source, by strategy)
+                  • Rejection review (with hindsight)
+                  • Equity curve + drawdown
+                  • Time-of-day / day-of-week / sector
+                  • Benchmark vs NIFTY50
+                  • AI lessons
+```
 
 ## 4. Request lifecycles
 
@@ -117,6 +176,19 @@ All tenant-owned tables have `tenant_id` indexed; DRF permission class enforces
 2. Publishes to Redis channel `ticks.{exchange}.{token}`.
 3. Fanout worker matches subscribers (per-tenant) and publishes to
    `tenant.{t}.ticks` — FE sockets receive only their tenant's subset.
+
+### 4.3 Monthly feedback report
+1. User opens `/monthly` in the React UI.
+2. FE GETs `/api/v1/portfolios/monthly/` (optionally `?month=2026-04`).
+3. `MonthlyReportView` calls `build_monthly_report(tenant, portfolio, month)`.
+4. Service queries Position (v2 Postgres) + TradeJournal/SignalLog/AuditLog (legacy SQLite) and aggregates into a single payload: month groups, YTD, capture matrix, signal audit, rejections, equity curve, analytics, benchmark vs NIFTY50, and rule-based lessons.
+5. Cached 120s in Django cache (memory in dev, Redis in prod).
+6. Mock-mode toggle on the page lets the trader compare against synthetic baseline data.
+
+### 4.4 Pyramid backtest (current) / live (planned)
+1. User configures strike, type, underlying, capital, risk %, etc. on `/pyramid`.
+2. Backtest path: FE GETs `/api/v1/legacy/pyramid/` — backend resolves the option symbol via `ticker_service.get_nfo_options()`, fetches 5-min candles from Angel One (NFO or BFO), runs `run_pyramid_with_chart_data()`, returns chart-ready candles + entries + trail SL + KPIs.
+3. Live path (planned): FE POSTs `/api/v1/legacy/pyramid/live/` → spawns a `PyramidExecutor` in a daemon thread → executor monitors live candles, calls `BrokerService.place_order()` for entries/pyramids/exits, persists to `PyramidPosition`, broadcasts status via `pyramid.{position_id}` channel group.
 
 ## 5. Security
 
@@ -169,17 +241,41 @@ Sizing assumption: 2× `c6i.large` ECS tasks for REST, 2× for WS, 4× workers, 
 
 ## 9. Migration plan from current repo
 
-| Phase | Change | Breakage |
-|-------|--------|----------|
-| 1 | New `backend/` tree stood up in parallel. Old `trading/`, `config/` untouched. | None |
-| 2 | Shared domain code (agents, risk_engine, analyzer) moved under `backend/apps/…` and imported from old code via shim. | None |
-| 3 | New DRF endpoints + WS live; old CLI commands kept functional. | None |
-| 4 | Frontend consumes new API; old dashboard.py deprecated. | Dashboard UI |
-| 5 | Delete old tree after 30-day freeze. | Removed scripts |
+| Phase | Change | Status (2026-05) |
+|-------|--------|------------------|
+| 1 | New `backend/` tree stood up in parallel. Old `trading/`, `dashboard.py` untouched. | ✅ Done |
+| 2 | Legacy bridge (`apps.legacy`) exposes existing data + screener/pyramid views via DRF. | ✅ Done |
+| 3 | New DRF endpoints (auth, portfolio, monthly, market_data) + WS live; old CLI commands kept functional. | ✅ Done |
+| 4 | Frontend consumes new API. Both v2 (port 8000) and legacy bridge (port 8001) served. | ✅ Done — React UI parity with Streamlit for trader-facing views |
+| 5 | Streamlit deprecated for trader use; kept for ops/debugging. | 🟡 In progress |
+| 6 | Migrate strategy engines (`pyramid/`, `screener/`, `swing/`) into `backend/apps/strategies/` plugins. | ⏳ Planned |
+| 7 | Delete legacy bridge after 30-day no-regression freeze. | ⏳ Planned |
 
-## 10. Open questions / risks
+The current shape is **dual-Django** (v2 + legacy). This is intentional and stable — it lets us ship the React UI immediately on top of 700+ existing TradeJournal rows without forcing a schema rewrite.
+
+## 10. Index metadata + exchange routing (added 2026-05)
+
+A subtle but important architectural choice: index options trade on two different exchanges with different symbol formats. The system handles this in three places:
+
+| Concern | Source of truth | Notes |
+|---------|----------------|-------|
+| Lot sizes, expiry weekdays, tokens | `frontend/src/lib/market-config.ts` | Frontend imports `INDICES`, `getLotSize`, `getExpiryWeekday`. Mirror constants exist in `trading/utils/expiry_utils.py` for backend fallback. |
+| NFO vs BFO indexing | `trading/services/ticker_service.py` | `_nfo_by_key` indexes both NFO + BFO instruments. `get_nfo_options()` matches by **strike in paisa** (78000 → 7800000.0) and **expiry date metadata**, not by substring search on the symbol (which would false-positive across BSE date encoding). |
+| Order placement exchange | `trading/services/broker_service.py` + caller | Caller passes `exchange="NFO"` for NIFTY/BANKNIFTY, `exchange="BFO"` for SENSEX, `exchange="NSE"` for equity. `product_type="CARRYFORWARD"` for options. |
+
+**Symbol formats:**
+- NFO: `{NAME}{DDMMMYY}{STRIKE}{TYPE}` — e.g. `NIFTY13MAY2624200CE`
+- BFO: `{NAME}{YMMDD}{STRIKE}{TYPE}` — e.g. `SENSEX2650778000CE` (Y=26, M=5, DD=07)
+
+**Lot sizes (Jan 2026+, NSE circular FAOP70616):** NIFTY=65, BANKNIFTY=30, SENSEX=20.
+**Expiry days (post Sep-2025 SEBI standardisation):** NSE=Tuesday, BSE=Thursday. BANKNIFTY no longer has weekly contracts (last Tuesday of month only).
+
+## 11. Open questions / risks
 
 - **Broker WS fan-out cost at 10k tenants** — may need Kinesis Data Streams in front.
 - **pgvector vs. dedicated store (Qdrant/Weaviate)** — starting with pgvector to reduce ops; reassess at 5M embeddings.
 - **LLM cost control** — per-tenant token budget + aggressive caching of prompts.
 - **Regulatory posture** — decide whether we register as SEBI Investment Advisor (IA) or stay execution-only platform. Affects copy in UI (no "recommendations", use "analyses").
+- **Dual-Django prod deployment** — running v2 (Postgres) alongside legacy bridge (SQLite) on separate ECS tasks works, but doubles the infra footprint. Migration phase 6 collapses this once strategies move into v2 plugins.
+- **SignalLog volume** — ~50 signals/day × 250 trading days = ~12k rows/year. Fine for SQLite. If we move to live multi-tenant, partition by tenant + month.
+- **Pyramid live execution** — currently CLI-only via `manage.py run_pyramid`. The UI "Go Live" wiring (background thread executor + WebSocket status broadcast) is planned but not yet implemented.
