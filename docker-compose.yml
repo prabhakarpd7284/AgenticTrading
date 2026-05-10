@@ -1,0 +1,86 @@
+version: "3.9"
+
+# Local dev stack. Same compose file drives the Stage-1 single-EC2 deploy
+# with an overlay file (docker-compose.prod.yml) that points to images in ECR.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: alphadesk
+      POSTGRES_PASSWORD: alphadesk
+      POSTGRES_DB: alphadesk
+    ports: ["5436:5432"]
+    volumes: ["pgdata:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U alphadesk"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  backend:
+    build:
+      context: .
+      dockerfile: docker/backend.Dockerfile
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.dev
+      DATABASE_URL: postgres://alphadesk:alphadesk@postgres:5432/alphadesk
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      DJANGO_SECRET_KEY: dev-change-me
+      DEBUG: "1"
+      ALLOWED_HOSTS: "*"
+      CORS_ALLOWED_ORIGINS: "http://localhost:5173"
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis:    { condition: service_healthy }
+    command: >
+      sh -c "python manage.py migrate &&
+             daphne -b 0.0.0.0 -p 8000 config.asgi:application"
+    ports: ["8000:8000"]
+    volumes: ["./backend:/app"]
+
+  worker:
+    build:
+      context: .
+      dockerfile: docker/worker.Dockerfile
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.dev
+      DATABASE_URL: postgres://alphadesk:alphadesk@postgres:5432/alphadesk
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+    depends_on: [backend]
+    volumes: ["./backend:/app"]
+
+  beat:
+    build:
+      context: .
+      dockerfile: docker/worker.Dockerfile
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.dev
+      DATABASE_URL: postgres://alphadesk:alphadesk@postgres:5432/alphadesk
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+    command: ["celery", "-A", "config", "beat", "-l", "info"]
+    depends_on: [backend]
+    volumes: ["./backend:/app"]
+
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/frontend.Dockerfile
+    ports: ["5173:80"]
+    depends_on: [backend]
+
+volumes:
+  pgdata:
