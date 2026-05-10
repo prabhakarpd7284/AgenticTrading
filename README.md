@@ -21,10 +21,19 @@ NIFTY · BANKNIFTY · SENSEX  →  Screener / Scanner  →  @RiskGuard  →  Bro
 
 ## Quick Start (Local Dev)
 
+> **TL;DR**: 3 terminals. (1) `python manage.py runserver 8001` — legacy bridge. (2) `cd backend && python manage.py runserver 8000` — v2 API. (3) `cd frontend && npm run dev` — UI on :5173.
+>
+> Or just run `docker compose -f docker-compose.local.yml up` and skip the next 5 sections.
+
 ### Prereqs
-- Python 3.12+
-- Node 20+
-- Angel One SmartAPI credentials (for live data; paper mode works without)
+
+| Tool | Version | Notes |
+|------|---------|-------|
+| Python | 3.12+ | `python --version` |
+| Node | 20+ | `node --version` |
+| (optional) Postgres | 14+ | dev defaults to SQLite — only needed for v2 prod parity |
+| (optional) Redis | 7+ | only needed if you run Celery workers locally |
+| (optional) Angel One SmartAPI creds | — | paper mode works without; live mode needs them |
 
 ### 1. Clone + secrets
 
@@ -32,30 +41,46 @@ NIFTY · BANKNIFTY · SENSEX  →  Screener / Scanner  →  @RiskGuard  →  Bro
 git clone https://github.com/prabhakarpd7284/AgenticTrading.git
 cd AgenticTrading
 
-# Set up your .env files (NEVER commit these)
+# Copy the three env templates (these files are gitignored)
 cp .env.example .env
 cp backend/.env.example backend/.env
 cp frontend/.env.example frontend/.env.local
 
-# Edit each .env to fill in your credentials
+# Edit each .env to fill in real values:
+#   .env                — SmartAPI creds, Telegram tokens (optional for paper)
+#   backend/.env        — DJANGO_SECRET_KEY, DATABASE_URL, REDIS_URL, ANTHROPIC_API_KEY
+#   frontend/.env.local — leave defaults for local dev
 ```
 
-### 2. Trading core (legacy Django + Streamlit)
+> **Tip**: For the fastest first run, leave `backend/.env` defaults — it'll fall back to SQLite and an in-memory cache. You can wire up Postgres/Redis later.
+
+### 2. Trading core (legacy Django + Streamlit) — port 8001
 
 ```bash
 # In project root
 python -m venv .venv
-source .venv/bin/activate
+source .venv/bin/activate           # Windows: .venv\Scripts\activate
 pip install -e .
 
-# Database
+# Migrate (creates db.sqlite3 in repo root)
 python manage.py migrate
 
-# Streamlit dashboard
-streamlit run dashboard.py
+# One-time seed data
+python manage.py run_trading_agent --seed-strategies
+python manage.py run_trading_agent --init-portfolio 500000
+
+# Run the legacy Django bridge (REQUIRED for the React UI's pyramid + screener pages)
+python manage.py runserver 0.0.0.0:8001
 ```
 
-### 3. v2 Backend (Django REST + WebSocket)
+(Optional, in another terminal) — operator dashboard:
+```bash
+streamlit run dashboard.py        # opens http://localhost:8501
+```
+
+**Verify**: `curl http://localhost:8001/api/v1/legacy/portfolio/` should return JSON.
+
+### 3. v2 Backend (Django REST + WebSocket) — port 8000
 
 ```bash
 cd backend
@@ -63,15 +88,21 @@ python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements/dev.txt
 python manage.py migrate
-python manage.py runserver 0.0.0.0:8000
+python manage.py createsuperuser    # for /admin and JWT login
 
-# In another shell — Celery worker for async order execution
+# Run the v2 API
+python manage.py runserver 0.0.0.0:8000
+```
+
+(Optional, in another terminal) — Celery worker (only needed if you place real orders or run agents):
+```bash
+cd backend && source .venv/bin/activate
 celery -A config worker -Q default,agents,orders -l info
 ```
 
-API docs: http://localhost:8000/api/docs/
+**Verify**: API docs at http://localhost:8000/api/docs/ should load.
 
-### 4. Frontend (React SPA)
+### 4. Frontend (React SPA) — port 5173
 
 ```bash
 cd frontend
@@ -79,15 +110,38 @@ npm install
 npm run dev
 ```
 
-Opens at http://localhost:5173. Vite proxies `/api/v1/legacy/*` → port 8001 (legacy bridge), everything else → port 8000 (v2 backend).
+Opens at **http://localhost:5173**. Vite proxies:
+- `/api/v1/legacy/*` → port 8001 (legacy bridge)
+- `/api/v1/*` → port 8000 (v2 API)
+- `/ws/*` → port 8000 (WebSocket)
 
-### 5. Optional — Docker Compose (full stack in one command)
+**Verify**: visit http://localhost:5173 — should redirect to login. Sign up, log in, and you should land on the Market Pulse page.
+
+### 5. (Recommended) Docker Compose — everything in one command
+
+If juggling 3-4 terminals isn't your thing:
 
 ```bash
 docker compose -f docker-compose.local.yml up
 ```
 
-Brings up Postgres, Redis, backend, worker, frontend, and the legacy bridge.
+Brings up Postgres, Redis, the legacy bridge (port 8001), the v2 backend (port 8000), the Celery worker, and the frontend (port 5173) — wired together. First run takes a few minutes to build images.
+
+To stop and remove containers + volumes:
+```bash
+docker compose -f docker-compose.local.yml down -v
+```
+
+### 6. Common first-run issues
+
+| Symptom | Cause | Fix |
+|--------|-------|-----|
+| `/monthly` says "Couldn't load monthly view (500)" | v2 backend stale code or missing user portfolio | Restart backend; the view auto-creates a default portfolio on first hit |
+| `/pyramid` says "No option candles found for SENSEX..." | SmartAPI not logged in | Set valid `SMARTAPI_*` in `.env` and restart backend; or toggle to mock data |
+| Frontend 401 errors | JWT expired / not logged in | Sign up at `/signup` and log in at `/login` |
+| `pip install -e .` fails | Wrong Python version | Verify `python --version` is 3.12+ |
+| `npm run dev` proxy errors | Backend not running | Start ports 8000 and 8001 (steps 2 + 3) |
+| Pyramid "0 entries" on real data | Risk filter too tight | Increase `max_risk_pct_of_price` in `PyramidConfig` (default 0.50 = 50%) |
 
 ---
 
