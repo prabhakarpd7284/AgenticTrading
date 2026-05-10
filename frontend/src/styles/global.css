@@ -1,0 +1,9 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root { color-scheme: dark; }
+
+body { font-feature-settings: "ss01", "cv11"; }
+
+.num { font-variant-numeric: tabular-nums; }
