@@ -1,0 +1,11 @@
+-r base.txt
+pytest>=8.2
+pytest-django>=4.8
+pytest-asyncio>=0.23
+pytest-cov>=5.0
+factory-boy>=3.3
+ruff>=0.5
+mypy>=1.10
+django-stubs>=5.0
+ipython>=8.25
+schemathesis>=3.30
