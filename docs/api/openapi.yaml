@@ -1,0 +1,247 @@
+openapi: 3.0.3
+info:
+  title: AlphaDesk API
+  description: |
+    REST API for AlphaDesk — AI-assisted trading desk.
+    Authenticate with JWT (`Authorization: Bearer <token>`). JWT carries `tenant_id`.
+    All error responses use `application/problem+json` (RFC 7807).
+  version: 1.0.0
+servers:
+  - url: https://api.alphadesk.ai/api/v1
+  - url: http://localhost:8000/api/v1
+
+security:
+  - bearerAuth: []
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    Problem:
+      type: object
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+    User:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: string, format: email }
+        full_name: { type: string }
+    Portfolio:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        capital: { type: number }
+        day_pnl: { type: number }
+        mode: { type: string, enum: [paper, live] }
+    OrderDraft:
+      type: object
+      required: [portfolio_id, symbol, side, qty]
+      properties:
+        portfolio_id: { type: string, format: uuid }
+        symbol: { type: string }
+        side: { type: string, enum: [BUY, SELL] }
+        qty: { type: integer, minimum: 1 }
+        order_type: { type: string, enum: [MARKET, LIMIT, SL, SL-M], default: MARKET }
+        product: { type: string, enum: [INTRADAY, DELIVERY, CARRYFORWARD] }
+        price: { type: number }
+        sl: { type: number }
+        tp: { type: number }
+    OrderResult:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        status: { type: string }
+    AgentRun:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        strategy_name: { type: string }
+        strategy_version: { type: string }
+        portfolio: { type: string, format: uuid }
+        config: { type: object }
+        status: { type: string, enum: [queued, running, succeeded, failed, cancelled] }
+        result: { type: object, nullable: true }
+        error: { type: string }
+    StrategySchema:
+      type: object
+      properties:
+        name: { type: string }
+        version: { type: string }
+        asset_class: { type: string, enum: [equity, options, futures] }
+        params: { type: object }
+        required_retrievers: { type: array, items: { type: string } }
+
+paths:
+  /auth/token/:
+    post:
+      summary: Obtain JWT pair
+      security: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email: { type: string }
+                password: { type: string }
+      responses:
+        "200":
+          description: Token pair
+  /auth/token/refresh/:
+    post:
+      summary: Refresh access token
+      security: []
+  /auth/auth/signup/:
+    post:
+      summary: Create account
+      security: []
+
+  /tenants/:
+    get:
+      summary: List tenants I belong to
+    post:
+      summary: Create a tenant (owner role)
+  /tenants/memberships/:
+    get:
+      summary: List memberships in current tenant
+
+  /portfolios/:
+    get: { summary: List portfolios }
+    post: { summary: Create portfolio }
+  /portfolios/{id}/:
+    get: { summary: Get portfolio }
+    patch: { summary: Update }
+  /portfolios/positions/:
+    get: { summary: List positions }
+  /portfolios/snapshots/:
+    get: { summary: Portfolio snapshots }
+
+  /brokers/:
+    get: { summary: List broker links }
+    post: { summary: Add broker link }
+
+  /market-data/symbols/:
+    get:
+      summary: Search symbols
+      parameters:
+        - in: query
+          name: q
+          schema: { type: string }
+  /market-data/candles/:
+    get:
+      summary: Recent candles
+      parameters:
+        - in: query
+          name: symbol
+          required: true
+          schema: { type: string }
+        - in: query
+          name: interval
+          schema: { type: string, default: 5m }
+        - in: query
+          name: n
+          schema: { type: integer, default: 200 }
+
+  /orders/:
+    get:
+      summary: List orders
+    post:
+      summary: Place order (async; returns 202)
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/OrderDraft" }
+      responses:
+        "202":
+          description: Accepted
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OrderResult" }
+        "422":
+          description: RiskGuard rejected
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+
+  /strategies/instances/:
+    get: { summary: List strategy instances }
+    post: { summary: Create strategy instance }
+  /strategies/backtests/:
+    get: { summary: List backtests }
+    post:
+      summary: Start a backtest
+      responses:
+        "202":
+          description: Accepted
+
+  /agents/catalog/:
+    get:
+      summary: Available strategies (from plugin registry)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/StrategySchema" }
+  /agents/runs/:
+    get: { summary: List agent runs }
+    post:
+      summary: Enqueue an agent run (returns 202; stream via WS)
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [strategy_name, portfolio]
+              properties:
+                strategy_name: { type: string }
+                portfolio: { type: string, format: uuid }
+                config: { type: object }
+
+  /rag/retrievers/:
+    get: { summary: List registered retrievers }
+  /rag/index/:
+    post:
+      summary: Index a document into a retriever namespace
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [namespace, external_id, text]
+              properties:
+                namespace: { type: string }
+                external_id: { type: string }
+                text: { type: string }
+                payload: { type: object }
+
+  /journals/:
+    get: { summary: List journal entries }
+    parameters:
+      - in: query
+        name: q
+        schema: { type: string }
+
+  /notifications/:
+    get: { summary: List alerts }
+
+  /billing/plans/:
+    get:
+      summary: Public — list plans
+      security: []
+  /billing/subscription/:
+    get: { summary: Current subscription }
+  /billing/webhook/{provider}/:
+    post:
+      summary: Payment provider webhook
+      security: []
