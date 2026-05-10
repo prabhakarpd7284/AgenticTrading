@@ -22,10 +22,12 @@ class StraddleAction(BaseModel):
     action: Literal[
         "HOLD",           # Do nothing — let theta work
         "CLOSE_BOTH",     # Buy back CE + PE immediately
-        "CLOSE_CE",       # Buy back CE only (CE is at risk or already worthless)
-        "CLOSE_PE",       # Buy back PE only (PE is tested / dangerous)
+        "CLOSE_CE",       # Buy back CE only, keep PE
+        "CLOSE_PE",       # Buy back PE only, keep CE
+        "ROLL_PE",        # Close tested PE, sell new PE at lower strike (roll down)
+        "ROLL_CE",        # Close tested CE, sell new CE at higher strike (roll up)
         "HEDGE_FUTURES",  # Buy/sell NIFTY futures to neutralize delta
-        "ROLL",           # Roll tested leg to different strike
+        "REENTER",        # Close both + immediately sell new ATM straddle
     ] = Field(description="Primary management action")
 
     urgency: Literal[
@@ -50,6 +52,11 @@ class StraddleAction(BaseModel):
     pe_target: Optional[float] = Field(
         default=None,
         description="Close PE for profit if price falls BELOW this level (INR). None if no target set.",
+    )
+
+    roll_to_strike: Optional[int] = Field(
+        default=None,
+        description="New strike for ROLL_PE/ROLL_CE. E.g. if PE tested at 23550, roll to 23400.",
     )
 
     hedge_side: Optional[Literal["BUY", "SELL", "NONE"]] = Field(
@@ -128,8 +135,9 @@ class StraddleAnalysis(BaseModel):
 
     # Risk flags
     is_underwater: bool         # combined_current > combined_sold
-    stop_triggered: bool        # combined > 1x sold (hard stop level)
-    expiry_tomorrow: bool       # days_to_expiry <= 1
+    stop_triggered: bool        # combined > 1.5x sold (hard stop level)
+    is_expiry_day: bool = False # days_to_expiry == 0 (expiry TODAY)
+    expiry_tomorrow: bool       # days_to_expiry <= 1 (expiry today OR tomorrow)
     days_to_expiry: int
 
     # Market phase

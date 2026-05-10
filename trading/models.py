@@ -223,8 +223,10 @@ class StraddlePosition(models.Model):
         CLOSE_BOTH      = "CLOSE_BOTH"
         CLOSE_CE        = "CLOSE_CE"
         CLOSE_PE        = "CLOSE_PE"
+        ROLL_PE         = "ROLL_PE"
+        ROLL_CE         = "ROLL_CE"
         HEDGE_FUTURES   = "HEDGE_FUTURES"
-        ROLL            = "ROLL"
+        REENTER         = "REENTER"
 
     # ── Position setup ──
     underlying      = models.CharField(max_length=20, default="NIFTY", db_index=True)
@@ -248,6 +250,7 @@ class StraddlePosition(models.Model):
     # ── Live state (updated each cycle) ──
     net_delta       = models.FloatField(default=0.0)
     current_pnl_inr = models.FloatField(default=0.0)
+    realized_pnl    = models.FloatField(default=0.0, help_text="Accumulated P&L from rolled/closed legs")
     status          = models.CharField(max_length=10, choices=Status.choices, default=Status.ACTIVE)
     action_taken    = models.CharField(
         max_length=20, choices=ActionTaken.choices, default=ActionTaken.NONE
@@ -289,3 +292,258 @@ class StraddlePosition(models.Model):
     @property
     def combined_current_pts(self) -> float:
         return self.ce_current_price + self.pe_current_price
+
+    # Reusable status filter for active positions
+    ACTIVE_STATUSES = ["ACTIVE", "PARTIAL", "HEDGED"]
+
+    @property
+    def is_spread(self) -> bool:
+        """True if this is a spread position (bull call, bear put), not a straddle."""
+        if self.management_log:
+            first = self.management_log[0] if self.management_log else {}
+            return first.get("spread_type") is not None
+        return False
+
+    @property
+    def spread_type(self) -> str:
+        """Return spread type or empty string."""
+        if self.management_log:
+            first = self.management_log[0] if self.management_log else {}
+            return first.get("spread_type", "")
+        return ""
+
+    @property
+    def spread_info(self) -> dict:
+        """Return spread details from first management log entry."""
+        if self.management_log:
+            first = self.management_log[0] if self.management_log else {}
+            return {
+                "type": first.get("spread_type", ""),
+                "long_strike": first.get("long_strike", 0),
+                "short_strike": first.get("short_strike", 0),
+                "net_debit": first.get("net_debit", 0),
+                "max_loss": first.get("max_loss", 0),
+                "max_profit": first.get("max_profit", 0),
+            }
+        return {}
+
+    @property
+    def position_type(self) -> str:
+        """Human-readable: STRADDLE, BULL_CALL_SPREAD, BEAR_PUT_SPREAD."""
+        if self.is_spread:
+            return self.spread_type
+        return "STRADDLE"
+
+    @property
+    def display_name(self) -> str:
+        """Compact display: e.g. 'BULL_CALL 23200/23400' or 'STRADDLE 23200'."""
+        if self.is_spread:
+            info = self.spread_info
+            return f"{info['type'].replace('_', ' ')} {info['long_strike']}/{info['short_strike']}"
+        return f"STRADDLE {self.display_strike}"
+
+    @property
+    def total_pnl(self) -> float:
+        """True P&L including realized losses from rolls."""
+        return self.current_pnl_inr + self.realized_pnl
+
+    @property
+    def ce_strike_actual(self) -> int:
+        """Extract actual CE strike from symbol (may differ from self.strike after rolls)."""
+        import re
+        m = re.search(r'(\d{5})CE', self.ce_symbol)
+        return int(m.group(1)) if m else self.strike
+
+    @property
+    def pe_strike_actual(self) -> int:
+        """Extract actual PE strike from symbol (may differ from self.strike after rolls)."""
+        import re
+        m = re.search(r'(\d{5})PE', self.pe_symbol)
+        return int(m.group(1)) if m else self.strike
+
+    @property
+    def display_strike(self) -> str:
+        """Human-readable strike display, handles asymmetric positions."""
+        ce_s = self.ce_strike_actual
+        pe_s = self.pe_strike_actual
+        if ce_s == pe_s:
+            return str(ce_s)
+        return f"CE@{ce_s}/PE@{pe_s}"
+
+
+class WatchlistEntry(models.Model):
+    """
+    Daily watchlist — stocks selected by the premarket scanner.
+    Tracks which stocks were watched, which triggered, and outcomes.
+    """
+
+    class SetupType(models.TextChoices):
+        ORB_LONG = "ORB_LONG"
+        ORB_SHORT = "ORB_SHORT"
+        PDH_BREAK = "PDH_BREAK"
+        PDL_BREAK = "PDL_BREAK"
+        GAP_AND_GO = "GAP_AND_GO"
+        GAP_FILL = "GAP_FILL"
+        VWAP_RECLAIM = "VWAP_RECLAIM"
+        VWAP_REJECT = "VWAP_REJECT"
+
+    class Outcome(models.TextChoices):
+        WATCHING = "WATCHING"     # On watchlist, not yet triggered
+        TRIGGERED = "TRIGGERED"   # Structure triggered
+        TRADED = "TRADED"         # Trade taken
+        SKIPPED = "SKIPPED"       # Triggered but skipped (risk/LLM)
+        NO_SIGNAL = "NO_SIGNAL"   # Nothing triggered
+
+    symbol = models.CharField(max_length=30, db_index=True)
+    scan_date = models.DateField(db_index=True)
+    score = models.FloatField(help_text="Premarket scanner score 0-100")
+    bias = models.CharField(max_length=10, default="NEUTRAL")
+    setups = models.JSONField(default=list, help_text="List of potential setup types")
+
+    # Previous day context
+    prev_high = models.FloatField(default=0.0)
+    prev_low = models.FloatField(default=0.0)
+    prev_close = models.FloatField(default=0.0)
+    prev_atr = models.FloatField(default=0.0)
+
+    # Today's data (updated during market hours)
+    orb_high = models.FloatField(null=True, blank=True)
+    orb_low = models.FloatField(null=True, blank=True)
+    vwap = models.FloatField(null=True, blank=True)
+
+    # Outcome
+    outcome = models.CharField(max_length=12, choices=Outcome.choices, default=Outcome.WATCHING)
+    triggered_setup = models.CharField(max_length=20, blank=True, default="")
+    reason = models.TextField(blank=True, default="")
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-scan_date", "-score"]
+        unique_together = ("symbol", "scan_date")
+        indexes = [
+            models.Index(fields=["scan_date", "score"]),
+        ]
+
+    def __str__(self):
+        return f"[{self.scan_date}] {self.symbol} score={self.score:.0f} {self.outcome}"
+
+
+class TraderNote(models.Model):
+    """Persistent per-ticker notes for the trader's journal."""
+    symbol = models.CharField(max_length=30, db_index=True, unique=True)
+    note = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["symbol"]
+
+    def __str__(self):
+        return f"Note: {self.symbol} ({len(self.note)} chars)"
+
+
+class SignalLog(models.Model):
+    """
+    Persists every signal fired by any screener/scanner for post-hoc analysis.
+
+    Enables the monthly feedback report to answer: "This stock moved X% —
+    how much of that did AlphaDesk capture?" by recording every opportunity
+    the system detected, whether or not it was acted upon.
+    """
+
+    class Source(models.TextChoices):
+        SCREENER = "SCREENER"       # Intraday ScreenerEngine
+        OK_SCANNER = "OK_SCANNER"   # Swing cycle scanner
+        PREMARKET = "PREMARKET"     # Premarket scanner
+
+    class Outcome(models.TextChoices):
+        PENDING = "PENDING"         # No action yet
+        TRADED = "TRADED"           # Converted to a TradeJournal entry
+        REJECTED = "REJECTED"       # Risk engine blocked it
+        SKIPPED = "SKIPPED"         # Skipped (capital/regime/user)
+        EXPIRED = "EXPIRED"         # Window passed without action
+
+    # Signal identity
+    symbol = models.CharField(max_length=30, db_index=True)
+    signal_date = models.DateField(db_index=True)
+    signal_time = models.DateTimeField()
+    source = models.CharField(max_length=16, choices=Source.choices)
+    strategy = models.CharField(max_length=40)
+    side = models.CharField(max_length=5)           # BUY | SELL
+    entry_price = models.FloatField()
+    stoploss = models.FloatField()
+    target = models.FloatField()
+    confidence = models.FloatField(default=0.0)
+    risk_reward = models.FloatField(default=0.0)
+    reasons = models.JSONField(default=list)
+    indicators = models.JSONField(default=dict)
+
+    # Outcome tracking
+    outcome = models.CharField(
+        max_length=10, choices=Outcome.choices, default=Outcome.PENDING
+    )
+    outcome_reason = models.TextField(blank=True, default="")
+    trade_journal = models.ForeignKey(
+        TradeJournal, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="signal_logs",
+    )
+
+    # Post-hoc price movement (filled by EOD enrichment)
+    eod_price = models.FloatField(null=True, blank=True)
+    max_favorable_move = models.FloatField(
+        null=True, blank=True,
+        help_text="Best intraday price move in signal direction after entry",
+    )
+    max_adverse_move = models.FloatField(
+        null=True, blank=True,
+        help_text="Worst intraday price move against signal direction",
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-signal_time"]
+        indexes = [
+            models.Index(fields=["signal_date", "symbol"]),
+            models.Index(fields=["source", "signal_date"]),
+            models.Index(fields=["outcome"]),
+        ]
+
+    def __str__(self):
+        return (
+            f"[{self.source}] {self.side} {self.symbol} @ {self.entry_price:.2f} "
+            f"({self.strategy}) [{self.outcome}]"
+        )
+
+    @property
+    def target_points(self) -> float:
+        return abs(self.target - self.entry_price)
+
+    @property
+    def risk_points(self) -> float:
+        return abs(self.entry_price - self.stoploss)
+
+    @property
+    def hypothetical_pnl_per_unit(self) -> float | None:
+        """P&L per share if the signal had been taken and held to max favorable.
+        Always positive — max_favorable_move is already direction-aware."""
+        if self.max_favorable_move is None:
+            return None
+        return self.max_favorable_move
+
+
+class SystemControl(models.Model):
+    """
+    Global system control flags.
+    Used for AI pause/resume, force-close triggers, etc.
+    """
+    key = models.CharField(max_length=50, unique=True)
+    value = models.JSONField(default=dict)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["key"]
+
+    def __str__(self):
+        return f"Control: {self.key} = {self.value}"

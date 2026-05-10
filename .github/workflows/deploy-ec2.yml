@@ -1,0 +1,61 @@
+name: deploy-ec2
+
+# Stage-1 deployment: SSH to a single EC2 host and `docker compose pull && up -d`.
+# Use this until we cut over to Stage-2 (ECS + Amplify).
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git ref to deploy"
+        required: true
+        default: "main"
+  workflow_run:
+    workflows: ["backend-ci", "frontend-ci"]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  AWS_REGION: ap-south-1
+
+jobs:
+  ssh-deploy:
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Resolve image tags
+        id: tags
+        run: echo "tag=${GITHUB_SHA::12}" >> $GITHUB_OUTPUT
+
+      - name: SSH and roll
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            set -euo pipefail
+            cd /opt/alphadesk
+            git fetch --all && git reset --hard origin/main
+            export BACKEND_IMAGE=${{ secrets.ECR_REGISTRY }}/alphadesk/backend:${{ steps.tags.outputs.tag }}
+            export WORKER_IMAGE=${{ secrets.ECR_REGISTRY }}/alphadesk/worker:${{ steps.tags.outputs.tag }}
+            export FRONTEND_IMAGE=${{ secrets.ECR_REGISTRY }}/alphadesk/frontend:${{ steps.tags.outputs.tag }}
+            aws ecr get-login-password --region $AWS_REGION | \
+              docker login --username AWS --password-stdin ${{ secrets.ECR_REGISTRY }}
+            docker compose -f docker-compose.yml -f docker-compose.prod.yml pull
+            docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+            docker image prune -f
+            curl -fsS http://localhost/healthz/ready
