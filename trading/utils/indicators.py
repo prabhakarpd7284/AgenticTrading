@@ -242,6 +242,62 @@ def sma(closes: List[float], period: int) -> Optional[float]:
 
 
 # ──────────────────────────────────────────────
+# WMA (Weighted Moving Average)
+# ──────────────────────────────────────────────
+def _wma(data: List[float], period: int) -> List[float]:
+    """Weighted Moving Average — full series."""
+    if len(data) < period:
+        return data
+    weight_sum = period * (period + 1) / 2
+    wma_values = []
+    for i in range(period - 1, len(data)):
+        window = data[i - period + 1: i + 1]
+        weighted = sum(v * (j + 1) for j, v in enumerate(window))
+        wma_values.append(weighted / weight_sum)
+    return wma_values
+
+
+def wma(closes: List[float], period: int) -> Optional[float]:
+    """Return latest WMA value."""
+    result = _wma(closes, period)
+    return round(result[-1], 2) if result else None
+
+
+# ──────────────────────────────────────────────
+# RSI series (full history, not just latest)
+# ──────────────────────────────────────────────
+def _rsi_series(closes: List[float], period: int = 14) -> List[float]:
+    """RSI as a full series (for applying EMA/WMA on top)."""
+    if len(closes) < period + 1:
+        return [50.0] * len(closes)
+
+    deltas = [closes[i] - closes[i - 1] for i in range(1, len(closes))]
+    gains = [max(0, d) for d in deltas[:period]]
+    losses = [max(0, -d) for d in deltas[:period]]
+
+    avg_gain = sum(gains) / period
+    avg_loss = sum(losses) / period
+
+    rsi_vals: List[float] = [None] * period  # type: ignore
+    if avg_loss == 0:
+        rsi_vals.append(100.0)
+    else:
+        rs = avg_gain / avg_loss
+        rsi_vals.append(100 - (100 / (1 + rs)))
+
+    for d in deltas[period:]:
+        avg_gain = (avg_gain * (period - 1) + max(0, d)) / period
+        avg_loss = (avg_loss * (period - 1) + max(0, -d)) / period
+        if avg_loss == 0:
+            rsi_vals.append(100.0)
+        else:
+            rs = avg_gain / avg_loss
+            rsi_vals.append(100 - (100 / (1 + rs)))
+
+    return rsi_vals
+
+
+# ──────────────────────────────────────────────
 # Composite signal scorer
 # ──────────────────────────────────────────────
 def compute_indicator_confluence(

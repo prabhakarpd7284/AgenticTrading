@@ -137,6 +137,32 @@ class LevelConfig:
 
 
 # ══════════════════════════════════════════════
+# Basket Config (imported from trading.basket.config)
+# ══════════════════════════════════════════════
+
+from trading.basket.config import BasketConfig
+
+
+# ══════════════════════════════════════════════
+# Oliver Kell Cycle Config
+# ══════════════════════════════════════════════
+
+@dataclass(frozen=True)
+class OKCycleConfig:
+    """Oliver Kell Cycle of Price Action parameters."""
+    ema_fast: int = 10                       # Fast EMA period
+    ema_mid: int = 20                        # Mid EMA period
+    ema_slow: int = 50                       # Slow EMA period
+    stdev_period: int = 20                   # Std dev lookback for extension bands
+    ext_threshold: float = 2.0              # Std dev multiplier for extension bands
+    vol_avg_period: int = 20                 # Volume average lookback
+    vol_spike_multiplier: float = 1.5        # Volume spike threshold
+    consolidation_bars: int = 5              # Basin break lookback
+    wedge_bars: int = 5                      # Wedge formation bars
+    lookback_days: int = 120                 # ~80 trading days for EMA50 warmup
+
+
+# ══════════════════════════════════════════════
 # Scanner Config
 # ══════════════════════════════════════════════
 
@@ -231,6 +257,8 @@ class TradingConfig:
     screener: ScreenerConfig = field(default_factory=ScreenerConfig)
     broker: BrokerConfig = field(default_factory=BrokerConfig)
     backtest: BacktestConfig = field(default_factory=BacktestConfig)
+    ok_cycle: OKCycleConfig = field(default_factory=OKCycleConfig)
+    basket: BasketConfig = field(default_factory=BasketConfig)
 
     # Mode
     trading_mode: str = os.getenv("TRADING_MODE", "paper")

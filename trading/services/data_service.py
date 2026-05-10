@@ -712,6 +712,109 @@ class DataService:
         logger.info(f"Historical fetch complete: {len(all_candles)} trading days for {symbol}")
         return all_candles
 
+    def fetch_intraday_candles(
+        self,
+        symbol: str,
+        from_date: str,
+        to_date: str,
+        interval: str = "FIVE_MINUTE",
+    ) -> List[Dict[str, Any]]:
+        """
+        Fetch raw intraday candles (not aggregated) across multiple days.
+
+        Uses per-day disk cache at /tmp/intraday_cache/ to avoid redundant
+        broker API calls. Second run for same symbol/day/interval is instant.
+
+        Args:
+            symbol: NSE symbol (e.g. 'RELIANCE')
+            from_date: Start date '%Y-%m-%d'
+            to_date: End date '%Y-%m-%d'
+            interval: THREE_MINUTE, FIVE_MINUTE, FIFTEEN_MINUTE, etc.
+
+        Returns:
+            List of candle dicts: [{timestamp, open, high, low, close, volume}, ...]
+        """
+        import json as _json
+        from pathlib import Path
+
+        self._ensure_broker()
+
+        from trading.services.ticker_service import ticker_service
+        token = ticker_service.get_token(symbol)
+        if not token:
+            logger.error(f"Token not found for {symbol}")
+            return []
+
+        cache_dir = Path("/tmp/intraday_cache")
+        cache_dir.mkdir(parents=True, exist_ok=True)
+
+        interval_short = {
+            "ONE_MINUTE": "1m", "THREE_MINUTE": "3m", "FIVE_MINUTE": "5m",
+            "TEN_MINUTE": "10m", "FIFTEEN_MINUTE": "15m", "THIRTY_MINUTE": "30m",
+            "ONE_HOUR": "1h",
+        }.get(interval, interval)
+
+        start_dt = datetime.strptime(from_date, "%Y-%m-%d").date()
+        end_dt = datetime.strptime(to_date, "%Y-%m-%d").date()
+        current = start_dt
+        all_candles: List[Dict[str, Any]] = []
+        cached_days = 0
+        fetched_days = 0
+
+        while current <= end_dt:
+            if current.weekday() >= 5:
+                current += timedelta(days=1)
+                continue
+
+            day_str = current.strftime("%Y-%m-%d")
+            cache_file = cache_dir / f"{symbol}_{interval_short}_{day_str}.json"
+
+            # Try disk cache first
+            if cache_file.exists():
+                try:
+                    day_candles = _json.loads(cache_file.read_text())
+                    all_candles.extend(day_candles)
+                    cached_days += 1
+                    current += timedelta(days=1)
+                    continue
+                except (_json.JSONDecodeError, IOError):
+                    pass
+
+            # Fetch from broker
+            raw = self._broker.fetch_candles(
+                token, f"{day_str} 09:15", f"{day_str} 15:30", interval
+            )
+
+            day_candles = []
+            if raw:
+                for row in raw:
+                    ts, o, h, l, c, v = row[0], row[1], row[2], row[3], row[4], row[5]
+                    day_candles.append({
+                        "timestamp": ts if isinstance(ts, str) else str(ts),
+                        "open": float(o),
+                        "high": float(h),
+                        "low": float(l),
+                        "close": float(c),
+                        "volume": int(v),
+                    })
+                # Cache to disk (only complete trading days, not today)
+                from datetime import date as _date
+                if current < _date.today():
+                    try:
+                        cache_file.write_text(_json.dumps(day_candles))
+                    except IOError:
+                        pass
+                fetched_days += 1
+
+            all_candles.extend(day_candles)
+            current += timedelta(days=1)
+
+        logger.info(
+            f"Intraday fetch: {symbol} {interval_short} {from_date}→{to_date}: "
+            f"{len(all_candles)} candles ({cached_days} cached, {fetched_days} fetched)"
+        )
+        return all_candles
+
     def fetch_multi_timeframe(
         self,
         symbol: str,

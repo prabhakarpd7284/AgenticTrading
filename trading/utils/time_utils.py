@@ -4,7 +4,7 @@ Time utilities — single source of truth for market hours, session phases.
 Every file that checks "is market open?" should use these functions
 instead of inline hour/minute comparisons.
 """
-from datetime import datetime, time as dt_time
+from datetime import datetime, date, time as dt_time, timedelta
 
 
 # ── Market schedule (IST) ──
@@ -69,6 +69,52 @@ def get_session_phase(now: datetime = None) -> str:
     if t <= MARKET_CLOSE:
         return "CLOSING"
     return "POST_MARKET"
+
+
+def last_trading_day(now: datetime = None) -> date:
+    """
+    Return the most recent completed trading day.
+    - During market hours on a weekday → previous trading day (today is incomplete)
+    - After market close on a weekday → today
+    - Weekend → last Friday
+    """
+    if now is None:
+        now = datetime.now()
+    d = now.date()
+
+    # If market is still open, today's data is incomplete — use yesterday
+    if now.weekday() < 5 and now.time() < MARKET_CLOSE:
+        d = d - timedelta(days=1)
+
+    # Walk back past weekends
+    while d.weekday() >= 5:
+        d = d - timedelta(days=1)
+
+    return d
+
+
+def get_candle_date_range(now: datetime = None) -> tuple:
+    """
+    Return (intraday_date, history_start, history_end) for candle fetching.
+    - intraday_date: date to fetch 5-min candles for (today if market open, else last trading day)
+    - history_start: 30 days back for daily/weekly/monthly charts
+    - history_end: last completed trading day
+
+    Works correctly on weekends, holidays, and after-hours.
+    """
+    if now is None:
+        now = datetime.now()
+
+    # Intraday: use today only if market is open and candles exist
+    if now.weekday() < 5 and now.time() >= CANDLE_AVAILABLE:
+        intraday_date = now.date()
+    else:
+        intraday_date = last_trading_day(now)
+
+    history_end = last_trading_day(now)
+    history_start = history_end - timedelta(days=90)  # ~3 months for monthly chart
+
+    return intraday_date, history_start, history_end
 
 
 def cap_end_time(date_str: str, now: datetime = None) -> str:
