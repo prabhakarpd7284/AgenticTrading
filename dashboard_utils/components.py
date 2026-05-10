@@ -281,15 +281,17 @@ def render_indicator_chart(
     sl: float = 0,
     target: float = 0,
     height: int = 8,
+    timeframe: str = "5m",
 ):
     """
-    Custom candlestick chart with our indicators overlaid.
+    Custom candlestick chart with indicators overlaid.
 
-    candles: list of dicts with open, high, low, close, volume
+    candles: list of dicts with open, high, low, close, volume, and optional timestamp
     pivots: Camarilla pivots dict {S3, S4, R3, R4, P}
+    timeframe: '5m', 'daily', 'weekly', 'monthly' — controls title and x-axis labels
     """
-    if not candles or len(candles) < 3:
-        st.info("Not enough candle data for chart.")
+    if not candles:
+        st.info("No candle data for chart.")
         return
 
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, height), gridspec_kw={"height_ratios": [3, 1]},
@@ -301,19 +303,30 @@ def render_indicator_chart(
     n = len(candles)
     x = list(range(n))
 
+    # ── Parse timestamps for x-axis labels ──
+    from datetime import datetime as _dt
+    timestamps = []
+    for c in candles:
+        ts = c.get("timestamp", "")
+        if ts:
+            try:
+                timestamps.append(_dt.fromisoformat(ts.replace("+05:30", "")))
+            except (ValueError, AttributeError):
+                timestamps.append(None)
+        else:
+            timestamps.append(None)
+
     # Candlesticks
     for i, c in enumerate(candles):
         o, h, l, cl = c["open"], c["high"], c["low"], c["close"]
         color = "#26a69a" if cl >= o else "#ef5350"
-        # Wick
         ax1.plot([i, i], [l, h], color=color, linewidth=0.8)
-        # Body
         body_bottom = min(o, cl)
         body_height = abs(cl - o) or 0.01
         ax1.bar(i, body_height, bottom=body_bottom, width=0.6, color=color, edgecolor=color)
 
-    # Camarilla pivots
-    if pivots:
+    # Camarilla pivots (only for intraday)
+    if pivots and timeframe == "5m":
         for level, color, style in [
             ("S4", "#ef5350", "--"), ("S3", "#ef5350", "-"),
             ("P", "#ffffff", ":"),
@@ -327,14 +340,13 @@ def render_indicator_chart(
     # Bollinger Bands
     if bb and bb.get("upper", 0) > 0:
         closes = [c["close"] for c in candles]
-        # Compute rolling BB for each point
         period = min(20, len(closes))
         import math
         uppers, lowers, mids = [], [], []
         for i in range(len(closes)):
             window = closes[max(0, i - period + 1):i + 1]
             mid = sum(window) / len(window)
-            std = math.sqrt(sum((x - mid) ** 2 for x in window) / len(window))
+            std = math.sqrt(sum((v - mid) ** 2 for v in window) / len(window))
             uppers.append(mid + 2 * std)
             lowers.append(mid - 2 * std)
             mids.append(mid)
@@ -342,8 +354,8 @@ def render_indicator_chart(
         ax1.plot(x, lowers, color="#2196f3", linewidth=0.6, alpha=0.5)
         ax1.fill_between(x, uppers, lowers, alpha=0.05, color="#2196f3")
 
-    # VWAP
-    if vwap_val > 0:
+    # VWAP (intraday only)
+    if vwap_val > 0 and timeframe == "5m":
         ax1.axhline(y=vwap_val, color="#ff9800", linestyle="-", linewidth=1, alpha=0.7)
         ax1.text(n + 0.5, vwap_val, f"VWAP {vwap_val:.0f}", fontsize=7, color="#ff9800", va="center")
 
@@ -370,12 +382,29 @@ def render_indicator_chart(
         ax1.axhline(y=target, color="#26a69a", linewidth=1.2, linestyle="-", alpha=0.9)
         ax1.text(n + 0.5, target, f"TGT {target:.1f}", fontsize=7, color="#26a69a", va="center", fontweight="bold")
 
-    ax1.set_title(f"{symbol} — 5min", color="white", fontsize=11)
+    # ── Title and x-axis labels ──
+    tf_labels = {"5m": "5min Intraday", "daily": "Daily", "weekly": "Weekly", "monthly": "Monthly"}
+    ax1.set_title(f"{symbol} — {tf_labels.get(timeframe, timeframe)}", color="white", fontsize=11)
     ax1.tick_params(colors="white", labelsize=7)
     ax1.spines["bottom"].set_color("#333")
     ax1.spines["left"].set_color("#333")
     ax1.spines["top"].set_visible(False)
     ax1.spines["right"].set_visible(False)
+
+    # X-axis timestamp labels
+    if timestamps and timestamps[0] is not None:
+        tick_step = max(1, n // 10)
+        tick_positions = list(range(0, n, tick_step))
+        if timeframe == "5m":
+            tick_labels = [timestamps[i].strftime("%H:%M") if timestamps[i] else "" for i in tick_positions]
+        elif timeframe == "daily":
+            tick_labels = [timestamps[i].strftime("%d %b") if timestamps[i] else "" for i in tick_positions]
+        elif timeframe == "weekly":
+            tick_labels = [timestamps[i].strftime("%d %b") if timestamps[i] else "" for i in tick_positions]
+        else:  # monthly
+            tick_labels = [timestamps[i].strftime("%b '%y") if timestamps[i] else "" for i in tick_positions]
+        ax2.set_xticks(tick_positions)
+        ax2.set_xticklabels(tick_labels, rotation=45, ha="right")
 
     # Volume bars
     volumes = [c.get("volume", 0) for c in candles]

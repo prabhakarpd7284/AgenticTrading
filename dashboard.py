@@ -1222,12 +1222,31 @@ elif page == "Screener":
                         ltp_data.extend(ds.fetch_batch_ltp(chunk))
                     st.session_state["scr_watchlist"] = ltp_data
                     st.session_state["scr_watchlist_ts"] = datetime.now()
+
+                    # ── Accumulate breadth snapshot for Gainers/Losers chart ──
+                    if ltp_data:
+                        g = sum(1 for s in ltp_data if s.get("pct_change", 0) > 0)
+                        l = sum(1 for s in ltp_data if s.get("pct_change", 0) < 0)
+                        unch = len(ltp_data) - g - l
+                        avg_c = sum(s.get("pct_change", 0) for s in ltp_data) / len(ltp_data)
+                        snap = {
+                            "ts": datetime.now().isoformat(),
+                            "gainers": g,
+                            "losers": l,
+                            "unchanged": unch,
+                            "avg_change": round(avg_c, 3),
+                            "total": len(ltp_data),
+                        }
+                        if "breadth_history" not in st.session_state:
+                            st.session_state["breadth_history"] = []
+                        st.session_state["breadth_history"].append(snap)
                 except Exception as e:
                     st.error(f"Fetch failed: {e}")
                     ltp_data = []
 
         watchlist = st.session_state.get("scr_watchlist", [])
         wl_ts = st.session_state.get("scr_watchlist_ts")
+        sym_meta = {s.get("symbol", ""): s for s in watchlist}
 
         if wl_ts:
             st.caption(f"Last update: {wl_ts.strftime('%H:%M:%S')} | {len(watchlist)} stocks")
@@ -1257,75 +1276,846 @@ elif page == "Screener":
             m4.metric("Top Gainer", f"{top_gainer.get('symbol', '')} {top_gainer.get('pct_change', 0):+.2f}%")
             m5.metric("Top Loser", f"{top_loser.get('symbol', '')} {top_loser.get('pct_change', 0):+.2f}%")
 
-            # ── Heatmap Table ──
-            rows = []
-            for s in watchlist:
-                pct = s.get("pct_change", 0)
-                rows.append({
-                    "Symbol": s.get("symbol", ""),
-                    "LTP": f"₹{s.get('ltp', 0):,.2f}",
-                    "Change%": f"{pct:+.2f}%",
-                    "Open": f"₹{s.get('open', 0):,.2f}",
-                    "High": f"₹{s.get('high', 0):,.2f}",
-                    "Low": f"₹{s.get('low', 0):,.2f}",
-                    "Volume": f"{s.get('volume', 0):,.0f}",
-                    "52W H": f"₹{s.get('high_52w', 0):,.0f}" if s.get("high_52w") else "",
-                    "52W L": f"₹{s.get('low_52w', 0):,.0f}" if s.get("low_52w") else "",
-                })
+            # ── Market Breadth: Gainers / Losers Over Time ──
+            # Persist breadth history to localStorage on every update
+            breadth_history = st.session_state.get("breadth_history", [])
+            if breadth_history:
+                import streamlit.components.v1 as _bcomp
+                _bh_json = json.dumps(breadth_history).replace("'", "\\'").replace("\n", "")
+                _bcomp.html(f"""<script>
+                try {{ localStorage.setItem('scr_breadth', JSON.stringify({json.dumps(breadth_history)})); }} catch(e) {{}}
+                </script>""", height=0)
 
-            df = pd.DataFrame(rows)
-            st.dataframe(df, use_container_width=True, hide_index=True, height=600)
+            # Restore breadth from localStorage on fresh session
+            if not breadth_history:
+                import streamlit.components.v1 as _bcomp
+                _bcomp.html("""<script>
+                try {
+                    const stored = localStorage.getItem('scr_breadth');
+                    if (stored) {
+                        const doc = window.parent.document;
+                        const inp = doc.querySelector('input[aria-label="breadth_restore"]');
+                        if (inp) {
+                            const nativeSet = Object.getOwnPropertyDescriptor(
+                                window.HTMLInputElement.prototype, 'value').set;
+                            nativeSet.call(inp, stored);
+                            inp.dispatchEvent(new Event('input', {bubbles: true}));
+                            inp.dispatchEvent(new KeyboardEvent('keydown',
+                                {key:'Enter',code:'Enter',bubbles:true}));
+                        }
+                    }
+                } catch(e) {}
+                </script>""", height=0)
+                _br_val = st.text_input("breadth_restore", value="", key="breadth_restore_input", label_visibility="collapsed")
+                if _br_val:
+                    try:
+                        restored = json.loads(_br_val)
+                        if isinstance(restored, list) and len(restored) >= 1:
+                            st.session_state["breadth_history"] = restored
+                            breadth_history = restored
+                            st.rerun()
+                    except (json.JSONDecodeError, ValueError):
+                        pass
 
-            # ── Click to expand chart ──
+            # Parse ISO timestamps back to datetime
+            def _parse_bts(ts):
+                if isinstance(ts, str):
+                    return datetime.fromisoformat(ts)
+                return ts
+
+            if len(breadth_history) >= 2:
+                import matplotlib
+                matplotlib.use("Agg")
+                import matplotlib.pyplot as plt
+                import matplotlib.dates as mdates
+
+                times = [_parse_bts(s["ts"]) for s in breadth_history]
+                g_vals = [s["gainers"] for s in breadth_history]
+                l_vals = [s["losers"] for s in breadth_history]
+                avg_vals = [s["avg_change"] for s in breadth_history]
+                total = breadth_history[0]["total"]
+
+                fig, (ax1, ax2) = plt.subplots(
+                    2, 1, figsize=(12, 4), gridspec_kw={"height_ratios": [3, 1]},
+                    sharex=True,
+                )
+                fig.patch.set_facecolor("#0e1117")
+                ax1.set_facecolor("#0e1117")
+                ax2.set_facecolor("#0e1117")
+
+                # ── Top: stacked area — Gainers (green) vs Losers (red) ──
+                ax1.fill_between(times, 0, g_vals, color="#26a69a", alpha=0.7, label="Gainers")
+                ax1.fill_between(times, 0, [-v for v in l_vals], color="#ef5350", alpha=0.7, label="Losers")
+                ax1.axhline(0, color="#555", linewidth=0.5)
+
+                # Annotate latest values
+                ax1.text(times[-1], g_vals[-1], f" {g_vals[-1]}", color="#26a69a",
+                         fontsize=9, fontweight="bold", va="bottom")
+                ax1.text(times[-1], -l_vals[-1], f" {l_vals[-1]}", color="#ef5350",
+                         fontsize=9, fontweight="bold", va="top")
+
+                ax1.set_ylabel("Stocks", color="white", fontsize=9)
+                ax1.set_title(
+                    f"Market Breadth — {total} stocks  |  "
+                    f"Now: {g_vals[-1]} gainers, {l_vals[-1]} losers  |  "
+                    f"{len(breadth_history)} snapshots",
+                    color="white", fontsize=10,
+                )
+                ax1.legend(loc="upper left", fontsize=8, framealpha=0.3)
+                ax1.tick_params(colors="white", labelsize=7)
+                ax1.spines["bottom"].set_color("#333")
+                ax1.spines["left"].set_color("#333")
+                ax1.spines["top"].set_visible(False)
+                ax1.spines["right"].set_visible(False)
+
+                # ── Bottom: avg change% line ──
+                ax2.plot(times, avg_vals, color="#ffeb3b", linewidth=1.2)
+                ax2.fill_between(
+                    times, avg_vals, 0,
+                    where=[v >= 0 for v in avg_vals], color="#26a69a", alpha=0.15,
+                )
+                ax2.fill_between(
+                    times, avg_vals, 0,
+                    where=[v < 0 for v in avg_vals], color="#ef5350", alpha=0.15,
+                )
+                ax2.axhline(0, color="#555", linewidth=0.5)
+                ax2.set_ylabel("Avg %", color="white", fontsize=8)
+                ax2.tick_params(colors="white", labelsize=7)
+                ax2.spines["bottom"].set_color("#333")
+                ax2.spines["left"].set_color("#333")
+                ax2.spines["top"].set_visible(False)
+                ax2.spines["right"].set_visible(False)
+
+                # X-axis time labels
+                ax2.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
+                fig.autofmt_xdate(rotation=0, ha="center")
+
+                plt.tight_layout()
+                st.pyplot(fig)
+                plt.close(fig)
+            elif len(breadth_history) == 1:
+                st.caption("Breadth chart will appear after the next refresh (need 2+ snapshots)")
+
+            # ── Market Turn Detection + Dynamic Buy/Sell Potential ──
+            if len(breadth_history) >= 3:
+                # Compute turn stats from last N snapshots
+                recent = breadth_history[-min(10, len(breadth_history)):]
+                avg_now = recent[-1]["avg_change"]
+                avg_prev = recent[0]["avg_change"]
+                g_now = recent[-1]["gainers"]
+                g_prev = recent[0]["gainers"]
+                l_now = recent[-1]["losers"]
+                g_delta = g_now - g_prev
+                avg_delta = avg_now - avg_prev
+                total = recent[-1]["total"]
+                g_ratio = g_now / total if total else 0
+                window_mins = (_parse_bts(recent[-1]["ts"]) - _parse_bts(recent[0]["ts"])).total_seconds() / 60
+
+                # Detect market regime
+                if avg_delta > 0.05 and g_delta > 3:
+                    turn_dir = "BULLISH"
+                    turn_color = "#26a69a"
+                    turn_desc = "Strengthening — gainers expanding"
+                elif avg_delta < -0.05 and g_delta < -3:
+                    turn_dir = "BEARISH"
+                    turn_color = "#ef5350"
+                    turn_desc = "Weakening — losers expanding"
+                else:
+                    turn_dir = "NEUTRAL"
+                    turn_color = "#888"
+                    turn_desc = "Range-bound — no clear direction"
+
+                # Stats row
+                tc1, tc2, tc3, tc4 = st.columns(4)
+                tc1.metric("Trend", turn_dir, delta=f"{avg_delta:+.2f}% avg")
+                tc2.metric("Gainers shift", f"{g_delta:+d}", delta=f"{g_now}/{total}")
+                tc3.metric("Breadth", f"{g_ratio:.0%} bullish")
+                tc4.metric("Window", f"{window_mins:.0f} min", delta=f"{len(recent)} snaps")
+
+                st.markdown(
+                    f'<div style="padding:6px 12px;border-left:3px solid {turn_color};'
+                    f'background:#0e1117;margin:4px 0;font-size:13px">'
+                    f'<b style="color:{turn_color}">{turn_dir}</b> &mdash; {turn_desc}'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+
+                # ── Auto-score every stock for Buy / Sell potential ──
+                # Runs on every refresh — no manual button needed
+                _scr_cd = st.session_state.get("screener_candles", {})
+                buy_potential = []
+                sell_potential = []
+
+                for s in watchlist:
+                    sym = s.get("symbol", "")
+                    pct = s.get("pct_change", 0)
+                    o = s.get("open", 0)
+                    h = s.get("high", 0)
+                    lo = s.get("low", 0)
+                    ltp_val = s.get("ltp", 0)
+                    vw = _scr_cd.get(sym, {}).get("vwap", 0)
+                    if o <= 0 or ltp_val <= 0:
+                        continue
+
+                    buy_score = 0
+                    buy_reasons = []
+                    sell_score = 0
+                    sell_reasons = []
+
+                    # ── Buy signals ──
+                    # Open = Low (buyers defended)
+                    if lo > 0 and abs(o - lo) < 0.005 * o:
+                        buy_score += 2
+                        buy_reasons.append("OL")
+                    # Near VWAP from below (pullback to value)
+                    if vw > 0 and 0 < (vw - ltp_val) / vw < 0.01:
+                        buy_score += 2
+                        buy_reasons.append("VWAP pull")
+                    # Above VWAP (strength)
+                    if vw > 0 and ltp_val > vw:
+                        buy_score += 1
+                        buy_reasons.append(">VWAP")
+                    # Recovering: was red, now near zero or green
+                    if -0.5 < pct < 0.5 and lo < o * 0.995:
+                        buy_score += 1
+                        buy_reasons.append("Recovering")
+                    # Positive with room: small gainer, not extended
+                    if 0 < pct < 1.5:
+                        buy_score += 1
+                        buy_reasons.append(f"+{pct:.1f}%")
+                    # Market bullish amplifier
+                    if turn_dir == "BULLISH":
+                        buy_score += 1
+
+                    # ── Sell signals ──
+                    # Open = High (sellers capped)
+                    if h > 0 and abs(o - h) < 0.005 * o:
+                        sell_score += 2
+                        sell_reasons.append("OH")
+                    # Near VWAP from above (rejection from value)
+                    if vw > 0 and 0 < (ltp_val - vw) / vw < 0.01:
+                        sell_score += 2
+                        sell_reasons.append("VWAP reject")
+                    # Below VWAP (weakness)
+                    if vw > 0 and ltp_val < vw:
+                        sell_score += 1
+                        sell_reasons.append("<VWAP")
+                    # Fading: was green, now near zero or red
+                    if -0.5 < pct < 0.5 and h > o * 1.005:
+                        sell_score += 1
+                        sell_reasons.append("Fading")
+                    # Negative with momentum
+                    if -1.5 < pct < 0:
+                        sell_score += 1
+                        sell_reasons.append(f"{pct:.1f}%")
+                    # Market bearish amplifier
+                    if turn_dir == "BEARISH":
+                        sell_score += 1
+
+                    if buy_score >= 3 and buy_score > sell_score:
+                        buy_potential.append({
+                            "symbol": sym, "score": buy_score,
+                            "reasons": buy_reasons, "pct": pct, "ltp": ltp_val,
+                        })
+                    elif sell_score >= 3 and sell_score > buy_score:
+                        sell_potential.append({
+                            "symbol": sym, "score": sell_score,
+                            "reasons": sell_reasons, "pct": pct, "ltp": ltp_val,
+                        })
+
+                buy_potential.sort(key=lambda x: x["score"], reverse=True)
+                sell_potential.sort(key=lambda x: x["score"], reverse=True)
+                buy_potential = buy_potential[:15]
+                sell_potential = sell_potential[:15]
+
+                # Save to session state (auto-updates every refresh)
+                st.session_state["buy_potential"] = [p["symbol"] for p in buy_potential]
+                st.session_state["sell_potential"] = [p["symbol"] for p in sell_potential]
+                st.session_state["buy_potential_details"] = buy_potential
+                st.session_state["sell_potential_details"] = sell_potential
+                st.session_state["potential_ts"] = datetime.now()
+                st.session_state["potential_turn"] = turn_dir
+
+                # Persist to localStorage
+                import streamlit.components.v1 as _comp
+                _ls_data = json.dumps({
+                    "buy": [p["symbol"] for p in buy_potential],
+                    "sell": [p["symbol"] for p in sell_potential],
+                    "turn": turn_dir,
+                }).replace("'", "\\'")
+                _comp.html(f"""<script>
+                try {{ localStorage.setItem('scr_potential', '{_ls_data}'); }} catch(e) {{}}
+                </script>""", height=0)
+
+                # ── Display Buy / Sell panels ──
+                def _render_potential_panel(title, color, items):
+                    if not items:
+                        return
+                    chips = []
+                    for p in items:
+                        r_str = " ".join(p["reasons"])
+                        pct_c = "#26a69a" if p["pct"] > 0 else "#ef5350" if p["pct"] < 0 else "#888"
+                        bar_w = min(p["score"] * 16, 100)
+                        chips.append(
+                            f'<div style="display:inline-flex;align-items:center;margin:2px 4px;'
+                            f'padding:4px 8px;background:#1a1f2e;border:1px solid {color}30;'
+                            f'border-left:3px solid {color};border-radius:4px;font-size:12px;gap:6px">'
+                            f'<b style="color:#e0e0e0;min-width:60px">{p["symbol"]}</b>'
+                            f'<span style="color:{pct_c};min-width:45px">{p["pct"]:+.1f}%</span>'
+                            f'<span style="background:{color}30;height:4px;width:{bar_w}px;'
+                            f'border-radius:2px;display:inline-block"></span>'
+                            f'<span style="color:#666;font-size:10px">{r_str}</span></div>'
+                        )
+                    st.markdown(
+                        f'<div style="margin:6px 0"><b style="color:{color}">{title}</b>'
+                        f' <span style="color:#666;font-size:12px">{len(items)} stocks</span></div>'
+                        + "".join(chips),
+                        unsafe_allow_html=True,
+                    )
+
+                buy_col, sell_col = st.columns(2)
+                with buy_col:
+                    _render_potential_panel("BUY Potential", "#26a69a", buy_potential)
+                with sell_col:
+                    _render_potential_panel("SELL Potential", "#ef5350", sell_potential)
+
+            # ── Restore from localStorage on fresh session ──
+            if "buy_potential" not in st.session_state:
+                import streamlit.components.v1 as _comp
+                _comp.html("""<script>
+                try {
+                    const stored = localStorage.getItem('scr_potential');
+                    if (stored) {
+                        const data = JSON.parse(stored);
+                        const doc = window.parent.document;
+                        const inp = doc.querySelector('input[aria-label="pot_restore"]');
+                        if (inp && data.buy) {
+                            const nativeSet = Object.getOwnPropertyDescriptor(
+                                window.HTMLInputElement.prototype, 'value').set;
+                            nativeSet.call(inp, stored);
+                            inp.dispatchEvent(new Event('input', {bubbles: true}));
+                            inp.dispatchEvent(new KeyboardEvent('keydown',
+                                {key:'Enter',code:'Enter',bubbles:true}));
+                        }
+                    }
+                } catch(e) {}
+                </script>""", height=0)
+                restore_val = st.text_input(
+                    "pot_restore", value="", key="pot_restore_input",
+                    label_visibility="collapsed",
+                )
+                if restore_val:
+                    try:
+                        data = json.loads(restore_val)
+                        if isinstance(data, dict):
+                            st.session_state["buy_potential"] = data.get("buy", [])
+                            st.session_state["sell_potential"] = data.get("sell", [])
+                            st.session_state["potential_turn"] = data.get("turn", "")
+                            st.session_state["buy_potential_details"] = [
+                                {"symbol": s, "score": 0, "reasons": [], "pct": 0, "ltp": 0}
+                                for s in data.get("buy", [])
+                            ]
+                            st.session_state["sell_potential_details"] = [
+                                {"symbol": s, "score": 0, "reasons": [], "pct": 0, "ltp": 0}
+                                for s in data.get("sell", [])
+                            ]
+                            st.rerun()
+                    except (json.JSONDecodeError, ValueError):
+                        pass
+
+            # ── Potential Stocks Dashboard ──
+            buy_det = st.session_state.get("buy_potential_details", [])
+            sell_det = st.session_state.get("sell_potential_details", [])
+            _scr_cd_vis = st.session_state.get("screener_candles", {})
+
+            if buy_det or sell_det:
+                def _render_stock_card(item, side_color, side_label, sym_data):
+                    """Render a single stock card with mini price bar and details."""
+                    sym = item["symbol"]
+                    m = sym_meta.get(sym, {})
+                    pct = m.get("pct_change", 0) or item.get("pct", 0)
+                    ltp_val = m.get("ltp", 0) or item.get("ltp", 0)
+                    o = m.get("open", 0)
+                    h = m.get("high", 0)
+                    lo = m.get("low", 0)
+                    prev_cl = m.get("prev_close", 0)
+                    vol = m.get("volume", 0)
+                    score = item.get("score", 0)
+                    reasons = item.get("reasons", [])
+                    vw = _scr_cd_vis.get(sym, {}).get("vwap", 0)
+
+                    # Price position bar: where is LTP within today's range?
+                    day_range = h - lo if h > lo else 1
+                    ltp_pct_in_range = ((ltp_val - lo) / day_range * 100) if day_range > 0 else 50
+                    ltp_pct_in_range = max(2, min(98, ltp_pct_in_range))
+
+                    # VWAP position in range
+                    vwap_pos = ((vw - lo) / day_range * 100) if vw > 0 and day_range > 0 else -1
+                    vwap_marker = ""
+                    if 0 < vwap_pos < 100:
+                        vwap_marker = (
+                            f'<div style="position:absolute;left:{vwap_pos}%;top:0;'
+                            f'width:1px;height:100%;background:#ff9800" '
+                            f'title="VWAP ₹{vw:,.0f}"></div>'
+                        )
+
+                    # Open position marker
+                    open_pos = ((o - lo) / day_range * 100) if o > 0 and day_range > 0 else -1
+                    open_marker = ""
+                    if 0 < open_pos < 100:
+                        open_marker = (
+                            f'<div style="position:absolute;left:{open_pos}%;top:0;'
+                            f'width:1px;height:100%;background:#666;border-left:1px dashed #666" '
+                            f'title="Open ₹{o:,.0f}"></div>'
+                        )
+
+                    pct_color = "#26a69a" if pct > 0 else "#ef5350" if pct < 0 else "#888"
+
+                    # Reason tags
+                    tag_chips = ""
+                    for r in reasons:
+                        tag_chips += (
+                            f'<span style="background:{side_color}20;color:{side_color};'
+                            f'padding:1px 5px;border-radius:3px;font-size:10px;margin-right:3px">'
+                            f'{r}</span>'
+                        )
+
+                    # Score dots
+                    dots = f'<span style="color:{side_color};letter-spacing:2px">{"●" * score}{"○" * (6 - score)}</span>'
+
+                    html = f'''
+                    <div style="background:#12161f;border:1px solid {side_color}25;border-left:3px solid {side_color};
+                                border-radius:6px;padding:10px 12px;margin-bottom:8px">
+                      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+                        <div>
+                          <span style="font-size:15px;font-weight:700;color:#e0e0e0">{sym}</span>
+                          <span style="color:{side_color};font-size:11px;margin-left:6px;font-weight:600">{side_label}</span>
+                        </div>
+                        <div style="text-align:right">
+                          <span style="font-size:14px;color:#e0e0e0;font-weight:600">₹{ltp_val:,.2f}</span>
+                          <span style="color:{pct_color};font-size:13px;margin-left:6px;font-weight:600">{pct:+.2f}%</span>
+                        </div>
+                      </div>
+                      <!-- Price range bar -->
+                      <div style="position:relative;height:8px;background:#1a1f2e;border-radius:4px;margin:6px 0;overflow:visible">
+                        {open_marker}{vwap_marker}
+                        <div style="position:absolute;left:0;top:0;width:{ltp_pct_in_range}%;height:100%;
+                                    background:linear-gradient(90deg,{side_color}40,{side_color});border-radius:4px"></div>
+                        <div style="position:absolute;left:{ltp_pct_in_range}%;top:-2px;width:4px;height:12px;
+                                    background:#fff;border-radius:2px;transform:translateX(-2px)"></div>
+                      </div>
+                      <div style="display:flex;justify-content:space-between;font-size:10px;color:#555;margin-bottom:6px">
+                        <span>L ₹{lo:,.1f}</span>
+                        <span>{'VWAP ₹' + f'{vw:,.0f}' if vw > 0 else ''}</span>
+                        <span>H ₹{h:,.1f}</span>
+                      </div>
+                      <!-- Score + reasons -->
+                      <div style="display:flex;justify-content:space-between;align-items:center">
+                        <div>{tag_chips}</div>
+                        <div style="font-size:10px">{dots}</div>
+                      </div>
+                      <div style="display:flex;gap:12px;margin-top:4px;font-size:10px;color:#555">
+                        <span>O ₹{o:,.1f}</span>
+                        <span>Vol {vol:,.0f}</span>
+                        <span>Range {((h-lo)/o*100) if o > 0 else 0:.2f}%</span>
+                      </div>
+                    </div>'''
+                    st.markdown(html, unsafe_allow_html=True)
+
+                st.markdown("---")
+                buy_col, sell_col = st.columns(2)
+
+                with buy_col:
+                    st.markdown(
+                        f'<div style="font-size:16px;font-weight:700;color:#26a69a;margin-bottom:8px">'
+                        f'BUY Potential — {len(buy_det)} stocks</div>',
+                        unsafe_allow_html=True,
+                    )
+                    if buy_det:
+                        for item in buy_det:
+                            _render_stock_card(item, "#26a69a", "BUY", sym_meta)
+                    else:
+                        st.caption("No buy setups detected")
+
+                with sell_col:
+                    st.markdown(
+                        f'<div style="font-size:16px;font-weight:700;color:#ef5350;margin-bottom:8px">'
+                        f'SELL Potential — {len(sell_det)} stocks</div>',
+                        unsafe_allow_html=True,
+                    )
+                    if sell_det:
+                        for item in sell_det:
+                            _render_stock_card(item, "#ef5350", "SELL", sym_meta)
+                    else:
+                        st.caption("No sell setups detected")
+            else:
+                # Fallback: show basic heatmap table if no potential data yet
+                st.caption("Potential stocks will appear after 3+ breadth snapshots (~90s)")
+                rows = []
+                for s in watchlist:
+                    pct = s.get("pct_change", 0)
+                    rows.append({
+                        "Symbol": s.get("symbol", ""),
+                        "LTP": f"₹{s.get('ltp', 0):,.2f}",
+                        "Change%": f"{pct:+.2f}%",
+                        "Open": f"₹{s.get('open', 0):,.2f}",
+                        "High": f"₹{s.get('high', 0):,.2f}",
+                        "Low": f"₹{s.get('low', 0):,.2f}",
+                        "Volume": f"{s.get('volume', 0):,.0f}",
+                    })
+                df = pd.DataFrame(rows)
+                st.dataframe(df, use_container_width=True, hide_index=True, height=400)
+
+            # ── Chart View with Side List + Keyboard Nav ──
             st.markdown("---")
             st.subheader("Chart View")
-            chart_sym = st.selectbox(
-                "Select symbol for chart",
-                [s.get("symbol", "") for s in watchlist],
-                key="scr_chart_sym",
-            )
+            st.caption("Navigate: **↑/↓** or **J/K** keys  |  Timeframe: **1/2/3** keys  |  Click stock in list")
 
-            if chart_sym:
-                with st.spinner(f"Loading {chart_sym} chart..."):
-                    try:
-                        from dashboard_utils.candle_cache import fetch_and_cache_candles, get_candles_for_timeframe
-                        fetch_and_cache_candles(chart_sym)
+            # Build symbol list for sidebar
+            sym_list = [s.get("symbol", "") for s in watchlist]
 
-                        chart_tabs = st.tabs(["5m Intraday", "Daily", "Weekly"])
+            # ── Session state: track selected symbol by name ──
+            if "chart_sym" not in st.session_state or st.session_state["chart_sym"] not in sym_list:
+                st.session_state["chart_sym"] = sym_list[0] if sym_list else ""
+            if "chart_tf" not in st.session_state:
+                st.session_state["chart_tf"] = "5m"
+            chart_sym = st.session_state["chart_sym"]
 
-                        with chart_tabs[0]:
-                            candles_5m = get_candles_for_timeframe(chart_sym, "5m")
-                            if candles_5m:
-                                from trading.utils.indicators import bollinger_bands, vwap, camarilla_pivots
-                                closes = [c["close"] for c in candles_5m]
-                                bb = bollinger_bands(closes) if len(closes) >= 20 else {}
-                                vwap_val = vwap(candles_5m) if candles_5m else 0
-                                prev = st.session_state.get(f"candle_cache_{chart_sym}", {}).get("prev_day") or {}
-                                pivots = {}
-                                if prev.get("high", 0) > 0 and prev.get("close", 0) > 0:
-                                    pivots = camarilla_pivots(prev["high"], prev["low"], prev["close"])
-                                render_indicator_chart(candles_5m, chart_sym, pivots=pivots, bb=bb, vwap_val=vwap_val, timeframe="5m")
-                            else:
-                                st.info("No 5m candles available")
+            # ── Build filtered & sorted list (used by nav + sidebar) ──
+            scr_candle_data = st.session_state.get("screener_candles", {})
+            if "side_sort" not in st.session_state:
+                st.session_state["side_sort"] = "A-Z"
+            if "side_filter" not in st.session_state:
+                st.session_state["side_filter"] = "All"
 
-                        with chart_tabs[1]:
-                            candles_d = get_candles_for_timeframe(chart_sym, "daily")
-                            if candles_d:
-                                closes_d = [c["close"] for c in candles_d]
-                                bb_d = bollinger_bands(closes_d) if len(closes_d) >= 20 else {}
-                                render_indicator_chart(candles_d, chart_sym, bb=bb_d, timeframe="daily")
-                            else:
-                                st.info("No daily candles")
+            def _passes_filter(sym, filt):
+                m = sym_meta.get(sym, {})
+                pct = m.get("pct_change", 0)
+                if filt == "Buy Potential":
+                    return sym in st.session_state.get("buy_potential", [])
+                if filt == "Sell Potential":
+                    return sym in st.session_state.get("sell_potential", [])
+                if filt == "Gainers":
+                    return pct > 0
+                if filt == "Losers":
+                    return pct < 0
+                if filt == "Open=High":
+                    o, h = m.get("open", 0), m.get("high", 0)
+                    return o > 0 and abs(o - h) < 0.01 * o
+                if filt == "Open=Low":
+                    o, lo = m.get("open", 0), m.get("low", 0)
+                    return o > 0 and abs(o - lo) < 0.01 * o
+                if filt == "VWAP Above":
+                    vw = scr_candle_data.get(sym, {}).get("vwap", 0)
+                    return vw > 0 and m.get("ltp", 0) > vw
+                if filt == "VWAP Below":
+                    vw = scr_candle_data.get(sym, {}).get("vwap", 0)
+                    return vw > 0 and m.get("ltp", 0) < vw
+                return True
 
-                        with chart_tabs[2]:
-                            candles_w = get_candles_for_timeframe(chart_sym, "weekly")
-                            if candles_w:
-                                render_indicator_chart(candles_w, chart_sym, timeframe="weekly")
-                            else:
-                                st.info("No weekly candles")
+            def _sort_list(lst, sort_key):
+                if sort_key == "A-Z":
+                    lst.sort()
+                elif sort_key == "Z-A":
+                    lst.sort(reverse=True)
+                elif sort_key == "% Top":
+                    lst.sort(key=lambda s: sym_meta.get(s, {}).get("pct_change", 0), reverse=True)
+                elif sort_key == "% Bottom":
+                    lst.sort(key=lambda s: sym_meta.get(s, {}).get("pct_change", 0))
+                elif sort_key == "Volume":
+                    lst.sort(key=lambda s: sym_meta.get(s, {}).get("volume", 0), reverse=True)
 
-                    except Exception as e:
-                        st.error(f"Chart failed: {e}")
+            filtered_list = [s for s in sym_list if _passes_filter(s, st.session_state["side_filter"])]
+            _sort_list(filtered_list, st.session_state["side_sort"])
+
+            # Ensure chart_sym is valid in filtered context
+            if filtered_list:
+                if chart_sym not in filtered_list:
+                    chart_sym = filtered_list[0]
+                    st.session_state["chart_sym"] = chart_sym
+                fl_idx = filtered_list.index(chart_sym)
+            else:
+                fl_idx = 0
+
+            # ── Keyboard navigation via JS ──
+            import streamlit.components.v1 as components
+            nav_js = """
+            <script>
+            (function() {
+                const doc = window.parent.document;
+                function clickNavBtn(exactText) {
+                    const buttons = doc.querySelectorAll('button[kind="secondary"], button[kind="primary"]');
+                    for (const btn of buttons) {
+                        const t = btn.textContent.trim();
+                        if (t === exactText) { btn.click(); return true; }
+                    }
+                    return false;
+                }
+                let lastNav = 0;
+                doc.addEventListener('keydown', function(e) {
+                    const tag = e.target.tagName;
+                    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+                    const now = Date.now();
+                    if (now - lastNav < 200) return;
+                    let handled = false;
+                    if (e.key === 'ArrowUp' || e.key === 'k') {
+                        handled = clickNavBtn('\u2B06 Prev');
+                    } else if (e.key === 'ArrowDown' || e.key === 'j') {
+                        handled = clickNavBtn('\u2B07 Next');
+                    } else if (e.key === '1') {
+                        handled = clickNavBtn('[1] 5m');
+                    } else if (e.key === '2') {
+                        handled = clickNavBtn('[2] Daily');
+                    } else if (e.key === '3') {
+                        handled = clickNavBtn('[3] Weekly');
+                    }
+                    if (handled) { e.preventDefault(); lastNav = now; }
+                });
+            })();
+            </script>
+            """
+            components.html(nav_js, height=0)
+
+            # ── Navigation + Timeframe bar ──
+            nav_c1, nav_c2, _spacer, nav_c3, nav_c4, nav_c5 = st.columns([1, 1, 1, 1, 1, 1])
+            cur_tf = st.session_state["chart_tf"]
+            with nav_c1:
+                if st.button("⬆ Prev", key="chart_prev", use_container_width=True, disabled=fl_idx <= 0):
+                    st.session_state["chart_sym"] = filtered_list[fl_idx - 1]
+                    st.rerun()
+            with nav_c2:
+                if st.button("⬇ Next", key="chart_next", use_container_width=True, disabled=fl_idx >= len(filtered_list) - 1):
+                    st.session_state["chart_sym"] = filtered_list[fl_idx + 1]
+                    st.rerun()
+            with nav_c3:
+                if st.button("[1] 5m", key="chart_tf_5m", type="primary" if cur_tf == "5m" else "secondary", use_container_width=True):
+                    st.session_state["chart_tf"] = "5m"
+                    st.rerun()
+            with nav_c4:
+                if st.button("[2] Daily", key="chart_tf_daily", type="primary" if cur_tf == "daily" else "secondary", use_container_width=True):
+                    st.session_state["chart_tf"] = "daily"
+                    st.rerun()
+            with nav_c5:
+                if st.button("[3] Weekly", key="chart_tf_weekly", type="primary" if cur_tf == "weekly" else "secondary", use_container_width=True):
+                    st.session_state["chart_tf"] = "weekly"
+                    st.rerun()
+
+            # ── Side-by-side: Stock List | Chart ──
+            list_col, chart_col = st.columns([1, 4])
+
+            with list_col:
+                # ── Sort & Filter dropdowns ──
+                sf1, sf2 = st.columns(2)
+                with sf1:
+                    side_sort = st.selectbox(
+                        "Sort", ["A-Z", "Z-A", "% Top", "% Bottom", "Volume"],
+                        key="side_sort", label_visibility="collapsed",
+                    )
+                with sf2:
+                    filter_opts = ["All", "Gainers", "Losers", "Open=High", "Open=Low", "VWAP Above", "VWAP Below"]
+                    if st.session_state.get("buy_potential"):
+                        filter_opts.insert(1, "Buy Potential")
+                    if st.session_state.get("sell_potential"):
+                        filter_opts.insert(2 if "Buy Potential" in filter_opts else 1, "Sell Potential")
+                    side_filter = st.selectbox(
+                        "Filter", filter_opts,
+                        key="side_filter", label_visibility="collapsed",
+                    )
+                st.caption(f"**{len(filtered_list)}** / {len(sym_list)}  |  #{fl_idx + 1}")
+
+                # Scrollable stock list — buttons with tags
+                with st.container(height=620):
+                    for idx, sym in enumerate(filtered_list):
+                        meta = sym_meta.get(sym, {})
+                        pct = meta.get("pct_change", 0)
+                        o = meta.get("open", 0)
+                        h = meta.get("high", 0)
+                        lo = meta.get("low", 0)
+                        is_oh = o > 0 and h > 0 and abs(o - h) < 0.01 * o
+                        is_ol = o > 0 and lo > 0 and abs(o - lo) < 0.01 * o
+                        is_active = sym == chart_sym
+
+                        if st.button(
+                            sym,
+                            key=f"stock_btn_{idx}",
+                            use_container_width=True,
+                            type="primary" if is_active else "secondary",
+                        ):
+                            st.session_state["chart_sym"] = sym
+                            st.rerun()
+
+                        # Render styled detail line under button
+                        pct_color = "#26a69a" if pct > 0 else "#ef5350" if pct < 0 else "#888"
+                        tag_html = ""
+                        if sym in st.session_state.get("buy_potential", []):
+                            tag_html += '<span style="background:#26a69a;color:#fff;padding:0 4px;border-radius:3px;font-size:10px;margin-left:4px;font-weight:700">B</span>'
+                        if sym in st.session_state.get("sell_potential", []):
+                            tag_html += '<span style="background:#ef5350;color:#fff;padding:0 4px;border-radius:3px;font-size:10px;margin-left:4px;font-weight:700">S</span>'
+                        if is_oh:
+                            tag_html += '<span style="background:#ef5350;color:#fff;padding:0 4px;border-radius:3px;font-size:10px;margin-left:4px">OH</span>'
+                        if is_ol:
+                            tag_html += '<span style="background:#26a69a;color:#fff;padding:0 4px;border-radius:3px;font-size:10px;margin-left:4px">OL</span>'
+
+                        st.markdown(
+                            f'<div style="margin-top:-12px;margin-bottom:6px;padding:0 8px;font-size:12px;line-height:1.2">'
+                            f'<span style="color:{pct_color};font-weight:600">{pct:+.2f}%</span>'
+                            f'<span style="color:#666;margin-left:6px">₹{meta.get("ltp", 0):,.1f}</span>'
+                            f'{tag_html}</div>',
+                            unsafe_allow_html=True,
+                        )
+
+            with chart_col:
+                if chart_sym:
+                    sel_tf = st.session_state["chart_tf"]
+                    meta = sym_meta.get(chart_sym, {})
+                    pct = meta.get("pct_change", 0)
+                    ltp = meta.get("ltp", 0)
+                    pct_str = f"{pct:+.2f}%"
+                    pct_css = "color:#26a69a" if pct > 0 else "color:#ef5350" if pct < 0 else ""
+
+                    st.markdown(
+                        f"### {chart_sym} &nbsp; ₹{ltp:,.2f} &nbsp; "
+                        f"<span style='{pct_css};font-size:1.1rem'>{pct_str}</span>",
+                        unsafe_allow_html=True,
+                    )
+
+                    # ── Resolve candle data ──
+                    candles = None
+                    vwap_val = 0
+                    pivots = {}
+                    source_label = ""
+
+                    if sel_tf in ("5m", "15m"):
+                        # ── 5m / 15m: always use screener CandleStore (today's 1m → 5m) ──
+                        # Check session cache first, auto-build if missing
+                        scr_candles = st.session_state.get("screener_candles", {})
+                        scr_sym_data = scr_candles.get(chart_sym, {})
+
+                        if scr_sym_data.get(sel_tf):
+                            candles = scr_sym_data[sel_tf]
+                            vwap_val = scr_sym_data.get("vwap", 0)
+                            prev = scr_sym_data.get("prev_day", {})
+                            if prev.get("high", 0) > 0 and prev.get("close", 0) > 0:
+                                from trading.utils.indicators import camarilla_pivots
+                                pivots = camarilla_pivots(prev["high"], prev["low"], prev["close"])
+                            scr_ts = st.session_state.get("screener_candles_ts")
+                            source_label = f"Live ({scr_ts.strftime('%H:%M:%S') if scr_ts else ''})"
+                        else:
+                            # Auto-bootstrap: build CandleStore for this symbol
+                            with st.spinner(f"Building {chart_sym} candles from 1m data..."):
+                                try:
+                                    from trading.screener.candle_store import CandleStore
+                                    from trading.services.data_service import BrokerClient
+                                    from trading.services.ticker_service import ticker_service
+                                    from trading.utils.time_utils import last_trading_day, can_fetch_candles, cap_end_time
+
+                                    token = ticker_service.get_token(chart_sym)
+                                    if token:
+                                        broker = BrokerClient.get_instance()
+                                        broker.ensure_login()
+                                        now = datetime.now()
+                                        store = CandleStore(chart_sym)
+
+                                        # Fetch prev-day OHLC for pivots
+                                        prev_day_str = last_trading_day(now).isoformat()
+                                        raw_daily = broker.fetch_candles(
+                                            token, f"{prev_day_str} 09:15",
+                                            f"{prev_day_str} 15:30", "ONE_DAY",
+                                        )
+                                        if raw_daily:
+                                            store.prev_day_high = float(raw_daily[0][2])
+                                            store.prev_day_low = float(raw_daily[0][3])
+                                            store.prev_day_close = float(raw_daily[0][4])
+
+                                        # Determine which day to fetch 1m candles for
+                                        if can_fetch_candles(now):
+                                            candle_day = now.strftime("%Y-%m-%d")
+                                            end_time = cap_end_time(candle_day, now)
+                                        else:
+                                            # After hours / weekend: use last trading day
+                                            candle_day = prev_day_str
+                                            end_time = f"{candle_day} 15:30"
+
+                                        # Seed 1m candles → CandleStore auto-builds 5m/15m
+                                        raw_1m = broker.fetch_candles(
+                                            token, f"{candle_day} 09:15", end_time, "ONE_MINUTE",
+                                        )
+                                        if raw_1m:
+                                            store.seed_from_candles(raw_1m, "1m")
+
+                                        # Persist to session state
+                                        sym_data = {}
+                                        for tf_key in ["1m", "5m", "15m"]:
+                                            bars = store.get_bars_as_dicts(tf_key)
+                                            for b in bars:
+                                                if isinstance(b.get("timestamp"), datetime):
+                                                    b["timestamp"] = b["timestamp"].isoformat()
+                                            sym_data[tf_key] = bars
+                                        sym_data["vwap"] = store.vwap
+                                        sym_data["prev_day"] = {
+                                            "high": store.prev_day_high,
+                                            "low": store.prev_day_low,
+                                            "close": store.prev_day_close,
+                                        }
+
+                                        if "screener_candles" not in st.session_state:
+                                            st.session_state["screener_candles"] = {}
+                                        st.session_state["screener_candles"][chart_sym] = sym_data
+                                        st.session_state["screener_candles_ts"] = datetime.now()
+
+                                        candles = sym_data.get(sel_tf, [])
+                                        vwap_val = sym_data.get("vwap", 0)
+                                        prev = sym_data.get("prev_day", {})
+                                        if prev.get("high", 0) > 0 and prev.get("close", 0) > 0:
+                                            from trading.utils.indicators import camarilla_pivots
+                                            pivots = camarilla_pivots(prev["high"], prev["low"], prev["close"])
+                                        source_label = f"Live ({datetime.now().strftime('%H:%M:%S')})"
+                                except Exception as e:
+                                    st.error(f"Candle build failed: {e}")
+
+                    else:
+                        # ── Daily / Weekly: fetch from REST API ──
+                        with st.spinner(f"Loading {chart_sym} {sel_tf} chart..."):
+                            try:
+                                from dashboard_utils.candle_cache import fetch_and_cache_candles, get_candles_for_timeframe
+                                fetch_and_cache_candles(chart_sym)
+                                candles = get_candles_for_timeframe(chart_sym, sel_tf)
+                                source_label = f"REST API | {sel_tf}"
+                            except Exception as e:
+                                st.error(f"Chart failed: {e}")
+
+                    # ── Render chart ──
+                    if candles:
+                        from trading.utils.indicators import bollinger_bands
+                        closes = [c["close"] for c in candles]
+                        bb = bollinger_bands(closes) if len(closes) >= 20 else {}
+
+                        if source_label:
+                            st.caption(f"Source: {source_label} | {len(candles)} candles")
+
+                        render_indicator_chart(
+                            candles, chart_sym, pivots=pivots, bb=bb,
+                            vwap_val=vwap_val, timeframe=sel_tf, height=10,
+                        )
+                    else:
+                        st.info(f"No {sel_tf} candles for {chart_sym}. Run a scan or click Bootstrap above.")
+
+                    # ── Multi-day 5m context chart (below today's chart) ──
+                    if sel_tf == "5m":
+                        try:
+                            from dashboard_utils.candle_cache import fetch_and_cache_candles, get_candles_for_timeframe
+                            fetch_and_cache_candles(chart_sym)
+                            ctx_candles = get_candles_for_timeframe(chart_sym, "5m")
+                            if ctx_candles and len(ctx_candles) > 10:
+                                ctx_closes = [c["close"] for c in ctx_candles]
+                                ctx_bb = bollinger_bands(ctx_closes) if len(ctx_closes) >= 20 else {}
+                                st.caption(f"5m context — {len(ctx_candles)} candles (~5 days)")
+                                render_indicator_chart(
+                                    ctx_candles, chart_sym, bb=ctx_bb,
+                                    timeframe="5m", height=5,
+                                )
+                        except Exception:
+                            pass
 
     # ══════════════════════════════════════════════
     # TAB 2: SIGNALS
@@ -1371,6 +2161,28 @@ elif page == "Screener":
                     st.session_state["scr_signals"] = signals_found
                     st.session_state["scr_sig_ts"] = datetime.now()
                     st.session_state["scr_sig_stats"] = engine.get_stats()
+
+                    # Persist screener candle stores for Chart View
+                    # Convert CandleBar deques to serializable dicts
+                    screener_candles = {}
+                    for sym, store in engine.stores.items():
+                        sym_data = {}
+                        for tf in ["1m", "5m", "15m"]:
+                            bars = store.get_bars_as_dicts(tf)
+                            # Ensure timestamps are ISO strings for chart renderer
+                            for b in bars:
+                                if isinstance(b.get("timestamp"), datetime):
+                                    b["timestamp"] = b["timestamp"].isoformat()
+                            sym_data[tf] = bars
+                        sym_data["vwap"] = store.vwap
+                        sym_data["prev_day"] = {
+                            "high": store.prev_day_high,
+                            "low": store.prev_day_low,
+                            "close": store.prev_day_close,
+                        }
+                        screener_candles[sym] = sym_data
+                    st.session_state["screener_candles"] = screener_candles
+                    st.session_state["screener_candles_ts"] = datetime.now()
 
                 except Exception as e:
                     st.error(f"Scan failed: {e}")
@@ -3013,6 +3825,152 @@ elif page == "Backtest":
 
                 except Exception as e:
                     st.error(f"Backtest failed: {e}")
+
+
+# ══════════════════════════════════════════════
+# (Swing Scanner moved to React AlphaDesk UI)
+# ══════════════════════════════════════════════
+elif False:  # Swing Scanner — now in React
+    st.header("Swing Scanner — Oliver Kell Cycles")
+    st.caption("Daily/weekly cycle phase detection across NIFTY 100")
+
+    # ── Controls ──
+    sw_c1, sw_c2, sw_c3, sw_c4 = st.columns([2, 1, 1, 1])
+
+    sw_universe = sw_c1.selectbox(
+        "Universe", ["NIFTY 100", "NIFTY 50", "Custom"], index=0, key="sw_univ"
+    )
+    sw_custom = ""
+    if sw_universe == "Custom":
+        sw_custom = sw_c1.text_input("Symbols (comma-separated)", key="sw_custom_sym")
+
+    sw_threshold = sw_c2.number_input(
+        "Extension σ", min_value=1.0, max_value=5.0, value=2.0, step=0.1, key="sw_ext"
+    )
+    sw_actionable_only = sw_c3.checkbox("Actionable only", value=False, key="sw_act")
+    sw_scan_btn = sw_c4.button("🔍 Scan", key="sw_scan", type="primary")
+
+    if sw_scan_btn:
+        from dashboard_utils.market_scanner import NIFTY_50_SYMBOLS, SCREENER_UNIVERSE
+        from trading.config import OKCycleConfig
+        from trading.swing.ok_cycles import (
+            BULLISH_ACTIONABLE,
+            BEARISH_ACTIONABLE,
+            CyclePhase,
+            TrendState,
+        )
+        from trading.swing.ok_scanner import OKScanner
+
+        # Resolve symbols
+        if sw_universe == "Custom" and sw_custom:
+            sw_symbols = [s.strip().upper() for s in sw_custom.split(",")]
+        elif sw_universe == "NIFTY 50":
+            sw_symbols = list(NIFTY_50_SYMBOLS)
+        else:
+            sw_symbols = list(SCREENER_UNIVERSE)
+
+        cfg = OKCycleConfig(ext_threshold=sw_threshold)
+
+        with st.spinner(f"Scanning {len(sw_symbols)} symbols on daily/weekly charts..."):
+            scanner = OKScanner(cfg=cfg)
+            sw_results = scanner.scan(sw_symbols)
+
+        if sw_actionable_only:
+            sw_results = scanner.get_actionable()
+
+        # ── Summary metrics ──
+        sw_active = [r for r in sw_results if r.phase != CyclePhase.NONE]
+        sw_buy = [r for r in sw_results if r.phase in BULLISH_ACTIONABLE and r.aligned]
+        sw_short = [r for r in sw_results if r.phase in BEARISH_ACTIONABLE and r.aligned]
+        sw_watch = [r for r in sw_results if r.phase == CyclePhase.REVERSAL_EXTENSION]
+
+        m1, m2, m3, m4, m5 = st.columns(5)
+        m1.metric("Scanned", len(sw_results))
+        m2.metric("Active Phases", len(sw_active))
+        m3.metric("BUY (aligned)", len(sw_buy))
+        m4.metric("SHORT (aligned)", len(sw_short))
+        m5.metric("WATCH", len(sw_watch))
+
+        # ── Phase distribution ──
+        summary = scanner.summary()
+        phase_items = {k: v for k, v in summary.items() if k != "NONE"}
+        if phase_items:
+            st.markdown("---")
+            st.subheader("Phase Distribution")
+
+            # Color map for phases
+            phase_colors = {
+                "RE": "#4CAF50", "WP": "#2196F3", "EC": "#9C27B0", "BB": "#009688",
+                "EX": "#F44336", "WD": "#880E4F", "EC_BEAR": "#FF9800", "BB_BEAR": "#FFC107",
+            }
+            cols = st.columns(len(phase_items))
+            for i, (phase_key, count) in enumerate(sorted(phase_items.items())):
+                color = phase_colors.get(phase_key, "#666")
+                cols[i].markdown(
+                    f"<div style='text-align:center; padding:8px; "
+                    f"background-color:{color}20; border-left:3px solid {color}; "
+                    f"border-radius:4px;'>"
+                    f"<b style='color:{color}'>{phase_key}</b><br>"
+                    f"<span style='font-size:1.5em'>{count}</span></div>",
+                    unsafe_allow_html=True,
+                )
+
+        # ── Results table ──
+        if sw_active:
+            st.markdown("---")
+            st.subheader("Cycle Phases Detected")
+
+            import pandas as pd
+
+            rows = []
+            for r in sw_active:
+                trend_d_icon = "🟢" if r.trend_daily == TrendState.BULLISH else (
+                    "🔴" if r.trend_daily == TrendState.BEARISH else "⚪"
+                )
+                trend_w_icon = "🟢" if r.trend_weekly == TrendState.BULLISH else (
+                    "🔴" if r.trend_weekly == TrendState.BEARISH else "⚪"
+                )
+                rows.append({
+                    "Symbol": r.symbol,
+                    "Phase": r.phase.value,
+                    "Action": r.action,
+                    "Daily": f"{trend_d_icon} {r.trend_daily.value}",
+                    "Weekly": f"{trend_w_icon} {r.trend_weekly.value}",
+                    "Aligned": "✅" if r.aligned else "❌",
+                    "Close": f"₹{r.last_close:,.2f}",
+                    "EMA10": f"₹{r.ema_fast:,.2f}",
+                    "EMA20": f"₹{r.ema_mid:,.2f}",
+                    "EMA50": f"₹{r.ema_slow:,.2f}",
+                    "Conf": f"{r.confidence:.0%}",
+                    "Vol": f"{r.volume_ratio:.1f}x",
+                })
+
+            df_results = pd.DataFrame(rows)
+            st.dataframe(df_results, use_container_width=True, hide_index=True)
+
+        elif not sw_actionable_only:
+            st.info("No active cycle phases detected in the scanned universe.")
+
+        # ── Trading rules reference ──
+        with st.expander("📖 Oliver Kell Cycle Trading Rules"):
+            st.markdown("""
+| Phase | Code | Action | Description |
+|-------|------|--------|-------------|
+| Reversal Extension | RE | WATCH | Potential bottom — price extended below EMAs with volume spike |
+| Wedge Pop | WP | **BUY** | Momentum entry — price crosses above EMAs with volume |
+| EMA Crossback | EC | **BUY** | Low-risk pullback entry — price tests EMA support and bounces |
+| Basin Break | BB | **BUY** | Continuation — breakout from consolidation near EMAs |
+| Exhaustion Extension | EX | SELL | Potential top — price extended above EMAs with volume spike |
+| Wedge Drop | WD | AVOID | Breakdown — price drops below EMAs |
+| Bear EMA Crossback | EC_BEAR | SHORT | Failed bounce at EMA resistance |
+| Bear Basin Break | BB_BEAR | SHORT | Continuation down from consolidation |
+
+**Best setups:** BUY phases (WP, EC, BB) when both daily AND weekly trends are bullish (aligned ✅).
+
+**Stop Loss:** Below EMA10/20 for longs, above EMA10/20 for shorts.
+
+**EMAs:** Fast=10, Mid=20, Slow=50. Bullish trend = EMA10 > EMA20 > EMA50.
+            """)
 
 
 # ══════════════════════════════════════════════
