@@ -175,9 +175,10 @@ class TickerService:
                 self._nse_by_name[name] = parsed
                 self._nse_by_token[tok] = parsed
 
-            # NFO instruments: index by full key for option lookups
-            elif seg == "NFO":
-                self._nfo_by_key[f"NFO:{sym}"] = inst
+            # NFO + BFO instruments: index by full key for option lookups
+            # BFO = BSE F&O segment (SENSEX, BANKEX options)
+            elif seg in ("NFO", "BFO"):
+                self._nfo_by_key[f"{seg}:{sym}"] = inst
 
     # ──────────────────────────────────────────────
     # Token lookups
@@ -272,8 +273,11 @@ class TickerService:
         """
         Find CE and PE tokens for an index option.
 
+        Searches both NFO (NIFTY, BANKNIFTY) and BFO (SENSEX, BANKEX)
+        instruments.
+
         Args:
-            underlying: "NIFTY" or "BANKNIFTY"
+            underlying: "NIFTY", "BANKNIFTY", or "SENSEX"
             strike: 23200
             expiry_str: "17MAR26" (DDMMMYY)
 
@@ -283,16 +287,23 @@ class TickerService:
         """
         self._ensure_loaded()
 
-        # Use the existing find_option_token logic from options.data_service
-        # but backed by our in-memory index for speed
+        from datetime import datetime
         import re
+
+        # Parse expiry string (DDMMMYY or DDMMMYYYY) to a date for matching
         m = re.match(r'^(\d{1,2})([A-Z]{3})(\d{2,4})$', expiry_str.strip().upper())
         if not m:
             return {}
 
         day, mon, year = m.group(1), m.group(2), m.group(3)
-        expected_expiry = f"{day.zfill(2)}{mon}{year[-2:]}"
-        strike_str = str(strike)
+        year_full = f"20{year}" if len(year) == 2 else year
+        try:
+            target_date = datetime.strptime(f"{day.zfill(2)}{mon}{year_full}", "%d%b%Y").date()
+        except ValueError:
+            return {}
+
+        # Angel One stores strike in paisa (78000 → 7800000.000000)
+        strike_paisa = strike * 100.0
 
         result = {}
         for option_type in ["CE", "PE"]:
@@ -301,18 +312,25 @@ class TickerService:
                 if (
                     inst.get("name") == underlying
                     and inst.get("instrumenttype") == "OPTIDX"
-                    and option_type in sym
-                    and strike_str in sym
-                    and sym.startswith(underlying)
+                    and sym.endswith(option_type)
                 ):
-                    after_name = sym[len(underlying):]
-                    strike_pos = after_name.find(strike_str)
-                    if strike_pos > 0:
-                        sym_expiry = after_name[:strike_pos]
-                        sym_option = after_name[strike_pos + len(strike_str):]
-                        if sym_option == option_type and sym_expiry.upper() == expected_expiry:
-                            result[option_type] = (sym, inst.get("token", ""))
-                            break
+                    # Match strike from metadata (exact, no substring ambiguity)
+                    try:
+                        inst_strike = float(inst.get("strike", 0))
+                    except (ValueError, TypeError):
+                        continue
+                    if abs(inst_strike - strike_paisa) > 1:
+                        continue
+
+                    # Match expiry date from metadata (works for both NSE and BSE symbol formats)
+                    inst_expiry = inst.get("expiry", "")
+                    try:
+                        inst_date = datetime.strptime(inst_expiry, "%d%b%Y").date()
+                    except (ValueError, TypeError):
+                        continue
+                    if inst_date == target_date:
+                        result[option_type] = (sym, inst.get("token", ""))
+                        break
 
         return result
 

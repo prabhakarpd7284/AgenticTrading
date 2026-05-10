@@ -118,13 +118,13 @@ def find_option_token(
     option_type: str,
 ) -> Optional[Tuple[str, str]]:
     """
-    Find the Angel One NFO token for a NIFTY/BANKNIFTY option.
+    Find the Angel One token for an index option (NFO or BFO).
 
     Delegates to the centralized ticker_service which keeps a daily-refreshed
-    in-memory index of all NFO instruments.
+    in-memory index of all NFO + BFO instruments.
 
     Args:
-        underlying: "NIFTY" or "BANKNIFTY"
+        underlying: "NIFTY", "BANKNIFTY", or "SENSEX"
         strike: 24200
         expiry_str: "10MAR26" or "10MAR2026" (both accepted)
         option_type: "CE" or "PE"

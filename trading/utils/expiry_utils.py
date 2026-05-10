@@ -133,8 +133,15 @@ def next_expiry_date(underlying: str = "NIFTY") -> Optional[date]:
     except Exception:
         pass
 
-    # Fallback: hardcoded weekday
-    expiry_weekday = 1 if underlying == "NIFTY" else 2  # Tue=1, Wed=2
+    # Fallback: hardcoded weekday (post Sep-2025 SEBI standardisation)
+    # NSE indices (NIFTY) → Tuesday (weekday 1)
+    # BSE indices (SENSEX) → Thursday (weekday 3)
+    # BANKNIFTY → no weekly; monthly = last Tuesday
+    expiry_weekday = {
+        "NIFTY": 1,       # Tuesday
+        "BANKNIFTY": 1,   # Tuesday (monthly — last of month)
+        "SENSEX": 3,      # Thursday
+    }.get(underlying, 1)
     days_ahead = (expiry_weekday - today.weekday()) % 7
     if days_ahead == 0:
         return today
