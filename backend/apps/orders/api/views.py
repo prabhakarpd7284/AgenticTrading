@@ -5,12 +5,12 @@ from apps.common.di import container
 from apps.orders.domain.entities import OrderDraft
 from apps.orders.models import Order
 from apps.orders.services.place_order import PlaceOrder
-from apps.orders.services.risk_guard import DeterministicRiskGuard
 from apps.portfolio.models import Portfolio
+from apps.trades.services.risk_engine import RiskEngine
 
 
 # Wire default binding on import (can be overridden in tests).
-container.bind(PlaceOrder, lambda: PlaceOrder(risk=DeterministicRiskGuard()))
+container.bind(PlaceOrder, lambda: PlaceOrder(risk=RiskEngine()))
 
 
 class OrderReadSerializer(serializers.ModelSerializer):

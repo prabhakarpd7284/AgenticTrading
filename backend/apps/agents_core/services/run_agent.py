@@ -50,9 +50,13 @@ class ChannelsPublisher:
 
 def build_context(run: AgentRun, publisher: ChannelsPublisher) -> AgentContext:
     from apps.market_data.services.data_port import DefaultMarketData
-    from apps.orders.services.risk_guard import DeterministicRiskGuard
+    from apps.trades.services.risk_engine import RiskEngine
     from apps.rag.services.router import DefaultRAGRouter
     from apps.journals.services.journal_port import JournalAdapter
+
+    # Canonical 10-criterion risk engine; wrapped in an adapter so plugin
+    # nodes can keep calling `ctx.risk.validate(draft_dict)`.
+    risk_port = RiskEngine().as_risk_port(portfolio_id=run.portfolio_id)
 
     return AgentContext(
         run_id=run.id,
@@ -61,7 +65,7 @@ def build_context(run: AgentRun, publisher: ChannelsPublisher) -> AgentContext:
         portfolio_id=run.portfolio_id,
         market_data=DefaultMarketData(run.tenant_id),
         rag=DefaultRAGRouter(run.tenant_id),
-        risk=DeterministicRiskGuard(),
+        risk=risk_port,
         journal=JournalAdapter(run.tenant_id),
         publisher=publisher,
         config=run.config or {},

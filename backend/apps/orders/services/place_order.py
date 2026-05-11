@@ -1,19 +1,24 @@
-"""Use-case: place an order. Uses Outbox pattern — returns HTTP 202 + order id."""
+"""Use-case: place an order. Uses Outbox pattern — returns HTTP 202 + order id.
+
+Risk validation goes through the canonical RiskEngine in
+apps.trades.services.risk_engine (10-criterion gate ported from the
+legacy trading.services.risk_engine).
+"""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from django.db import transaction
 
-from apps.agents_core.domain.contracts import RiskPort
 from apps.common.exceptions import RiskRejected
 from apps.orders.domain.entities import OrderDraft, OrderResult
 from apps.orders.models import Order, OutboxEvent
+from apps.trades.services.risk_engine import RiskEngine, TradeDraft
 
 
 @dataclass
 class PlaceOrder:
-    risk: RiskPort
+    risk: RiskEngine = field(default_factory=RiskEngine)
 
     @transaction.atomic
     def execute(self, tenant, user, portfolio, draft: OrderDraft,
@@ -26,7 +31,17 @@ class PlaceOrder:
             if existing:
                 return OrderResult(id=str(existing.id), status=existing.status)
 
-        decision = self.risk.validate({**draft.model_dump(), "portfolio_id": portfolio.id})
+        # Convert OrderDraft → TradeDraft for the canonical risk engine.
+        trade_draft = TradeDraft(
+            symbol=draft.symbol,
+            side=draft.side,
+            entry_price=float(draft.price or 0),
+            stop_loss=float(draft.sl or 0),
+            target=float(draft.tp or 0),
+            quantity=int(draft.qty),
+            confidence=0.55,  # Manual / API orders default to threshold; agents pass real value
+        )
+        decision = self.risk.validate(trade_draft, portfolio_id=portfolio.id)
         if not decision.approved:
             raise RiskRejected(decision.reason)
 

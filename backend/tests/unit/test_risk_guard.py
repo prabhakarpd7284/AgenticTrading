@@ -1,18 +1,18 @@
-"""Deterministic RiskGuard — the last line of defence before any broker call.
+"""Deterministic RiskGuard — DEPRECATED tests.
 
-Every rule below is a standalone unit test. If any of these regresses, the
-system is unsafe to ship. No mocks of the risk rules themselves — we only
-stub the portfolio snapshot.
+This test module exercises the legacy `DeterministicRiskGuard` shim which now
+delegates to the canonical `apps.trades.services.risk_engine.RiskEngine`. The
+new engine has stricter 10-criterion validation, so drafts must carry full
+trade economics (entry_price + stop_loss + target) — not just `price`.
 
-Rules covered:
+The fresh test suite against the canonical engine lives in
+`tests/unit/test_risk_engine.py`. Once the deprecation window closes (Phase 6
+of the redesign-v2 migration), this file gets deleted.
+
+Rules still covered by this shim:
   1. qty ≤ 0 → reject
   2. TRADING_MODE == "halt" → reject (kill-switch)
-  3. notional > MAX_POSITION_SIZE_PCT of capital → reject
-  4. portfolio.day_pnl ≤ −(MAX_DAILY_LOSS_PCT of capital) → reject
-  5. happy path → approve
-
-TODO (tracked in TESTING_STRATEGY.md §8): add hypothesis strategies that
-fuzz portfolio snapshot + order draft combinations to prove determinism.
+  3-10. delegated to the canonical engine when portfolio_id is present
 """
 from __future__ import annotations
 
@@ -53,11 +53,17 @@ def guard(paper_snap):
 
 
 def _draft(**overrides):
+    # The new engine requires entry/SL/target/confidence; defaults keep R:R 1.74 and
+    # confidence above the threshold so size/daily-loss tests can vary one knob at a time.
     base = {
         "portfolio_id": "00000000-0000-4000-a000-000000000001",
         "symbol": "HDFCBANK",
         "qty": 10,
         "price": 1_600,
+        "entry_price": 1_600,
+        "stop_loss": 1_592,
+        "target": 1_614,
+        "confidence": 0.72,
         "side": "BUY",
     }
     base.update(overrides)
@@ -91,7 +97,8 @@ def test_rejects_position_over_size_cap(guard):
     # 100 × 1,600 = 160,000 ≈ 32% of 500,000 → over 10% cap
     decision = guard.validate(_draft(qty=100, price=1_600))
     assert decision.approved is False
-    assert "position size" in decision.reason
+    # Canonical engine phrases the failure as "Position value … exceeds …% of capital"
+    assert "Position value" in decision.reason or "position size" in decision.reason
 
 
 def test_accepts_position_at_or_under_size_cap(guard):
