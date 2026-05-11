@@ -114,7 +114,7 @@ def build_swing_scanner(
     # Resolve symbols
     if symbols is None:
         try:
-            from dashboard_utils.market_scanner import SCREENER_UNIVERSE
+            from apps.market_data.constants import SCREENER_UNIVERSE
             symbols = list(SCREENER_UNIVERSE)
         except Exception as e:
             logger.warning("Could not load SCREENER_UNIVERSE: %s", e)

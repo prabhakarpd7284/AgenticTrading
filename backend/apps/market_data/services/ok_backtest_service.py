@@ -88,7 +88,7 @@ def _smart_universe(mode: str, scan_date: str | None = None) -> list[str]:
         return cached["symbols"]
 
     try:
-        from dashboard_utils.market_scanner import SCREENER_UNIVERSE
+        from apps.market_data.constants import SCREENER_UNIVERSE
         from trading.swing.ok_scanner import OKScanner
         from trading.swing.ok_cycles import CyclePhase
 
@@ -120,7 +120,7 @@ def _smart_universe(mode: str, scan_date: str | None = None) -> list[str]:
         logger.warning(f"Smart universe scan failed: {e}, falling back to NIFTY 50")
 
     try:
-        from dashboard_utils.market_scanner import NIFTY_50_SYMBOLS
+        from apps.market_data.constants import NIFTY_50_SYMBOLS
         fallback = list(NIFTY_50_SYMBOLS)
         _smart_universe._last_scan = {
             "scanned": 0, "active": 0, "symbols": fallback,
