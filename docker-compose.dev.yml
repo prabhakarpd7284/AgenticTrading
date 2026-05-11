@@ -1,0 +1,30 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: alphadesk-pg
+    environment:
+      POSTGRES_USER: alphadesk
+      POSTGRES_PASSWORD: alphadesk
+      POSTGRES_DB: alphadesk
+    ports: ["5436:5432"]
+    volumes: ["pgdata:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U alphadesk"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: alphadesk-redis
+    ports: ["6379:6379"]
+    volumes: ["redisdata:/data"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pgdata:
+  redisdata:

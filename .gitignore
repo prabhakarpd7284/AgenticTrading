@@ -25,6 +25,8 @@ frontend/.env.*
 
 # ── Local data / runtime ──
 db.sqlite3
+db.sqlite3.bak*
+*.bak
 logs/
 NSE_CM_sym_master.json
 *.jsonl
