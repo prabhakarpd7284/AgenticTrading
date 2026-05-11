@@ -211,8 +211,8 @@ def run_screener_backtest(
     through ScreenerEngine), but the new BacktestEngine for trade
     simulation (exits, P&L, stats).
     """
-    from trading.screener.backtest import run_backtest as _old_replay
-    from trading.screener.backtest import BacktestResult as OldResult
+    from plugins.strategy_screener.backtest import run_backtest as _old_replay
+    from plugins.strategy_screener.backtest import BacktestResult as OldResult
 
     # Step 1: Use old screener replay to collect signals
     # (the screener's tick-by-tick replay + strategy evaluation is

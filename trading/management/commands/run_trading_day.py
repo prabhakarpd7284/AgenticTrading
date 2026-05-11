@@ -504,8 +504,8 @@ class Command(BaseCommand):
         Lightweight — reuses cached candle data, no extra API calls.
         """
         try:
-            from trading.screener.engine import ScreenerEngine
-            from trading.screener.strategies import STRATEGIES
+            from plugins.strategy_screener.engine import ScreenerEngine
+            from plugins.strategy_screener.strategies import STRATEGIES
             from trading.services.ticker_service import ticker_service
             from trading.utils.time_utils import can_fetch_candles, cap_end_time
 

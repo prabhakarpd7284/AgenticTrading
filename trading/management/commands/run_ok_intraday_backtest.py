@@ -38,7 +38,7 @@ class Command(BaseCommand):
         parser.add_argument("--telegram", action="store_true", help="Send report to Telegram")
 
     def handle(self, *args, **options):
-        from dashboard_utils.market_scanner import NIFTY_50_SYMBOLS
+        from apps.market_data.constants import NIFTY_50_SYMBOLS
         from trading.backtester.compat import run_intraday_backtest
         from trading.backtester.report import ReportFormatter
         from trading.backtester.types import PnLMode

@@ -34,7 +34,7 @@ from logzero import logger
 
 load_dotenv()  # Load .env for TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, etc.
 
-from dashboard_utils.market_scanner import NIFTY_50_SYMBOLS, SCREENER_UNIVERSE
+from apps.market_data.constants import NIFTY_50_SYMBOLS, SCREENER_UNIVERSE
 
 
 class Command(BaseCommand):
@@ -66,7 +66,7 @@ class Command(BaseCommand):
         parser.add_argument("--poll-interval", type=float, default=5.0, help="Polling interval in seconds")
 
     def handle(self, *args, **options):
-        from trading.screener.strategies import STRATEGIES
+        from plugins.strategy_screener.strategies import STRATEGIES
 
         # List strategies
         if options["list_strategies"]:
@@ -136,7 +136,7 @@ class Command(BaseCommand):
 
         # Send to Telegram if enabled
         if options.get("telegram"):
-            from trading.screener.telegram import TelegramAlertService
+            from plugins.strategy_screener.telegram import TelegramAlertService
             telegram = TelegramAlertService()
             if telegram.is_configured:
                 # Build Telegram-friendly summary
@@ -181,9 +181,9 @@ class Command(BaseCommand):
                 self.stderr.write("Telegram not configured\n")
 
     def _run_live(self, symbols, strategies, options):
-        from trading.screener.engine import ScreenerEngine
-        from trading.screener.tick_stream import TickStream
-        from trading.screener.telegram import TelegramAlertService
+        from plugins.strategy_screener.engine import ScreenerEngine
+        from plugins.strategy_screener.tick_stream import TickStream
+        from plugins.strategy_screener.telegram import TelegramAlertService
 
         self.stdout.write(f"\n═══ Live Screener ═══")
         self.stdout.write(f"\nSymbols: {len(symbols)} | Strategies: {len(strategies)}")
