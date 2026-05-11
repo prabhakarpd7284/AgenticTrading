@@ -72,7 +72,8 @@ class Command(BaseCommand):
         parser.add_argument("--dry-run", action="store_true",
                             help="Print counts without writing anything")
         parser.add_argument("--phase", default="all",
-                            choices=["all", "trades", "audit", "options", "snapshots"],
+                            choices=["all", "trades", "audit", "options", "snapshots",
+                                      "signals", "watchlist", "knowledge", "system"],
                             help="Restrict to a single phase (for retries)")
 
     def handle(self, *args, **opts):
@@ -82,8 +83,13 @@ class Command(BaseCommand):
             from trading.models import (  # noqa: F401  — local to lift
                 AuditLog as LegacyAuditLog,
                 PortfolioSnapshot as LegacyPortfolioSnapshot,
+                SignalLog as LegacySignalLog,
                 StraddlePosition as LegacyStraddle,
+                StrategyDoc as LegacyStrategyDoc,
+                SystemControl as LegacySystemControl,
                 TradeJournal as LegacyTradeJournal,
+                TraderNote as LegacyTraderNote,
+                WatchlistEntry as LegacyWatchlist,
             )
         except ImportError as e:
             raise CommandError(
@@ -95,6 +101,11 @@ class Command(BaseCommand):
         self.LegacyAuditLog = LegacyAuditLog
         self.LegacyStraddle = LegacyStraddle
         self.LegacyPortfolioSnapshot = LegacyPortfolioSnapshot
+        self.LegacySignalLog = LegacySignalLog
+        self.LegacyWatchlist = LegacyWatchlist
+        self.LegacyStrategyDoc = LegacyStrategyDoc
+        self.LegacySystemControl = LegacySystemControl
+        self.LegacyTraderNote = LegacyTraderNote
 
         tenant = self._resolve_tenant(opts["tenant"])
         portfolio = self._resolve_portfolio(tenant)
@@ -117,6 +128,14 @@ class Command(BaseCommand):
             self._lift_straddles(tenant, portfolio)
         if phase in ("all", "snapshots"):
             self._lift_snapshots(tenant, portfolio)
+        if phase in ("all", "signals"):
+            self._lift_signals(tenant)
+        if phase in ("all", "watchlist"):
+            self._lift_watchlist(tenant)
+        if phase in ("all", "knowledge"):
+            self._lift_knowledge(tenant)
+        if phase in ("all", "system"):
+            self._lift_system(tenant)
 
         self.stdout.write(self.style.SUCCESS("\nDone."))
 
@@ -285,18 +304,15 @@ class Command(BaseCommand):
                 )
                 created_legs += 2
 
-                # management_log[] → Event rows
-                # (Event model doesn't have an options_position FK; we
-                # serialize position metadata into the payload so the
-                # event log can be joined back via payload.straddle_id.)
+                # management_log[] → Event rows, linked via options_position FK
                 for entry in (sp.management_log or []):
                     Event.objects.create(
                         tenant=tenant,
                         ts=self._parse_ts(entry.get("time")) or sp.last_updated,
                         type=Event.Type.STRADDLE_LEG_ROLLED,
                         actor_kind=Event.ActorKind.WORKFLOW,
+                        options_position=pos,
                         payload={
-                            "straddle_id": str(pos.id),
                             "legacy_straddle_id": sp.id,
                             "action": entry.get("action"),
                             "nifty": entry.get("nifty"),
@@ -331,6 +347,159 @@ class Command(BaseCommand):
             except ValueError:
                 return None
         return value
+
+    # ── Phase 6: SignalLog → strategies.Signal ───────────────────────
+
+    def _lift_signals(self, tenant: Tenant):
+        from apps.strategies.models import Signal
+
+        existing = set(
+            Signal.objects.filter(tenant=tenant, legacy_signal_log_id__isnull=False)
+            .values_list("legacy_signal_log_id", flat=True)
+        )
+        qs = self.LegacySignalLog.objects.using("legacy").exclude(id__in=existing)
+        total = qs.count()
+        self.stdout.write(f"\n· SignalLog: {total} new legacy rows")
+        if self.dry or total == 0:
+            return
+
+        # Build legacy-trade-journal-id → new-trade lookup so signals
+        # whose `trade_journal_id` is set can be relinked.
+        tj_to_trade = dict(
+            Trade.objects.filter(tenant=tenant, legacy_trade_journal_id__isnull=False)
+            .values_list("legacy_trade_journal_id", "id")
+        )
+
+        created = 0
+        with transaction.atomic():
+            for sl in qs.iterator(chunk_size=500):
+                Signal.objects.create(
+                    tenant=tenant,
+                    symbol=sl.symbol,
+                    signal_date=sl.signal_date,
+                    signal_time=sl.signal_time,
+                    source=sl.source,
+                    strategy=sl.strategy,
+                    side=sl.side,
+                    entry_price=sl.entry_price,
+                    stoploss=sl.stoploss,
+                    target=sl.target,
+                    confidence=sl.confidence,
+                    risk_reward=sl.risk_reward,
+                    reasons=sl.reasons or [],
+                    indicators=sl.indicators or {},
+                    outcome=sl.outcome,
+                    outcome_reason=sl.outcome_reason or "",
+                    trade_id=tj_to_trade.get(sl.trade_journal_id) if sl.trade_journal_id else None,
+                    eod_price=sl.eod_price,
+                    max_favorable_move=sl.max_favorable_move,
+                    max_adverse_move=sl.max_adverse_move,
+                    legacy_signal_log_id=sl.id,
+                )
+                created += 1
+        self.stdout.write(f"  ✓ created {created} Signal rows")
+
+    # ── Phase 7: WatchlistEntry → strategies.WatchlistEntry ──────────
+
+    def _lift_watchlist(self, tenant: Tenant):
+        from apps.strategies.models import WatchlistEntry as V2Watchlist
+
+        existing = set(
+            V2Watchlist.objects.filter(tenant=tenant, legacy_watchlist_id__isnull=False)
+            .values_list("legacy_watchlist_id", flat=True)
+        )
+        qs = self.LegacyWatchlist.objects.using("legacy").exclude(id__in=existing)
+        total = qs.count()
+        self.stdout.write(f"\n· WatchlistEntry: {total} new legacy rows")
+        if self.dry or total == 0:
+            return
+
+        created = 0
+        with transaction.atomic():
+            for w in qs.iterator(chunk_size=500):
+                V2Watchlist.objects.update_or_create(
+                    tenant=tenant, symbol=w.symbol, scan_date=w.scan_date,
+                    defaults=dict(
+                        score=w.score,
+                        bias=w.bias,
+                        setups=w.setups or [],
+                        prev_high=w.prev_high,
+                        prev_low=w.prev_low,
+                        prev_close=w.prev_close,
+                        prev_atr=w.prev_atr,
+                        orb_high=w.orb_high,
+                        orb_low=w.orb_low,
+                        vwap=w.vwap,
+                        outcome=w.outcome,
+                        triggered_setup=w.triggered_setup or "",
+                        reason=w.reason or "",
+                        legacy_watchlist_id=w.id,
+                    ),
+                )
+                created += 1
+        self.stdout.write(f"  ✓ upserted {created} WatchlistEntry rows")
+
+    # ── Phase 8: StrategyDoc → rag.KnowledgeDoc ──────────────────────
+
+    def _lift_knowledge(self, tenant: Tenant):
+        from apps.rag.models import KnowledgeDoc
+
+        existing = set(
+            KnowledgeDoc.objects.filter(tenant=tenant, legacy_strategy_doc_id__isnull=False)
+            .values_list("legacy_strategy_doc_id", flat=True)
+        )
+        qs = self.LegacyStrategyDoc.objects.using("legacy").exclude(id__in=existing)
+        total = qs.count()
+        self.stdout.write(f"\n· StrategyDoc: {total} new legacy rows")
+        if self.dry or total == 0:
+            return
+
+        created = 0
+        with transaction.atomic():
+            for sd in qs.iterator(chunk_size=200):
+                KnowledgeDoc.objects.create(
+                    tenant=tenant,
+                    title=sd.title,
+                    content=sd.content,
+                    category=sd.category,
+                    is_active=sd.is_active,
+                    legacy_strategy_doc_id=sd.id,
+                )
+                created += 1
+        self.stdout.write(f"  ✓ created {created} KnowledgeDoc rows")
+
+    # ── Phase 9: SystemControl + TraderNote ──────────────────────────
+
+    def _lift_system(self, tenant: Tenant):
+        from apps.system.models import SystemControl, TraderNote
+
+        sc_qs = self.LegacySystemControl.objects.using("legacy").all()
+        sc_total = sc_qs.count()
+        tn_qs = self.LegacyTraderNote.objects.using("legacy").all()
+        tn_total = tn_qs.count()
+        self.stdout.write(
+            f"\n· SystemControl: {sc_total} rows · TraderNote: {tn_total} rows"
+        )
+        if self.dry:
+            return
+
+        sc_created = tn_created = 0
+        with transaction.atomic():
+            for sc in sc_qs.iterator(chunk_size=200):
+                SystemControl.objects.update_or_create(
+                    tenant=tenant, key=sc.key,
+                    defaults={"value": sc.value or {}},
+                )
+                sc_created += 1
+            for tn in tn_qs.iterator(chunk_size=200):
+                TraderNote.objects.update_or_create(
+                    tenant=tenant, symbol=tn.symbol,
+                    defaults={"note": tn.note or ""},
+                )
+                tn_created += 1
+        self.stdout.write(
+            f"  ✓ upserted {sc_created} SystemControl + {tn_created} TraderNote rows"
+        )
 
     # ── Phase 5: PortfolioSnapshot ────────────────────────────────────
 

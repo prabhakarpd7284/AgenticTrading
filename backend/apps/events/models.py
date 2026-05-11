@@ -112,13 +112,20 @@ class Event(TenantModel):
     step_name = models.CharField(max_length=64, blank=True, default="")
 
     # Domain links (nullable — only set when relevant)
+    # `trade_id` and `signal_id` are soft UUID refs to dodge FK ordering pain
+    # during the unification migration; `options_position` is a hard FK since
+    # OptionsPosition is in the same app boundary as Trade.
     trade_id = models.UUIDField(null=True, blank=True, db_index=True,
-                                 help_text="FK to trading.Trade (added when that model exists)")
+                                 help_text="Soft FK to trades.Trade.id")
+    options_position = models.ForeignKey(
+        "trades.OptionsPosition", null=True, blank=True, on_delete=models.SET_NULL,
+        related_name="events",
+    )
     order = models.ForeignKey(
         "orders.Order", null=True, blank=True, on_delete=models.SET_NULL, related_name="+",
     )
     signal_id = models.BigIntegerField(null=True, blank=True, db_index=True,
-                                        help_text="FK to strategies.Signal (added later)")
+                                        help_text="Soft FK to strategies.Signal.id")
 
     # Body
     payload = models.JSONField(default=dict, blank=True,

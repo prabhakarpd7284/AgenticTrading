@@ -2,6 +2,44 @@ from __future__ import annotations
 
 from django.db import models
 
+from apps.common.tenancy import TenantModel
+
+
+class KnowledgeDoc(TenantModel):
+    """RAG knowledge document (rules, patterns, strategy notes).
+
+    Replaces the legacy `trading.StrategyDoc`. Despite the legacy name,
+    these aren't strategies — they're knowledge injected into LLM prompt
+    contexts via the RAG retriever. Hence the move to apps.rag.
+    """
+
+    class Category(models.TextChoices):
+        ENTRY    = "ENTRY"
+        EXIT     = "EXIT"
+        RISK     = "RISK"
+        SIZING   = "SIZING"
+        FILTER   = "FILTER"
+        GENERAL  = "GENERAL"
+        RULE     = "RULE"
+        PATTERN  = "PATTERN"
+        STRATEGY = "STRATEGY"
+
+    id = models.BigAutoField(primary_key=True)
+    title = models.CharField(max_length=200)
+    content = models.TextField()
+    category = models.CharField(max_length=16, choices=Category.choices, default=Category.GENERAL)
+    is_active = models.BooleanField(default=True)
+
+    # Legacy lift shim
+    legacy_strategy_doc_id = models.IntegerField(null=True, blank=True, db_index=True)
+
+    class Meta:
+        ordering = ["-updated_at"]
+        indexes = [models.Index(fields=["tenant", "category", "is_active"])]
+
+    def __str__(self) -> str:
+        return f"[{self.category}] {self.title}"
+
 
 class Embedding(models.Model):
     """Unified embeddings table (namespace column separates journal / news / etc).

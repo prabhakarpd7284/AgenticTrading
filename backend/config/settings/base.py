@@ -57,6 +57,7 @@ LOCAL_APPS = [
     "apps.audit",
     "apps.events",  # unified event log (redesign-v2; will eventually absorb journals + audit)
     "apps.trades",  # Trade + OptionsPosition + OptionsLeg (redesign-v2; will absorb portfolio.Position)
+    "apps.system",  # SystemControl + TraderNote (redesign-v2; will fold into apps.core later)
     "apps.notifications",
 ]
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
