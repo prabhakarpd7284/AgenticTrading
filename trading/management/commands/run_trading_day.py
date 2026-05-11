@@ -154,7 +154,7 @@ class Command(BaseCommand):
                     self._premarket_done = True
 
                 # AI pause check
-                from dashboard_utils.data_layer import is_ai_paused
+                from apps.system.services.flags import is_ai_paused
                 if is_ai_paused():
                     self._log("AI trading PAUSED. Waiting...", style="WARNING")
                     self._sleep(30)
@@ -712,10 +712,13 @@ class Command(BaseCommand):
                 continue
 
             if self._dry_run:
-                from dashboard_utils.data_layer import run_straddle_analysis
-                from trading.options.data_service import OptionsDataService
-                svc = OptionsDataService()
-                result = run_straddle_analysis(svc, pos.id, include_candles=False)
+                raise NotImplementedError(
+                    "run_straddle_analysis() lived in dashboard_utils.data_layer "
+                    "(legacy SQLite era). Phase 6 dropped the legacy DB. "
+                    "Run the short_straddle plugin via the strategies app instead, "
+                    "or refactor this command to use apps.trades.OptionsPosition."
+                )
+                result = {}  # unreachable
                 if "error" not in result:
                     pnl = result.get("net_pnl_inr", 0)
                     decay = result.get("premium_decayed_pct", 0)

@@ -111,7 +111,7 @@ class Command(BaseCommand):
                 continue
 
             # ── AI pause check ──
-            from dashboard_utils.data_layer import is_ai_paused
+            from apps.system.services.flags import is_ai_paused
             if is_ai_paused():
                 self._log("AI trading is PAUSED. Waiting...", style="WARNING")
                 self._sleep(30)
@@ -189,8 +189,13 @@ class Command(BaseCommand):
 
         try:
             if dry_run:
-                from dashboard_utils.data_layer import run_straddle_analysis
-                result = run_straddle_analysis(svc, pos.id, include_candles=False)
+                raise NotImplementedError(
+                    "run_straddle_analysis() lived in dashboard_utils.data_layer "
+                    "(legacy SQLite era). Phase 6 dropped the legacy DB. "
+                    "Run the short_straddle plugin via the strategies app instead, "
+                    "or refactor this command to use apps.trades.OptionsPosition."
+                )
+                result = {}  # unreachable, kept so the existing checks below still type-check
                 if "error" in result:
                     self._log(f"  ERROR: {result['error']}", style="ERROR")
                 else:

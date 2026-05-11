@@ -9,12 +9,12 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import django
 django.setup()
 
-from trading.screener.engine import ScreenerEngine
-from trading.screener.strategies import STRATEGIES
+from plugins.strategy_screener.engine import ScreenerEngine
+from plugins.strategy_screener.strategies import STRATEGIES
 from trading.services.data_service import BrokerClient, DataService
 from trading.services.ticker_service import ticker_service
-from trading.screener.telegram import TelegramAlertService
-from dashboard_utils.market_scanner import SCREENER_UNIVERSE
+from plugins.strategy_screener.telegram import TelegramAlertService
+from apps.market_data.constants import SCREENER_UNIVERSE
 from trading.utils.time_utils import last_trading_day, cap_end_time
 
 

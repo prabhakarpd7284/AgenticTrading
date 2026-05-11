@@ -78,7 +78,7 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
-        from dashboard_utils.market_scanner import (
+        from apps.market_data.constants import (
             NIFTY_50_SYMBOLS,
             SCREENER_UNIVERSE,
         )

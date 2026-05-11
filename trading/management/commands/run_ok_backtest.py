@@ -43,7 +43,7 @@ class Command(BaseCommand):
         parser.add_argument("--json", action="store_true", help="Output as JSON")
 
     def handle(self, *args, **options):
-        from dashboard_utils.market_scanner import NIFTY_50_SYMBOLS, SCREENER_UNIVERSE
+        from apps.market_data.constants import NIFTY_50_SYMBOLS, SCREENER_UNIVERSE
         from plugins.strategy_backtest.compat import run_ok_backtest
         from plugins.strategy_backtest.report import ReportFormatter
         from plugins.strategy_backtest.types import PnLMode
