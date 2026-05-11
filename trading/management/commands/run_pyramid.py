@@ -90,7 +90,7 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
-        from trading.pyramid.strategy import (
+        from plugins.strategy_pyramid.strategy import (
             Candle, PyramidConfig, run_pyramid, format_result,
         )
 
@@ -154,8 +154,8 @@ class Command(BaseCommand):
 
         # ── Telegram ──
         if options.get("telegram"):
-            from trading.pyramid.strategy import run_pyramid_with_chart_data
-            from trading.pyramid.telegram import send_pyramid_report
+            from plugins.strategy_pyramid.strategy import run_pyramid_with_chart_data
+            from plugins.strategy_pyramid.telegram import send_pyramid_report
             import time
 
             data = run_pyramid_with_chart_data(candles, symbol=symbol_label, config=config)
@@ -178,7 +178,7 @@ class Command(BaseCommand):
         """Fetch real option candles from Angel One."""
         from trading.options.data_service import find_option_token
         from trading.services.data_service import BrokerClient
-        from trading.pyramid.strategy import Candle
+        from plugins.strategy_pyramid.strategy import Candle
         from trading.utils.time_utils import cap_end_time
 
         # Find token
@@ -218,7 +218,7 @@ class Command(BaseCommand):
         sustained trending with higher lows → late fade.
         """
         import random
-        from trading.pyramid.strategy import Candle
+        from plugins.strategy_pyramid.strategy import Candle
 
         candles = []
         price = 180.0

@@ -783,11 +783,11 @@ def watchlist(request):
     return Response({"count": len(rows), "results": rows})
 
 
-# ── Pyramid (strategy code — STILL imports trading.pyramid for now) ──
-# This is the one endpoint that runs legacy strategy code. It will be
-# replaced by a plugin-based runner in Phase 3 (engine moves). Until
-# then it lazily imports the legacy module — if the broker stack isn't
-# importable, the @_with_legacy wrapper surfaces a 500 with detail.
+# ── Pyramid (plugin-backed) ─────────────────────────────────────────
+# Engine now lives at backend/plugins/strategy_pyramid/. This view still
+# directly calls the plugin's pure functions (run_pyramid_with_chart_data)
+# rather than going through the StrategyRun framework — Phase 3 follow-up
+# will route this through the workflow runtime once the framework is wired.
 
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
@@ -795,11 +795,11 @@ def watchlist(request):
 def pyramid(request):
     from datetime import date as dt_date, timedelta as td
 
-    from trading.options.data_service import find_option_token
-    from trading.pyramid.strategy import (
+    from plugins.strategy_pyramid.strategy import (
         Candle, PyramidConfig, run_pyramid_with_chart_data,
         _generate_pyramid_sample,
     )
+    from trading.options.data_service import find_option_token
     from trading.services.data_service import BrokerClient
     from trading.utils.expiry_utils import iso_to_angel, next_expiry_date
     from trading.utils.time_utils import cap_end_time

@@ -694,3 +694,53 @@ def format_result(result: PyramidResult) -> str:
 
     lines.append(f"{'=' * 70}")
     return "\n".join(lines)
+
+
+# ──────────────────────────────────────────────
+# Sample data generator
+# ──────────────────────────────────────────────
+
+def _generate_pyramid_sample() -> List[Candle]:
+    """Synthetic 5m candles for backtest dry-runs.
+
+    Six-phase trajectory designed to exercise initial entry, multiple
+    pyramid adds, and an eventual trail-SL or EOD exit. Deterministic
+    (seeded) so the UI always renders the same chart in dry-run mode.
+    """
+    import random
+    from datetime import datetime
+
+    candles: list[Candle] = []
+    price = 180.0
+    base_time = datetime(2026, 5, 5, 9, 15)
+    random.seed(77)
+    phases = {
+        (0, 15): (0.1, 0.8),    # quiet open
+        (15, 25): (0.8, 1.0),   # initial trend up
+        (25, 45): (1.2, 0.7),   # extension
+        (45, 55): (0.6, 0.5),   # consolidation
+        (55, 65): (1.5, 0.9),   # second leg
+        (65, 75): (-0.3, 1.2),  # late fade
+    }
+    for i in range(75):
+        total_min = 15 + i * 5
+        ts = base_time.replace(hour=9 + total_min // 60, minute=total_min % 60)
+        if ts.hour >= 15 and ts.minute > 30:
+            break
+        drift, vol = 0.1, 0.8
+        for (s, e), (d, v) in phases.items():
+            if s <= i < e:
+                drift, vol = d, v
+                break
+        open_p = price
+        close_p = open_p + drift + random.gauss(0, vol)
+        high_p = max(open_p, close_p) + abs(random.gauss(0, vol * 0.6))
+        low_p = min(open_p, close_p) - abs(random.gauss(0, vol * 0.5))
+        candles.append(Candle(
+            timestamp=ts.strftime("%Y-%m-%dT%H:%M:%S+05:30"),
+            open=round(open_p, 2), high=round(high_p, 2),
+            low=round(low_p, 2), close=round(close_p, 2),
+            volume=random.randint(8000, 60000),
+        ))
+        price = close_p
+    return candles

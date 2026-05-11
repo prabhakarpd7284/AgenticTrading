@@ -235,7 +235,7 @@ class PyramidView(APIView):
             )
 
     def _run(self, request):
-        from trading.pyramid.strategy import (
+        from plugins.strategy_pyramid.strategy import (
             Candle, PyramidConfig, run_pyramid_with_chart_data,
         )
 
@@ -309,7 +309,7 @@ class PyramidView(APIView):
         # Telegram report
         telegram_sent = False
         if send_tg:
-            from trading.pyramid.telegram import send_pyramid_report
+            from plugins.strategy_pyramid.telegram import send_pyramid_report
             telegram_sent = send_pyramid_report(data)
         data["telegram_sent"] = telegram_sent
 
@@ -319,9 +319,9 @@ class PyramidView(APIView):
     def _fetch_candles(underlying, strike, expiry_str, opt_type, candle_date, interval):
         """Fetch option candles, walking back up to 5 days for holidays."""
         from datetime import date as dt_date, timedelta
+        from plugins.strategy_pyramid.strategy import Candle
         from trading.options.data_service import find_option_token
         from trading.services.data_service import BrokerClient
-        from trading.pyramid.strategy import Candle
         from trading.utils.time_utils import cap_end_time
 
         result = find_option_token(underlying, strike, expiry_str, opt_type)
@@ -349,40 +349,9 @@ class PyramidView(APIView):
 
     @staticmethod
     def _sample_candles():
-        import random
-        from datetime import datetime
-        from trading.pyramid.strategy import Candle
-
-        candles = []
-        price = 180.0
-        base_time = datetime(2026, 5, 5, 9, 15)
-        random.seed(77)
-        phases = {
-            (0, 15): (0.1, 0.8), (15, 25): (0.8, 1.0), (25, 45): (1.2, 0.7),
-            (45, 55): (0.6, 0.5), (55, 65): (1.5, 0.9), (65, 75): (-0.3, 1.2),
-        }
-        for i in range(75):
-            total_min = 15 + i * 5
-            ts = base_time.replace(hour=9 + total_min // 60, minute=total_min % 60)
-            if ts.hour >= 15 and ts.minute > 30:
-                break
-            drift, vol = 0.1, 0.8
-            for (s, e), (d, v) in phases.items():
-                if s <= i < e:
-                    drift, vol = d, v
-                    break
-            open_p = price
-            close_p = open_p + drift + random.gauss(0, vol)
-            high_p = max(open_p, close_p) + abs(random.gauss(0, vol * 0.6))
-            low_p = min(open_p, close_p) - abs(random.gauss(0, vol * 0.5))
-            candles.append(Candle(
-                timestamp=ts.strftime("%Y-%m-%dT%H:%M:%S+05:30"),
-                open=round(open_p, 2), high=round(high_p, 2),
-                low=round(low_p, 2), close=round(close_p, 2),
-                volume=random.randint(8000, 60000),
-            ))
-            price = close_p
-        return candles
+        """Delegates to the canonical sample generator in the plugin."""
+        from plugins.strategy_pyramid.strategy import _generate_pyramid_sample
+        return _generate_pyramid_sample()
 
 
 # ---------------------------------------------------------------------------
