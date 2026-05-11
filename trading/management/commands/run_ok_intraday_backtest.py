@@ -39,9 +39,9 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         from apps.market_data.constants import NIFTY_50_SYMBOLS
-        from trading.backtester.compat import run_intraday_backtest
-        from trading.backtester.report import ReportFormatter
-        from trading.backtester.types import PnLMode
+        from plugins.strategy_backtest.compat import run_intraday_backtest
+        from plugins.strategy_backtest.report import ReportFormatter
+        from plugins.strategy_backtest.types import PnLMode
 
         # Resolve args
         if options["symbols"]:

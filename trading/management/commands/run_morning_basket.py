@@ -38,8 +38,8 @@ class Command(BaseCommand):
         from plugins.strategy_basket.signals import BasketSignalGenerator
         from plugins.strategy_basket.executor import BasketExecutor
         from plugins.strategy_basket.manager import BasketPositionManager
-        from trading.backtester.sizing import PositionSizer
-        from trading.backtester.types import PnLMode
+        from plugins.strategy_backtest.sizing import PositionSizer
+        from plugins.strategy_backtest.types import PnLMode
 
         cfg = BasketConfig()
         capital = options["capital"]
@@ -168,9 +168,9 @@ class Command(BaseCommand):
     def _run_backtest(self, options):
         """Run basket backtest on historical intraday data."""
         from datetime import date
-        from trading.backtester.compat import run_basket_backtest
-        from trading.backtester.report import ReportFormatter
-        from trading.backtester.types import PnLMode
+        from plugins.strategy_backtest.compat import run_basket_backtest
+        from plugins.strategy_backtest.report import ReportFormatter
+        from plugins.strategy_backtest.types import PnLMode
         from apps.market_data.constants import NIFTY_50_SYMBOLS
 
         from_date = options.get("from_date")
@@ -213,8 +213,8 @@ class Command(BaseCommand):
 
     def _send_backtest_telegram(self, stats, meta):
         from plugins.strategy_swing.ok_alerts import OKAlertService
-        from trading.backtester.report import ReportFormatter
-        from trading.backtester.types import PnLMode
+        from plugins.strategy_backtest.report import ReportFormatter
+        from plugins.strategy_backtest.types import PnLMode
         import time
 
         svc = OKAlertService()

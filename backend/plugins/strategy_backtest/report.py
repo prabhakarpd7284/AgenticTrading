@@ -1,8 +1,8 @@
 """Report formatting — CLI + Telegram HTML."""
 from __future__ import annotations
 
-from trading.backtester.stats import BacktestStats
-from trading.backtester.types import PnLMode
+from plugins.strategy_backtest.stats import BacktestStats
+from plugins.strategy_backtest.types import PnLMode
 
 
 class ReportFormatter:

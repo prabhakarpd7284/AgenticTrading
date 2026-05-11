@@ -62,6 +62,7 @@ pyramid = "plugins.strategy_pyramid:PyramidStrategy"
 intraday_screener = "plugins.strategy_screener:ScreenerStrategy"
 swing_scanner = "plugins.strategy_swing:SwingScannerStrategy"
 premarket_basket = "plugins.strategy_basket:PremarketBasketStrategy"
+backtest = "plugins.strategy_backtest:BacktestStrategy"
 
 [project.entry-points."alphadesk.retrievers"]
 portfolio = "apps.rag.retrievers.portfolio:PortfolioRetriever"

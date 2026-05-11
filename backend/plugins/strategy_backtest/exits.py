@@ -17,7 +17,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import List, Optional
 
-from trading.backtester.types import Bar, ExitSignal, TradeSide
+from plugins.strategy_backtest.types import Bar, ExitSignal, TradeSide
 
 
 class ExitCheck(ABC):

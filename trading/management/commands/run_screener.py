@@ -116,9 +116,9 @@ class Command(BaseCommand):
         return list(SCREENER_UNIVERSE)
 
     def _run_backtest(self, symbols, strategies, options):
-        from trading.backtester.compat import run_screener_backtest
-        from trading.backtester.report import ReportFormatter
-        from trading.backtester.types import PnLMode
+        from plugins.strategy_backtest.compat import run_screener_backtest
+        from plugins.strategy_backtest.report import ReportFormatter
+        from plugins.strategy_backtest.types import PnLMode
 
         from_date = options.get("from_date")
         to_date = options.get("to_date")

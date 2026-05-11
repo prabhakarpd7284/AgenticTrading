@@ -6,12 +6,12 @@ from typing import Dict, List, Optional
 
 from logzero import logger
 
-from trading.backtester.entry import EntryDetector
-from trading.backtester.exits import ExitCheck, ExitManager
-from trading.backtester.sizing import PositionSizer
-from trading.backtester.stats import BacktestStats, StatsAggregator
-from trading.backtester.trade import Trade
-from trading.backtester.types import (
+from plugins.strategy_backtest.entry import EntryDetector
+from plugins.strategy_backtest.exits import ExitCheck, ExitManager
+from plugins.strategy_backtest.sizing import PositionSizer
+from plugins.strategy_backtest.stats import BacktestStats, StatsAggregator
+from plugins.strategy_backtest.trade import Trade
+from plugins.strategy_backtest.types import (
     Bar,
     EntrySignal,
     PnLMode,

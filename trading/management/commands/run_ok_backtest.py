@@ -44,9 +44,9 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         from dashboard_utils.market_scanner import NIFTY_50_SYMBOLS, SCREENER_UNIVERSE
-        from trading.backtester.compat import run_ok_backtest
-        from trading.backtester.report import ReportFormatter
-        from trading.backtester.types import PnLMode
+        from plugins.strategy_backtest.compat import run_ok_backtest
+        from plugins.strategy_backtest.report import ReportFormatter
+        from plugins.strategy_backtest.types import PnLMode
 
         # Resolve symbols
         if options["symbols"]:

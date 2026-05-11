@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Dict, List, Tuple
 
-from trading.backtester.types import PnLMode
+from plugins.strategy_backtest.types import PnLMode
 
 
 @dataclass

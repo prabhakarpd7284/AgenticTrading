@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from trading.backtester.types import PnLMode
+from plugins.strategy_backtest.types import PnLMode
 
 
 @dataclass

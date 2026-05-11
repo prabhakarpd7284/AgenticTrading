@@ -223,7 +223,7 @@ def _run_daily(
 ) -> OKBacktestPayload:
     """Run daily swing backtest using unified BacktestEngine."""
     try:
-        from trading.backtester.compat import run_ok_backtest
+        from plugins.strategy_backtest.compat import run_ok_backtest
     except Exception as e:
         return OKBacktestPayload(
             as_of=datetime.now(timezone.utc).isoformat(),
@@ -251,7 +251,7 @@ def _run_intraday(
 ) -> OKBacktestPayload:
     """Run intraday multi-TF grid backtest using unified BacktestEngine."""
     try:
-        from trading.backtester.compat import run_intraday_backtest
+        from plugins.strategy_backtest.compat import run_intraday_backtest
     except Exception as e:
         return OKBacktestPayload(
             as_of=datetime.now(timezone.utc).isoformat(),
@@ -319,7 +319,7 @@ def _run_basket(
 ) -> OKBacktestPayload:
     """Run morning basket backtest using unified BacktestEngine."""
     try:
-        from trading.backtester.compat import run_basket_backtest
+        from plugins.strategy_backtest.compat import run_basket_backtest
     except Exception as e:
         return OKBacktestPayload(
             as_of=datetime.now(timezone.utc).isoformat(),

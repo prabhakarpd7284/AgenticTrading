@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from trading.backtester.types import Bar, EntrySignal, PnLMode, TradeSide, TradeState
+from plugins.strategy_backtest.types import Bar, EntrySignal, PnLMode, TradeSide, TradeState
 
 
 @dataclass

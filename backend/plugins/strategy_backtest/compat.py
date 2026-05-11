@@ -11,9 +11,9 @@ from typing import Dict, List, Optional
 
 from logzero import logger
 
-from trading.backtester.engine import BacktestEngine, EngineConfig
-from trading.backtester.entry import IntradayCycleAdapter, OKCycleAdapter, ScreenerEntryAdapter
-from trading.backtester.exits import (
+from plugins.strategy_backtest.engine import BacktestEngine, EngineConfig
+from plugins.strategy_backtest.entry import IntradayCycleAdapter, OKCycleAdapter, ScreenerEntryAdapter
+from plugins.strategy_backtest.exits import (
     BreakevenExit,
     EODExit,
     MaxHoldExit,
@@ -21,9 +21,9 @@ from trading.backtester.exits import (
     TargetExit,
     TrailingSLExit,
 )
-from trading.backtester.report import ReportFormatter
-from trading.backtester.stats import BacktestStats
-from trading.backtester.types import Bar, PnLMode, TimeframeMode
+from plugins.strategy_backtest.report import ReportFormatter
+from plugins.strategy_backtest.stats import BacktestStats
+from plugins.strategy_backtest.types import Bar, PnLMode, TimeframeMode
 
 
 def run_ok_backtest(
@@ -222,8 +222,8 @@ def run_screener_backtest(
     # Step 2: Convert old BacktestTrade results to unified BacktestStats
     # The old result already simulated trades with its own exit logic,
     # so we import the completed trades directly into stats.
-    from trading.backtester.trade import Trade
-    from trading.backtester.types import TradeSide, PnLMode
+    from plugins.strategy_backtest.trade import Trade
+    from plugins.strategy_backtest.types import TradeSide, PnLMode
 
     trades: List[Trade] = []
     for old_t in old_result.trades:
@@ -248,11 +248,11 @@ def run_screener_backtest(
         t.rr_achieved = old_t.pnl / old_t.signal.risk_points if old_t.signal.risk_points > 0 else 0
         t.metadata = {"trade_type": old_t.signal.strategy, "strategy": old_t.signal.strategy}
         t._pnl_mode = PnLMode.POINTS
-        from trading.backtester.types import TradeState
+        from plugins.strategy_backtest.types import TradeState
         t.state = TradeState.CLOSED
         trades.append(t)
 
-    from trading.backtester.stats import StatsAggregator
+    from plugins.strategy_backtest.stats import StatsAggregator
     agg = StatsAggregator(0, PnLMode.POINTS)
     return agg.compute(trades, total_signals=old_result.total_signals)
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Dict, List, Optional, Protocol
 
-from trading.backtester.types import Bar, EntrySignal, TradeSide
+from plugins.strategy_backtest.types import Bar, EntrySignal, TradeSide
 
 
 # ──────────────────────────────────────────────

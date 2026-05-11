@@ -12,8 +12,8 @@ from typing import Dict, List
 
 from logzero import logger
 
-from trading.backtester.entry import EntryDetector
-from trading.backtester.types import Bar, EntrySignal, TradeSide
+from plugins.strategy_backtest.entry import EntryDetector
+from plugins.strategy_backtest.types import Bar, EntrySignal, TradeSide
 from plugins.strategy_basket.config import BasketConfig
 from trading.utils.indicators import _ema, _wma, _rsi_series, bollinger_bands
 
