@@ -55,6 +55,7 @@ LOCAL_APPS = [
     "apps.rag",
     "apps.journals",
     "apps.audit",
+    "apps.events",  # unified event log (redesign-v2; will eventually absorb journals + audit)
     "apps.notifications",
 ]
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS

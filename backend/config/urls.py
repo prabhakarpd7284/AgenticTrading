@@ -25,6 +25,7 @@ api_v1 = [
     path("agents/", include("apps.agents_core.api.urls")),
     path("rag/", include("apps.rag.api.urls")),
     path("journals/", include("apps.journals.api.urls")),
+    path("events/", include("apps.events.api.urls")),
     path("notifications/", include("apps.notifications.api.urls")),
     # Bridge to the legacy `trading` Django app — exposes the existing
     # 700+ rows of TradeJournal / StraddlePosition / AuditLog data so
