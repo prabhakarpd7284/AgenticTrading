@@ -137,10 +137,10 @@ class LevelConfig:
 
 
 # ══════════════════════════════════════════════
-# Basket Config (imported from trading.basket.config)
+# Basket Config (imported from plugins.strategy_basket.config)
 # ══════════════════════════════════════════════
 
-from trading.basket.config import BasketConfig
+from plugins.strategy_basket.config import BasketConfig
 
 
 # ══════════════════════════════════════════════

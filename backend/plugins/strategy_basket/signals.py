@@ -11,8 +11,8 @@ from typing import List, Optional, Tuple
 
 from logzero import logger
 
-from trading.basket.config import BasketConfig
-from trading.basket.mood import MarketMood, MoodAssessment
+from plugins.strategy_basket.config import BasketConfig
+from plugins.strategy_basket.mood import MarketMood, MoodAssessment
 from trading.utils.indicators import _ema, _wma, _rsi_series, bollinger_bands
 
 
@@ -101,7 +101,7 @@ class BasketSignalGenerator:
         scan_date = date.today().strftime("%Y-%m-%d")
         scanner = OKScanner()
 
-        from dashboard_utils.market_scanner import NIFTY_50_SYMBOLS
+        from apps.market_data.constants import NIFTY_50_SYMBOLS
         results = scanner.scan(list(NIFTY_50_SYMBOLS), scan_date=scan_date)
 
         # Filter by mood-aligned phases

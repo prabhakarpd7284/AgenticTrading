@@ -26,8 +26,8 @@ def build_basket_status(force: bool = False) -> dict:
         if cached is not None:
             return cached
 
-    from trading.basket.config import BasketConfig
-    from trading.basket.mood import MarketMoodAssessor, MarketMood
+    from plugins.strategy_basket.config import BasketConfig
+    from plugins.strategy_basket.mood import MarketMoodAssessor, MarketMood
 
     cfg = BasketConfig()
 
@@ -54,7 +54,7 @@ def build_basket_status(force: bool = False) -> dict:
 
     if mood.mood != MarketMood.NEUTRAL:
         try:
-            from trading.basket.signals import BasketSignalGenerator
+            from plugins.strategy_basket.signals import BasketSignalGenerator
             gen = BasketSignalGenerator(cfg)
             signals = gen.generate(mood)
             result["signals"] = [s.to_dict() for s in signals]

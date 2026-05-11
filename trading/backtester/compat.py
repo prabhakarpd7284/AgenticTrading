@@ -274,7 +274,7 @@ def run_basket_backtest(
       3. Run through BacktestEngine with breakeven + SL + target + EOD exits
     """
     from trading.config import config as tc
-    from trading.basket.entry_adapter import BasketEntryAdapter
+    from plugins.strategy_basket.entry_adapter import BasketEntryAdapter
 
     capital = capital or tc.risk.default_capital
 

@@ -14,8 +14,8 @@ from typing import Dict, List, Optional
 
 from logzero import logger
 
-from trading.basket.config import BasketConfig
-from trading.basket.signals import BasketSignal
+from plugins.strategy_basket.config import BasketConfig
+from plugins.strategy_basket.signals import BasketSignal
 
 
 @dataclass

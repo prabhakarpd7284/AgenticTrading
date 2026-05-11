@@ -16,7 +16,7 @@ from typing import List
 
 from logzero import logger
 
-from trading.basket.config import BasketConfig
+from plugins.strategy_basket.config import BasketConfig
 
 
 class MarketMood(Enum):
@@ -67,13 +67,13 @@ class MarketMoodAssessor:
     """Assess morning market mood from live data."""
 
     def __init__(self, cfg: BasketConfig = None):
-        from trading.basket.config import BasketConfig
+        from plugins.strategy_basket.config import BasketConfig
         self.cfg = cfg or BasketConfig()
 
     def assess(self) -> MoodAssessment:
         """Fetch live data and compute mood. Works during market hours."""
-        from trading.services.data_service import BrokerClient
-        from dashboard_utils.market_scanner import NIFTY_50_SYMBOLS, fetch_nifty50_ltp
+        from trading.services.data_service import BrokerClient, DataService
+        from apps.market_data.constants import NIFTY_50_SYMBOLS
 
         broker = BrokerClient.get_instance()
         broker.ensure_login()
@@ -88,10 +88,12 @@ class MarketMoodAssessor:
         vix_data = broker.ltp("NSE", "INDIA VIX", "99926017")
         vix = vix_data.get("ltp", 0)
 
-        # 3. Advance / Decline (batch fetch — 1 API call)
-        stocks = fetch_nifty50_ltp(broker, NIFTY_50_SYMBOLS)
-        advance = sum(1 for s in stocks if s.get("change_pct", 0) > 0)
-        decline = sum(1 for s in stocks if s.get("change_pct", 0) < 0)
+        # 3. Advance / Decline (one batched market_data call via DataService).
+        # DataService.fetch_batch_ltp returns `pct_change`, not the legacy
+        # `change_pct` key that the old dashboard helper used.
+        stocks = DataService().fetch_batch_ltp(NIFTY_50_SYMBOLS)
+        advance = sum(1 for s in stocks if s.get("pct_change", 0) > 0)
+        decline = sum(1 for s in stocks if s.get("pct_change", 0) < 0)
         flat = len(stocks) - advance - decline
         ad_ratio = advance / max(decline, 1)
 

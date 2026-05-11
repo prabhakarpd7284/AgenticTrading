@@ -33,11 +33,11 @@ class Command(BaseCommand):
             self._run_backtest(options)
             return
 
-        from trading.basket.config import BasketConfig
-        from trading.basket.mood import MarketMoodAssessor, MarketMood
-        from trading.basket.signals import BasketSignalGenerator
-        from trading.basket.executor import BasketExecutor
-        from trading.basket.manager import BasketPositionManager
+        from plugins.strategy_basket.config import BasketConfig
+        from plugins.strategy_basket.mood import MarketMoodAssessor, MarketMood
+        from plugins.strategy_basket.signals import BasketSignalGenerator
+        from plugins.strategy_basket.executor import BasketExecutor
+        from plugins.strategy_basket.manager import BasketPositionManager
         from trading.backtester.sizing import PositionSizer
         from trading.backtester.types import PnLMode
 
@@ -171,7 +171,7 @@ class Command(BaseCommand):
         from trading.backtester.compat import run_basket_backtest
         from trading.backtester.report import ReportFormatter
         from trading.backtester.types import PnLMode
-        from dashboard_utils.market_scanner import NIFTY_50_SYMBOLS
+        from apps.market_data.constants import NIFTY_50_SYMBOLS
 
         from_date = options.get("from_date")
         to_date = options.get("to_date") or date.today().strftime("%Y-%m-%d")

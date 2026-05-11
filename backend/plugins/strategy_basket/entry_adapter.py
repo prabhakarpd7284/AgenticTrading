@@ -14,7 +14,7 @@ from logzero import logger
 
 from trading.backtester.entry import EntryDetector
 from trading.backtester.types import Bar, EntrySignal, TradeSide
-from trading.basket.config import BasketConfig
+from plugins.strategy_basket.config import BasketConfig
 from trading.utils.indicators import _ema, _wma, _rsi_series, bollinger_bands
 
 
