@@ -388,15 +388,15 @@ def build_monthly_report(
     else:
         target_month = current_month
 
-    capture_matrix = _build_capture_matrix(target_month)
-    signal_audit = _build_signal_audit(target_month)
-    rejections = _build_rejections(target_month)
+    capture_matrix = _build_capture_matrix(target_month, tenant=tenant)
+    signal_audit = _build_signal_audit(target_month, tenant=tenant)
+    rejections = _build_rejections(target_month, tenant=tenant)
 
     # ── 6. Equity curve + drawdown ──
-    equity_curve = _build_equity_curve(target_month)
+    equity_curve = _build_equity_curve(target_month, tenant=tenant)
 
     # ── 7. Analytics (time-of-day, day-of-week, sector) ──
-    analytics = _build_analytics(target_month)
+    analytics = _build_analytics(target_month, tenant=tenant)
 
     # ── 8. Benchmark comparison ──
     capital_base = _dec(portfolio.capital) if portfolio else 500_000
@@ -441,7 +441,12 @@ def _month_group_to_dict(mg: MonthGroup) -> dict:
 # ══════════════════════════════════════════════════════════════════════
 
 def _build_month_groups(tenant, portfolio, month, current_month) -> list[MonthGroup]:
-    """Build MonthGroup objects from Position data."""
+    """Build MonthGroup objects, sourced primarily from apps.trades.Trade.
+
+    The legacy apps.portfolio.Position table is checked first (in case a
+    future workflow writes Positions directly), then we fall back to the
+    canonical Trade table which is where all the data now lives.
+    """
     from apps.portfolio.models import Position
 
     positions = Position.objects.filter(
@@ -462,9 +467,11 @@ def _build_month_groups(tenant, portfolio, month, current_month) -> list[MonthGr
         # Filter to specific month
         month_buckets = {k: v for k, v in month_buckets.items() if k == month}
 
-    # Also check legacy TradeJournal if no positions exist
+    # Source from apps.trades.Trade — this is where all the data lives
+    # post data lift. (apps.portfolio.Position is a future-state model that
+    # may carry live broker-reconciled positions in addition to Trade rows.)
     if not month_buckets:
-        month_buckets = _legacy_month_groups(month, current_month)
+        month_buckets = _v2_month_groups(tenant, month)
 
     months = []
     for m_key in sorted(month_buckets.keys(), reverse=True)[:12]:
@@ -485,32 +492,41 @@ def _build_month_groups(tenant, portfolio, month, current_month) -> list[MonthGr
     return months
 
 
-def _legacy_month_groups(month, current_month) -> dict:
-    """Fallback: build month groups from legacy TradeJournal."""
-    try:
-        from trading.models import TradeJournal
-        # Include FILLED, PAPER, EXECUTED, CANCELLED (all have P&L data).
-        # Exclude REJECTED (blocked signals — tracked in rejections section).
-        # Exclude PENDING, PLANNED, APPROVED (pre-execution, no outcome).
-        qs = TradeJournal.objects.filter(
-            status__in=["FILLED", "PAPER", "EXECUTED", "CANCELLED"]
-        )
-        if month:
-            y, m = int(month[:4]), int(month[5:7])
-            first, last = _month_range(month)
-            qs = qs.filter(trade_date__gte=first, trade_date__lte=last)
+def _v2_month_groups(tenant, month) -> dict:
+    """Build month buckets from apps.trades.Trade (v2 Postgres).
 
-        buckets = defaultdict(list)
-        for tj in qs:
-            m_key = tj.trade_date.strftime("%Y-%m")
-            buckets[m_key].append(tj)
-        return buckets
-    except Exception:
-        return {}
+    Includes terminal-state trades that have P&L: FILLED, CANCELLED, CLOSED.
+    Excludes PLAN/APPROVED/QUEUED/SENT (pre-execution) and REJECTED/EXPIRED
+    (no outcome) — those appear in the signal audit + rejection sections.
+    """
+    from apps.trades.models import Trade
+
+    qs = Trade.objects.filter(
+        tenant=tenant,
+        status__in=[
+            Trade.Status.FILLED,
+            Trade.Status.CANCELLED,
+            Trade.Status.CLOSED,
+            Trade.Status.PARTIAL,
+        ],
+    )
+    if month:
+        first, last = _month_range(month)
+        qs = qs.filter(trade_date__gte=first, trade_date__lte=last)
+
+    buckets: dict = defaultdict(list)
+    for t in qs:
+        m_key = t.trade_date.strftime("%Y-%m")
+        buckets[m_key].append(t)
+    return buckets
 
 
 def _positions_to_month_group(month_key: str, positions) -> MonthGroup:
-    """Convert a list of Position objects (or TradeJournal) to MonthGroup."""
+    """Convert a list of Position / Trade objects to a MonthGroup.
+
+    Both old-style Position and new Trade rows expose `.symbol` + `.exchange`,
+    so we can derive asset class without checking the concrete class.
+    """
     first_day, last_day = _month_range(month_key)
     trading_days = _trading_days_in_month(first_day, last_day)
     now = date.today()
@@ -518,16 +534,15 @@ def _positions_to_month_group(month_key: str, positions) -> MonthGroup:
     by_asset = {"cash": defaultdict(list), "fno": defaultdict(list), "commodity": defaultdict(list)}
 
     for pos in positions:
-        # Handle both Position (backend) and TradeJournal (legacy)
-        if hasattr(pos, "exchange"):
-            ac = _derive_asset_class(pos.exchange)
-            underlying = _extract_underlying(pos.symbol, pos.exchange)
-            leg = _position_to_leg(pos)
+        # Both v2 Position and v2 Trade have an `exchange` column.
+        # If the row is a Trade (has avg_price=None — Position-only field),
+        # the leg adapter routes accordingly via field probing.
+        ac = _derive_asset_class(getattr(pos, "exchange", "NSE") or "NSE")
+        underlying = _extract_underlying(pos.symbol, ac and pos.exchange or "NSE")
+        if hasattr(pos, "avg_price"):
+            leg = _position_to_leg(pos)         # apps.portfolio.Position
         else:
-            # TradeJournal
-            ac = "cash"  # legacy doesn't have exchange field
-            underlying = pos.symbol
-            leg = _tradejournal_to_leg(pos)
+            leg = _trade_to_leg(pos)            # apps.trades.Trade
 
         by_asset[ac][underlying].append(leg)
 
@@ -590,24 +605,28 @@ def _position_to_leg(pos) -> PositionLeg:
     )
 
 
-def _tradejournal_to_leg(tj) -> PositionLeg:
-    """Convert a legacy TradeJournal to PositionLeg."""
-    closed = tj.status in ("FILLED", "PAPER", "CANCELLED")
-    pnl = tj.pnl or 0.0
+def _trade_to_leg(t) -> PositionLeg:
+    """Convert an apps.trades.Trade row to PositionLeg.
+
+    A "closed" trade for monthly-report purposes is any terminal state
+    that carried a fill — FILLED, CANCELLED, CLOSED, PARTIAL.
+    """
+    closed = t.status in ("FILLED", "PAPER", "CANCELLED", "CLOSED", "PARTIAL")
+    pnl = _dec(t.realized_pnl)
     return PositionLeg(
-        id=str(tj.id),
-        symbol=tj.symbol,
-        side=tj.side,
-        quantity=tj.quantity,
-        entry_price=tj.entry_price,
-        exit_price=tj.fill_price,
-        entry_date=tj.trade_date.strftime("%Y-%m-%d"),
-        exit_date=tj.trade_date.strftime("%Y-%m-%d") if closed else None,
-        target_price=tj.target,
-        stop_price=tj.stop_loss,
+        id=str(t.id),
+        symbol=t.symbol,
+        side=t.side,
+        quantity=t.quantity,
+        entry_price=_dec(t.entry_price),
+        exit_price=_dec(t.fill_price) if t.fill_price else None,
+        entry_date=t.trade_date.strftime("%Y-%m-%d"),
+        exit_date=t.trade_date.strftime("%Y-%m-%d") if closed else None,
+        target_price=_dec(t.target),
+        stop_price=_dec(t.stop_loss),
         pnl=round(pnl, 2),
         status="CLOSED" if closed else "OPEN",
-        notes=tj.reasoning[:100] if tj.reasoning else "",
+        notes=(t.reasoning[:100] if t.reasoning else ""),
     )
 
 
@@ -708,25 +727,25 @@ def _build_ytd(months: list[MonthGroup], portfolio) -> YtdSummary:
     )
 
 
-def _build_capture_matrix(month: str) -> list[StockCapture]:
-    """Build per-stock capture rate from SignalLog + TradeJournal."""
-    try:
-        from trading.models import SignalLog, TradeJournal
-    except Exception:
-        return []
+def _build_capture_matrix(month: str, tenant=None) -> list[StockCapture]:
+    """Build per-stock capture rate from apps.strategies.Signal + apps.trades.Trade."""
+    from apps.strategies.models import Signal
+    from apps.trades.models import Trade
 
     first, last = _month_range(month)
 
-    # Get all signals for this month
-    signals = list(SignalLog.objects.filter(
-        signal_date__gte=first, signal_date__lte=last,
-    ))
-
-    # Get all trades for this month (include CANCELLED — they have real P&L)
-    trades = list(TradeJournal.objects.filter(
+    sig_qs = Signal.objects.filter(signal_date__gte=first, signal_date__lte=last)
+    trade_qs = Trade.objects.filter(
         trade_date__gte=first, trade_date__lte=last,
-        status__in=["FILLED", "PAPER", "EXECUTED", "CANCELLED"],
-    ))
+        status__in=[Trade.Status.FILLED, Trade.Status.PARTIAL,
+                     Trade.Status.CANCELLED, Trade.Status.CLOSED],
+    )
+    if tenant is not None:
+        sig_qs = sig_qs.filter(tenant=tenant)
+        trade_qs = trade_qs.filter(tenant=tenant)
+
+    signals = list(sig_qs)
+    trades = list(trade_qs)
 
     # Group by symbol
     sym_signals = defaultdict(list)
@@ -748,7 +767,8 @@ def _build_capture_matrix(month: str) -> list[StockCapture]:
         traded = [s for s in sigs if s.outcome == "TRADED"]
         skipped = [s for s in sigs if s.outcome in ("REJECTED", "SKIPPED", "EXPIRED")]
 
-        captured_pnl = sum(t.pnl or 0 for t in tds)
+        # Trade.realized_pnl replaces legacy TradeJournal.pnl
+        captured_pnl = sum(float(t.realized_pnl or 0) for t in tds)
 
         # Potential P&L from max favorable moves
         potential_pnl = sum(
@@ -801,20 +821,15 @@ def _build_capture_matrix(month: str) -> list[StockCapture]:
     return matrix
 
 
-def _build_signal_audit(month: str) -> SignalAudit:
-    """Build signal outcome breakdown."""
-    try:
-        from trading.models import SignalLog
-    except Exception:
-        return SignalAudit(
-            total_signals=0, by_outcome={}, by_source={},
-            by_strategy={}, profitable_if_taken=0, loss_avoided=0,
-        )
+def _build_signal_audit(month: str, tenant=None) -> SignalAudit:
+    """Build signal outcome breakdown from apps.strategies.Signal."""
+    from apps.strategies.models import Signal
 
     first, last = _month_range(month)
-    signals = list(SignalLog.objects.filter(
-        signal_date__gte=first, signal_date__lte=last,
-    ))
+    qs = Signal.objects.filter(signal_date__gte=first, signal_date__lte=last)
+    if tenant is not None:
+        qs = qs.filter(tenant=tenant)
+    signals = list(qs.select_related("trade"))
 
     by_outcome = defaultdict(int)
     by_source = defaultdict(int)
@@ -835,7 +850,8 @@ def _build_signal_audit(month: str) -> SignalAudit:
             hit_sl = (s.max_adverse_move or 0) >= risk
 
             if s.outcome == "TRADED":
-                if s.trade_journal and (s.trade_journal.pnl or 0) > 0:
+                # s.trade is now an apps.trades.Trade row
+                if s.trade and float(s.trade.realized_pnl or 0) > 0:
                     by_strategy[s.strategy]["wins"] += 1
                 by_strategy[s.strategy]["rr_sum"] += s.risk_reward
             elif s.outcome in ("REJECTED", "SKIPPED", "EXPIRED"):
@@ -864,39 +880,43 @@ def _build_signal_audit(month: str) -> SignalAudit:
     )
 
 
-def _build_rejections(month: str) -> list[RejectionReview]:
+def _build_rejections(month: str, tenant=None) -> list[RejectionReview]:
     """Build risk rejection reviews with hindsight profitability.
 
-    Primary source: TradeJournal with status=REJECTED (most reliable).
-    Secondary source: AuditLog with event_type=RISK_REJECT (older straddle data).
+    Primary source: apps.trades.Trade with status=REJECTED (equity).
+    Secondary source: events.Event with type='risk.rejected' (straddle/options).
     """
-    try:
-        from trading.models import AuditLog, SignalLog, TradeJournal
-    except Exception:
-        return []
+    from apps.events.models import Event
+    from apps.strategies.models import Signal
+    from apps.trades.models import Trade
 
     first, last = _month_range(month)
-    seen = set()  # (symbol, date) dedup
+    seen = set()  # (symbol, date, reason) dedup
     reviews = []
 
-    # ── Primary: TradeJournal REJECTED (equity screening rejections) ──
-    rejected_trades = TradeJournal.objects.filter(
-        status="REJECTED",
-        trade_date__gte=first,
-        trade_date__lte=last,
+    # ── Primary: Trade REJECTED (equity screening rejections) ──
+    rejected_trades_qs = Trade.objects.filter(
+        status=Trade.Status.REJECTED,
+        trade_date__gte=first, trade_date__lte=last,
     )
-    for tj in rejected_trades:
-        key = (tj.symbol, tj.trade_date.isoformat(), tj.risk_reason)
+    if tenant is not None:
+        rejected_trades_qs = rejected_trades_qs.filter(tenant=tenant)
+
+    for t in rejected_trades_qs:
+        key = (t.symbol, t.trade_date.isoformat(), t.risk_reason)
         if key in seen:
             continue
         seen.add(key)
 
-        # Check SignalLog for post-hoc price data
-        sig = SignalLog.objects.filter(
-            symbol=tj.symbol,
-            signal_date=tj.trade_date,
+        # Hindsight: check apps.strategies.Signal for max_favorable_move
+        sig_qs = Signal.objects.filter(
+            symbol=t.symbol,
+            signal_date=t.trade_date,
             max_favorable_move__isnull=False,
-        ).first()
+        )
+        if tenant is not None:
+            sig_qs = sig_qs.filter(tenant=tenant)
+        sig = sig_qs.first()
 
         would_profit = False
         hypo_pnl = 0.0
@@ -906,32 +926,33 @@ def _build_rejections(month: str) -> list[RejectionReview]:
             hypo_pnl = sig.max_favorable_move
 
         reviews.append(RejectionReview(
-            symbol=tj.symbol,
-            date=tj.trade_date.isoformat(),
-            reason=tj.risk_reason or "Unknown",
+            symbol=t.symbol,
+            date=t.trade_date.isoformat(),
+            reason=t.risk_reason or "Unknown",
             would_have_profited=would_profit,
             hypothetical_pnl=round(hypo_pnl, 2),
         ))
 
-    # ── Secondary: AuditLog RISK_REJECT (straddle/options rejections) ──
-    audit_rejects = AuditLog.objects.filter(
-        event_type="RISK_REJECT",
-        created_at__date__gte=first,
-        created_at__date__lte=last,
+    # ── Secondary: Event(type=risk.rejected) for straddle / non-Trade rejections ──
+    event_rejects_qs = Event.objects.filter(
+        type=Event.Type.RISK_REJECTED,
+        ts__date__gte=first, ts__date__lte=last,
     )
-    for r in audit_rejects:
-        key = (r.symbol, r.created_at.date().isoformat(),
-               (r.risk_details or {}).get("reason", ""))
+    if tenant is not None:
+        event_rejects_qs = event_rejects_qs.filter(tenant=tenant)
+
+    for e in event_rejects_qs:
+        # Symbol may live in payload (Trade-bound events) or in text (system events)
+        symbol = (e.payload or {}).get("symbol") or e.text.split()[0] if e.text else ""
+        reason = (e.payload or {}).get("reason", "") or e.text
+        key = (symbol, e.ts.date().isoformat(), reason)
         if key in seen:
             continue
         seen.add(key)
 
-        reason = (r.risk_details or {}).get("reason", "")
-        if not reason and r.risk_details:
-            reason = (r.risk_details or {}).get("rule", "")
         reviews.append(RejectionReview(
-            symbol=r.symbol,
-            date=r.created_at.strftime("%Y-%m-%d"),
+            symbol=symbol,
+            date=e.ts.strftime("%Y-%m-%d"),
             reason=reason or "Unknown",
             would_have_profited=False,
             hypothetical_pnl=0.0,
@@ -944,25 +965,26 @@ def _build_rejections(month: str) -> list[RejectionReview]:
 # Equity curve + drawdown
 # ══════════════════════════════════════════════════════════════════════
 
-def _build_equity_curve(month: str) -> EquityCurve:
+def _build_equity_curve(month: str, tenant=None) -> EquityCurve:
     """Build day-by-day equity curve with drawdown from peak."""
-    try:
-        from trading.models import TradeJournal
-    except Exception:
-        return _empty_equity_curve()
+    from apps.trades.models import Trade
 
     first, last = _month_range(month)
-    trades = TradeJournal.objects.filter(
+    qs = Trade.objects.filter(
         trade_date__gte=first, trade_date__lte=last,
-        status__in=["FILLED", "PAPER", "EXECUTED", "CANCELLED"],
+        status__in=[Trade.Status.FILLED, Trade.Status.PARTIAL,
+                     Trade.Status.CANCELLED, Trade.Status.CLOSED],
     )
+    if tenant is not None:
+        qs = qs.filter(tenant=tenant)
 
     daily = defaultdict(lambda: {"pnl": 0.0, "trades": 0, "wins": 0})
-    for t in trades:
+    for t in qs:
         d = t.trade_date.isoformat()
-        daily[d]["pnl"] += t.pnl or 0
+        pnl = float(t.realized_pnl or 0)
+        daily[d]["pnl"] += pnl
         daily[d]["trades"] += 1
-        if (t.pnl or 0) > 0:
+        if pnl > 0:
             daily[d]["wins"] += 1
 
     if not daily:
@@ -1012,32 +1034,32 @@ def _empty_equity_curve() -> EquityCurve:
 
 IST_OFFSET = 5.5  # UTC+5:30
 
-def _build_analytics(month: str) -> Analytics:
+def _build_analytics(month: str, tenant=None) -> Analytics:
     """Break down trades by hour (IST), day-of-week, and sector."""
-    try:
-        from trading.models import TradeJournal
-    except Exception:
-        return Analytics(by_hour=[], by_day_of_week=[], by_sector=[])
+    from apps.trades.models import Trade
 
     first, last = _month_range(month)
-    trades = list(TradeJournal.objects.filter(
+    qs = Trade.objects.filter(
         trade_date__gte=first, trade_date__lte=last,
-        status__in=["FILLED", "PAPER", "EXECUTED", "CANCELLED"],
-    ))
+        status__in=[Trade.Status.FILLED, Trade.Status.PARTIAL,
+                     Trade.Status.CANCELLED, Trade.Status.CLOSED],
+    )
+    if tenant is not None:
+        qs = qs.filter(tenant=tenant)
+    trades = list(qs)
 
     # ── By hour (IST) ──
     hour_data = defaultdict(lambda: {"trades": 0, "wins": 0, "losses": 0, "pnl": 0.0})
     for t in trades:
         # Convert UTC created_at to IST hour
         ist_hour = (t.created_at.hour + int(IST_OFFSET)) % 24
-        # Clamp to market hours 9-15
         if ist_hour < 9:
             ist_hour = 9
         elif ist_hour > 15:
             ist_hour = 15
         bucket = hour_data[ist_hour]
         bucket["trades"] += 1
-        pnl = t.pnl or 0
+        pnl = float(t.realized_pnl or 0)
         bucket["pnl"] += pnl
         if pnl > 0:
             bucket["wins"] += 1
@@ -1060,7 +1082,7 @@ def _build_analytics(month: str) -> Analytics:
     for t in trades:
         dow = t.trade_date.weekday()  # 0=Mon
         dow_data[dow]["trades"] += 1
-        pnl = t.pnl or 0
+        pnl = float(t.realized_pnl or 0)
         dow_data[dow]["pnl"] += pnl
         if pnl > 0:
             dow_data[dow]["wins"] += 1
@@ -1082,7 +1104,7 @@ def _build_analytics(month: str) -> Analytics:
         sector = _get_sector(t.symbol)
         sector_data[sector]["trades"] += 1
         sector_data[sector]["symbols"].add(t.symbol)
-        pnl = t.pnl or 0
+        pnl = float(t.realized_pnl or 0)
         sector_data[sector]["pnl"] += pnl
         if pnl > 0:
             sector_data[sector]["wins"] += 1
