@@ -15,7 +15,7 @@ Setup:
   3. Set env vars: TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 
 Usage:
-    from trading.screener.telegram import TelegramAlertService
+    from plugins.strategy_screener.telegram import TelegramAlertService
 
     alerts = TelegramAlertService()
     alerts.send_signal(signal)         # send a screener signal
@@ -35,7 +35,7 @@ from typing import Optional
 
 from logzero import logger
 
-from trading.screener.signals import Signal
+from plugins.strategy_screener.signals import Signal
 
 
 class TelegramAlertService:

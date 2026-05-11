@@ -13,7 +13,7 @@ from typing import List
 
 from logzero import logger
 
-from trading.swing.ok_cycles import (
+from plugins.strategy_swing.ok_cycles import (
     BULLISH_ACTIONABLE,
     BEARISH_ACTIONABLE,
     CyclePhase,

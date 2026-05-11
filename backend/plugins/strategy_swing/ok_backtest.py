@@ -10,7 +10,7 @@ Simulates swing trades triggered by OK cycle phases:
 Position sizing: risk 1% of capital per trade, max 15% notional.
 
 Usage:
-    from trading.swing.ok_backtest import run_ok_backtest
+    from plugins.strategy_swing.ok_backtest import run_ok_backtest
     result = run_ok_backtest(symbols, "2026-03-01", "2026-04-30")
     print(result.summary())
 """
@@ -24,9 +24,9 @@ from typing import Dict, List, Optional
 import pandas as pd
 from logzero import logger
 
-from dashboard_utils.candle_cache import _aggregate_to_weekly
+from plugins.strategy_swing.candle_utils import _aggregate_to_weekly
 from trading.config import config as trading_config
-from trading.swing.ok_cycles import (
+from plugins.strategy_swing.ok_cycles import (
     BULLISH_ACTIONABLE,
     BEARISH_ACTIONABLE,
     CycleDetector,

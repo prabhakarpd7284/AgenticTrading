@@ -12,9 +12,9 @@ from dataclasses import dataclass, field
 from datetime import time as dt_time
 from typing import Optional
 
-from trading.screener.conditions import Condition, ConditionType
-from trading.screener.indicator_engine import IndicatorSnapshot
-from trading.screener.candle_store import CandleStore
+from plugins.strategy_screener.conditions import Condition, ConditionType
+from plugins.strategy_screener.indicator_engine import IndicatorSnapshot
+from plugins.strategy_screener.candle_store import CandleStore
 
 
 # ══════════════════════════════════════════════

@@ -65,7 +65,7 @@ class BasketEntryAdapter:
         phase = "BASKET"
         if daily_candles and len(daily_candles) >= 60:
             try:
-                from trading.swing.ok_cycles import CycleDetector, BULLISH_ACTIONABLE, BEARISH_ACTIONABLE
+                from plugins.strategy_swing.ok_cycles import CycleDetector, BULLISH_ACTIONABLE, BEARISH_ACTIONABLE
                 detector = CycleDetector()
                 df = detector.compute_indicators(daily_candles)
                 detected = detector.detect_phase(df)

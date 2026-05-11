@@ -17,7 +17,7 @@ from typing import Dict, List, Optional
 from logzero import logger
 
 from trading.config import config as trading_config
-from trading.swing.ok_intraday import IntradayCycleDetector, IntradayCycleResult
+from plugins.strategy_swing.ok_intraday import IntradayCycleDetector, IntradayCycleResult
 
 
 # ══════════════════════════════════════════════

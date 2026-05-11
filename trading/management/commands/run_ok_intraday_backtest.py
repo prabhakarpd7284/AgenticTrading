@@ -114,7 +114,7 @@ class Command(BaseCommand):
             self._send_telegram(results, from_date, to_date, len(symbols))
 
     def _send_telegram(self, results, from_date, to_date, n_symbols):
-        from trading.swing.ok_alerts import OKAlertService
+        from plugins.strategy_swing.ok_alerts import OKAlertService
         import time
 
         svc = OKAlertService()

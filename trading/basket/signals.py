@@ -95,8 +95,8 @@ class BasketSignalGenerator:
         """Find equity legs from OK scanner + momentum filters."""
         self._ensure_data_svc()
 
-        from trading.swing.ok_scanner import OKScanner
-        from trading.swing.ok_cycles import CyclePhase, BULLISH_ACTIONABLE, BEARISH_ACTIONABLE
+        from plugins.strategy_swing.ok_scanner import OKScanner
+        from plugins.strategy_swing.ok_cycles import CyclePhase, BULLISH_ACTIONABLE, BEARISH_ACTIONABLE
 
         scan_date = date.today().strftime("%Y-%m-%d")
         scanner = OKScanner()

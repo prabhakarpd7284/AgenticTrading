@@ -130,7 +130,7 @@ class Command(BaseCommand):
             self._send_telegram(mood, signals, summary, capital)
 
     def _send_telegram(self, mood, signals, summary, capital):
-        from trading.swing.ok_alerts import OKAlertService
+        from plugins.strategy_swing.ok_alerts import OKAlertService
         import time
 
         svc = OKAlertService()
@@ -212,7 +212,7 @@ class Command(BaseCommand):
             self._send_backtest_telegram(stats, meta)
 
     def _send_backtest_telegram(self, stats, meta):
-        from trading.swing.ok_alerts import OKAlertService
+        from plugins.strategy_swing.ok_alerts import OKAlertService
         from trading.backtester.report import ReportFormatter
         from trading.backtester.types import PnLMode
         import time

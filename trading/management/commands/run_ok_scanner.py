@@ -83,7 +83,7 @@ class Command(BaseCommand):
             SCREENER_UNIVERSE,
         )
         from trading.config import OKCycleConfig, config as trading_config
-        from trading.swing.ok_scanner import OKScanner, invalidate_cache
+        from plugins.strategy_swing.ok_scanner import OKScanner, invalidate_cache
 
         # ── Clear cache if requested ──
         if options["clear_cache"]:
@@ -137,7 +137,7 @@ class Command(BaseCommand):
 
     def _persist_signals(self, results, scan_date):
         """Persist actionable cycle results to SignalLog for monthly feedback."""
-        from trading.swing.ok_cycles import CyclePhase
+        from plugins.strategy_swing.ok_cycles import CyclePhase
         try:
             from trading.models import SignalLog
             from datetime import datetime
@@ -193,7 +193,7 @@ class Command(BaseCommand):
 
     def _output_table(self, results, scanner):
         """Pretty CLI table output."""
-        from trading.swing.ok_cycles import (
+        from plugins.strategy_swing.ok_cycles import (
             BULLISH_ACTIONABLE,
             BEARISH_ACTIONABLE,
             CyclePhase,
@@ -277,7 +277,7 @@ class Command(BaseCommand):
 
     def _send_telegram(self, results, scanner):
         """Send Telegram alerts."""
-        from trading.swing.ok_alerts import OKAlertService
+        from plugins.strategy_swing.ok_alerts import OKAlertService
 
         alerts = OKAlertService()
         if not alerts.is_configured:

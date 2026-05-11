@@ -14,9 +14,9 @@ from typing import Optional
 
 from logzero import logger
 
-from trading.screener.engine import ScreenerEngine
-from trading.screener.signals import Signal
-from trading.screener.strategies import Strategy, STRATEGIES
+from plugins.strategy_screener.engine import ScreenerEngine
+from plugins.strategy_screener.signals import Signal
+from plugins.strategy_screener.strategies import Strategy, STRATEGIES
 
 
 @dataclass

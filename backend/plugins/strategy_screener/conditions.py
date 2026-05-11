@@ -11,8 +11,8 @@ from datetime import datetime, time as dt_time
 from enum import Enum
 from typing import Optional
 
-from trading.screener.candle_store import CandleStore, CandleBar
-from trading.screener.indicator_engine import IndicatorSnapshot
+from plugins.strategy_screener.candle_store import CandleStore, CandleBar
+from plugins.strategy_screener.indicator_engine import IndicatorSnapshot
 
 
 class ConditionType(Enum):

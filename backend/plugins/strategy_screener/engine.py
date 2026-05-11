@@ -19,11 +19,11 @@ from logzero import logger
 # ── Pivot cache — avoid re-fetching prev-day OHLC on restart ──
 _PIVOT_CACHE_DIR = Path("/tmp/screener_cache")
 
-from trading.screener.candle_store import CandleStore
-from trading.screener.indicator_engine import IndicatorEngine
-from trading.screener.conditions import Condition
-from trading.screener.strategies import Strategy, STRATEGIES
-from trading.screener.signals import Signal
+from plugins.strategy_screener.candle_store import CandleStore
+from plugins.strategy_screener.indicator_engine import IndicatorEngine
+from plugins.strategy_screener.conditions import Condition
+from plugins.strategy_screener.strategies import Strategy, STRATEGIES
+from plugins.strategy_screener.signals import Signal
 
 
 class ScreenerEngine:

@@ -130,8 +130,8 @@ def build_swing_scanner(
 
     # Run the scanner
     try:
-        from trading.swing.ok_scanner import OKScanner
-        from trading.swing.ok_cycles import (
+        from plugins.strategy_swing.ok_scanner import OKScanner
+        from plugins.strategy_swing.ok_cycles import (
             BULLISH_ACTIONABLE,
             BEARISH_ACTIONABLE,
             CyclePhase,

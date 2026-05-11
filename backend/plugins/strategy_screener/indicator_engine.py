@@ -11,7 +11,7 @@ from typing import Optional
 from trading.utils.indicators import (
     sma, ema, bollinger_bands, rsi, atr, macd, camarilla_pivots,
 )
-from trading.screener.candle_store import CandleStore
+from plugins.strategy_screener.candle_store import CandleStore
 
 
 @dataclass

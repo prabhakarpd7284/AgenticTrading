@@ -89,8 +89,8 @@ def _smart_universe(mode: str, scan_date: str | None = None) -> list[str]:
 
     try:
         from apps.market_data.constants import SCREENER_UNIVERSE
-        from trading.swing.ok_scanner import OKScanner
-        from trading.swing.ok_cycles import CyclePhase
+        from plugins.strategy_swing.ok_scanner import OKScanner
+        from plugins.strategy_swing.ok_cycles import CyclePhase
 
         logger.info("Smart universe: scanning NIFTY 100 for active OK phases...")
         scanner = OKScanner()

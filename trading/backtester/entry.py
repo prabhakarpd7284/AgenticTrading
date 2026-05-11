@@ -49,14 +49,14 @@ class OKCycleAdapter:
 
     def _get_detector(self):
         if self._detector is None:
-            from trading.swing.ok_cycles import CycleDetector
+            from plugins.strategy_swing.ok_cycles import CycleDetector
             self._detector = CycleDetector()
         return self._detector
 
     def detect(
         self, symbol: str, bars: List[Bar], bar_index: int, context: dict,
     ) -> List[EntrySignal]:
-        from trading.swing.ok_cycles import BULLISH_ACTIONABLE, BEARISH_ACTIONABLE, CyclePhase
+        from plugins.strategy_swing.ok_cycles import BULLISH_ACTIONABLE, BEARISH_ACTIONABLE, CyclePhase
 
         detector = self._get_detector()
         daily_slice = [{"date": b.timestamp, "open": b.open, "high": b.high,
@@ -68,7 +68,7 @@ class OKCycleAdapter:
 
         weekly_slice = context.get(f"weekly_{symbol}", [])
         if not weekly_slice:
-            from trading.swing.ok_scanner import OKScanner
+            from plugins.strategy_swing.ok_scanner import OKScanner
             scanner = OKScanner()
             weekly_slice = scanner._daily_to_weekly(daily_slice)
 
@@ -192,7 +192,7 @@ class IntradayCycleAdapter:
 
     def precompute(self, symbol: str, candles: List[dict]) -> Dict[str, List[EntrySignal]]:
         """Pre-compute all signals for a symbol. Returns {timestamp: [signals]}."""
-        from trading.swing.ok_intraday import IntradayCycleDetector
+        from plugins.strategy_swing.ok_intraday import IntradayCycleDetector
 
         detector = IntradayCycleDetector(sl_atr_mult=self.sl_atr_mult)
         raw_signals = detector.scan(symbol, candles, min_rr=self.min_rr)

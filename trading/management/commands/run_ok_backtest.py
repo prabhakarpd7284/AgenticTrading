@@ -108,7 +108,7 @@ class Command(BaseCommand):
             self._send_telegram(fmt, stats, meta)
 
     def _send_telegram(self, fmt, stats, meta):
-        from trading.swing.ok_alerts import OKAlertService
+        from plugins.strategy_swing.ok_alerts import OKAlertService
         import time
 
         service = OKAlertService()

@@ -12,9 +12,9 @@ from typing import Dict, List, Optional
 
 from logzero import logger
 
-from dashboard_utils.candle_cache import _aggregate_to_weekly
+from plugins.strategy_swing.candle_utils import _aggregate_to_weekly
 from trading.config import OKCycleConfig, config as default_config
-from trading.swing.ok_cycles import (
+from plugins.strategy_swing.ok_cycles import (
     BULLISH_ACTIONABLE,
     BEARISH_ACTIONABLE,
     CycleDetector,

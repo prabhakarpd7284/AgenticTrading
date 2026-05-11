@@ -23,7 +23,7 @@ import pandas as pd
 
 from trading.config import OKCycleConfig, config as default_config
 from trading.utils.indicators import _ema, _wma, _rsi_series, atr
-from trading.swing.ok_cycles import CyclePhase, TrendState, PHASE_ACTION
+from plugins.strategy_swing.ok_cycles import CyclePhase, TrendState, PHASE_ACTION
 
 
 # ══════════════════════════════════════════════
@@ -302,7 +302,7 @@ class IntradayCycleDetector:
         if df.empty:
             return []
 
-        from trading.swing.ok_cycles import BULLISH_ACTIONABLE, BEARISH_ACTIONABLE
+        from plugins.strategy_swing.ok_cycles import BULLISH_ACTIONABLE, BEARISH_ACTIONABLE
 
         signals: List[IntradayCycleResult] = []
         warmup = max(self.cfg.ema_slow, self.rsi_wma_period, self.cfg.stdev_period) + 5
