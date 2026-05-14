@@ -53,9 +53,7 @@ LOCAL_APPS = [
     "apps.strategies",
     "apps.agents_core",
     "apps.rag",
-    "apps.journals",
-    "apps.audit",
-    "apps.events",  # unified event log (redesign-v2; will eventually absorb journals + audit)
+    "apps.events",  # unified event log — absorbed journals + audit in Phase 4a
     "apps.trades",  # Trade + OptionsPosition + OptionsLeg (redesign-v2; will absorb portfolio.Position)
     "apps.system",  # SystemControl + TraderNote (redesign-v2; will fold into apps.core later)
     "apps.notifications",

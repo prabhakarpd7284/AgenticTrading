@@ -24,7 +24,9 @@ api_v1 = [
     path("strategies/", include("apps.strategies.api.urls")),
     path("agents/", include("apps.agents_core.api.urls")),
     path("rag/", include("apps.rag.api.urls")),
-    path("journals/", include("apps.journals.api.urls")),
+    # /journals/ is a back-compat alias — Phase 4a folded the journals app
+    # into events; the viewset now reads the unified Event log.
+    path("journals/", include("apps.events.api.journal_urls")),
     path("events/", include("apps.events.api.urls")),
     path("notifications/", include("apps.notifications.api.urls")),
     # Bridge to the legacy `trading` Django app — exposes the existing

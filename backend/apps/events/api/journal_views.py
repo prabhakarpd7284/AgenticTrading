@@ -1,8 +1,9 @@
 """Backward-compat views: /api/v1/journals/ now reads from apps.events.Event.
 
-The legacy `JournalEntry` model is kept (empty) only for migration
-history. New writes flow into Event via JournalAdapter. Frontend will
-migrate to /api/v1/events/ in the next IA pass.
+The old `apps.journals.JournalEntry` model was deleted in Phase 4a — its
+table was empty (writes had already been redirected to Event). This
+viewset keeps the /api/v1/journals/ route alive against the unified
+Event log until the frontend migrates to /api/v1/events/.
 """
 from rest_framework import serializers, viewsets
 from rest_framework.permissions import IsAuthenticated

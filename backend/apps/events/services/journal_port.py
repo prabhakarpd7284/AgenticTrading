@@ -1,9 +1,8 @@
 """JournalPort adapter — used by the agent framework.
 
-Post redesign-v2, this adapter writes to `apps.events.Event` rather
-than the old `apps.journals.JournalEntry`. The JournalEntry model is
-kept around (with zero rows) for back-compat with any external code
-that may still query it; new writes flow into the unified Event log.
+Lives in apps.events since Phase 4a folded the journals app away. This
+adapter writes plugin journal entries into the unified `apps.events.Event`
+log. The old `apps.journals.JournalEntry` model has been deleted.
 """
 from __future__ import annotations
 

@@ -1,7 +1,7 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
-from apps.journals.api.views import JournalEntryViewSet
+from apps.events.api.journal_views import JournalEntryViewSet
 
 router = DefaultRouter()
 router.register("", JournalEntryViewSet, basename="journal")

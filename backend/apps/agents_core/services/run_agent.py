@@ -52,7 +52,7 @@ def build_context(run: AgentRun, publisher: ChannelsPublisher) -> AgentContext:
     from apps.market_data.services.data_port import DefaultMarketData
     from apps.trades.services.risk_engine import RiskEngine
     from apps.rag.services.router import DefaultRAGRouter
-    from apps.journals.services.journal_port import JournalAdapter
+    from apps.events.services.journal_port import JournalAdapter
 
     # Canonical 10-criterion risk engine; wrapped in an adapter so plugin
     # nodes can keep calling `ctx.risk.validate(draft_dict)`.
