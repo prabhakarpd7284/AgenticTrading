@@ -142,7 +142,9 @@ def test_place_order_dedupes_on_idempotency_key(tenant, paper_portfolio, owner):
     from apps.orders.services.place_order import PlaceOrder
 
     class _AlwaysApprove:
-        def validate(self, _draft):
+        # PlaceOrder calls `risk.validate(trade_draft, portfolio_id=...)`
+        # since the Phase 2 RiskEngine consolidation — accept the kwarg.
+        def validate(self, _draft, **_kwargs):
             from apps.agents_core.domain.contracts import RiskDecision
             return RiskDecision(approved=True)
 

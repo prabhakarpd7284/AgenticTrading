@@ -91,5 +91,20 @@ def api_client():
 
 @pytest.fixture
 def auth_client(api_client, owner):
+    """Authenticated client carrying a *real* JWT with the tenant_id claim.
+
+    `force_authenticate` alone sets request.user but skips the JWT path, so
+    `TenantMiddleware` never resolves `request.tenant` — fine for reads
+    (filters just return empty) but writes to TenantModel tables hit a
+    NOT NULL tenant_id violation. Minting a token with the tenant claim
+    keeps the middleware happy for both.
+    """
+    from rest_framework_simplejwt.tokens import RefreshToken
+
+    from apps.accounts.api.jwt import _attach_tenant_claims
+
+    access = RefreshToken.for_user(owner).access_token
+    _attach_tenant_claims(access, owner)
     api_client.force_authenticate(user=owner)
+    api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {access}")
     return api_client
