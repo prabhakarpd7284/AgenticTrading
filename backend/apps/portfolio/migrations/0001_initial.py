@@ -11,7 +11,7 @@ class Migration(migrations.Migration):
     initial = True
 
     dependencies = [
-        ('broker', '0001_initial'),
+        ('market_data', '0001_initial'),
         ('tenants', '0001_initial'),
     ]
 
@@ -28,7 +28,7 @@ class Migration(migrations.Migration):
                 ('realized_pnl', models.DecimalField(decimal_places=2, default=Decimal('0'), max_digits=16)),
                 ('day_pnl', models.DecimalField(decimal_places=2, default=Decimal('0'), max_digits=16)),
                 ('mode', models.CharField(default='paper', max_length=10)),
-                ('broker_link', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='portfolios', to='broker.brokerlink')),
+                ('broker_link', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='portfolios', to='market_data.brokerlink')),
                 ('tenant', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='+', to='tenants.tenant')),
             ],
         ),

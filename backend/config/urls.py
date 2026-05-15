@@ -17,7 +17,8 @@ api_v1 = [
     path("auth/", include("apps.accounts.api.urls")),
     path("tenants/", include("apps.tenants.api.urls")),
     path("billing/", include("apps.billing.api.urls")),
-    path("brokers/", include("apps.broker.api.urls")),
+    # /brokers/ — broker linking was absorbed into market_data in Phase 4b.
+    path("brokers/", include("apps.market_data.api.broker_urls")),
     path("market-data/", include("apps.market_data.api.urls")),
     path("portfolios/", include("apps.portfolio.api.urls")),
     path("orders/", include("apps.orders.api.urls")),

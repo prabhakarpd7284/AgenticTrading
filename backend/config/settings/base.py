@@ -46,8 +46,7 @@ LOCAL_APPS = [
     "apps.accounts",
     "apps.tenants",
     "apps.billing",
-    "apps.broker",
-    "apps.market_data",
+    "apps.market_data",  # absorbed the broker app in Phase 4b (BrokerLink + adapters)
     "apps.portfolio",
     "apps.orders",
     "apps.strategies",

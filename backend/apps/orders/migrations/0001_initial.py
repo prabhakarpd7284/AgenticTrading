@@ -11,7 +11,7 @@ class Migration(migrations.Migration):
     initial = True
 
     dependencies = [
-        ('broker', '0001_initial'),
+        ('market_data', '0001_initial'),
         ('portfolio', '0001_initial'),
         ('tenants', '0001_initial'),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
@@ -37,7 +37,7 @@ class Migration(migrations.Migration):
                 ('idempotency_key', models.CharField(blank=True, db_index=True, max_length=128)),
                 ('origin', models.CharField(default='ui', max_length=32)),
                 ('error', models.TextField(blank=True)),
-                ('broker_link', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, to='broker.brokerlink')),
+                ('broker_link', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, to='market_data.brokerlink')),
                 ('created_by', models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, to=settings.AUTH_USER_MODEL)),
                 ('portfolio', models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, to='portfolio.portfolio')),
                 ('tenant', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='+', to='tenants.tenant')),

@@ -17,7 +17,7 @@ class Portfolio(TenantModel):
     day_pnl = models.DecimalField(max_digits=16, decimal_places=2, default=Decimal("0"))
     mode = models.CharField(max_length=10, default="paper")  # paper | live
     broker_link = models.ForeignKey(
-        "broker.BrokerLink", on_delete=models.SET_NULL, null=True, blank=True,
+        "market_data.BrokerLink", on_delete=models.SET_NULL, null=True, blank=True,
         related_name="portfolios",
     )
 

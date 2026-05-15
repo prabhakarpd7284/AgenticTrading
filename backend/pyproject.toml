@@ -72,7 +72,7 @@ news = "apps.rag.retrievers.news:NewsRetriever"
 [project.entry-points."alphadesk.brokers"]
 angel_one = "plugins.broker_angel.adapter:AngelOneAdapter"
 zerodha = "plugins.broker_zerodha.adapter:ZerodhaAdapter"
-paper = "apps.broker.adapters.paper:PaperBrokerAdapter"
+paper = "apps.market_data.adapters.paper:PaperBrokerAdapter"
 
 [tool.setuptools.packages.find]
 include = ["apps*", "config*", "plugins*"]

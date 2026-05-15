@@ -1,6 +1,36 @@
 from __future__ import annotations
 
+import uuid
+
 from django.db import models
+
+from apps.common.tenancy import TenantModel
+
+
+class BrokerLink(TenantModel):
+    """A tenant's connection to an upstream broker (Angel One / Zerodha / …).
+
+    Absorbed from the standalone `broker` app in Phase 4b — broker
+    integration is part of the markets domain, not its own concern.
+    """
+
+    class Status(models.TextChoices):
+        ACTIVE = "active"
+        EXPIRED = "expired"
+        DISABLED = "disabled"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    broker_name = models.CharField(max_length=32)  # angel_one | zerodha | fyers
+    owner = models.ForeignKey("accounts.User", on_delete=models.CASCADE)
+    credential_arn = models.CharField(max_length=256, help_text="AWS Secrets Manager ARN")
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.ACTIVE)
+    last_refreshed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        # Physical table keeps its original name — the model moved apps in
+        # Phase 4b but the table didn't, so existing DBs need no DDL.
+        db_table = "broker_brokerlink"
+        indexes = [models.Index(fields=["tenant", "owner"])]
 
 
 class Symbol(models.Model):

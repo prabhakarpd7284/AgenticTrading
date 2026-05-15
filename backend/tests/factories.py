@@ -19,7 +19,7 @@ import factory
 from factory.django import DjangoModelFactory
 
 from apps.accounts.models import User
-from apps.broker.models import BrokerLink
+from apps.market_data.models import BrokerLink
 from apps.orders.models import Order, OutboxEvent
 from apps.portfolio.models import Portfolio, Position
 from apps.tenants.models import Membership, Tenant

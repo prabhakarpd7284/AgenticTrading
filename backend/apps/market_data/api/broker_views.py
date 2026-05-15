@@ -1,6 +1,6 @@
 from rest_framework import serializers, viewsets
 
-from apps.broker.models import BrokerLink
+from apps.market_data.models import BrokerLink
 
 
 class BrokerLinkSerializer(serializers.ModelSerializer):

@@ -31,7 +31,7 @@ class Order(TenantModel):
     portfolio = models.ForeignKey("portfolio.Portfolio", on_delete=models.PROTECT)
     created_by = models.ForeignKey("accounts.User", on_delete=models.PROTECT)
     broker_link = models.ForeignKey(
-        "broker.BrokerLink", on_delete=models.SET_NULL, null=True, blank=True,
+        "market_data.BrokerLink", on_delete=models.SET_NULL, null=True, blank=True,
     )
     symbol = models.CharField(max_length=80)
     side = models.CharField(max_length=4, choices=Side.choices)
