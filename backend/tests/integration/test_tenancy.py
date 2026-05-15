@@ -14,8 +14,8 @@ from __future__ import annotations
 
 import pytest
 
-from apps.orders.models import Order
-from apps.portfolio.models import Portfolio, Position
+from apps.trading.models import Order
+from apps.trading.models import Portfolio, Position
 from tests.factories import (
     OrderFactory,
     PortfolioFactory,

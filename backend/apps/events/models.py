@@ -118,11 +118,11 @@ class Event(TenantModel):
     trade_id = models.UUIDField(null=True, blank=True, db_index=True,
                                  help_text="Soft FK to trades.Trade.id")
     options_position = models.ForeignKey(
-        "trades.OptionsPosition", null=True, blank=True, on_delete=models.SET_NULL,
+        "trading.OptionsPosition", null=True, blank=True, on_delete=models.SET_NULL,
         related_name="events",
     )
     order = models.ForeignKey(
-        "orders.Order", null=True, blank=True, on_delete=models.SET_NULL, related_name="+",
+        "trading.Order", null=True, blank=True, on_delete=models.SET_NULL, related_name="+",
     )
     signal_id = models.BigIntegerField(null=True, blank=True, db_index=True,
                                         help_text="Soft FK to strategies.Signal.id")

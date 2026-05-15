@@ -101,7 +101,7 @@ def test_sibling_router_paths_are_not_shadowed_by_catchall_viewset(api_client):
     emit a detail pattern ``^(?P<pk>[^/.]+)/$`` that swallowed sibling
     routes like ``/memberships/`` (capturing ``pk="memberships"``).  The
     fix mounts the sibling routers under explicit prefixes.  Same gotcha
-    affected ``apps.portfolio.api.urls`` — check both here.
+    affected ``apps.trading.api.urls`` — check both here.
     """
     User.objects.create_user(email="shadow@alphadesk.io", password="longpassword123")
     tok = api_client.post(

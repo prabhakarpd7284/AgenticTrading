@@ -2,7 +2,7 @@
 from django.urls import path
 
 from apps.market_data.consumers import TickConsumer
-from apps.portfolio.consumers import PnLConsumer
+from apps.trading.consumers import PnLConsumer
 from apps.agents_core.consumers import AgentRunConsumer
 from apps.notifications.consumers import AlertsConsumer
 from apps.events.consumers import EventsFirehoseConsumer, RunTimelineConsumer

@@ -6,10 +6,10 @@ the new v2 models:
 
   Legacy table                 → v2 source
   -------------------------------------------------
-  trading.TradeJournal         → apps.trades.Trade
-  trading.StraddlePosition     → apps.trades.OptionsPosition + .OptionsLeg
+  trading.TradeJournal         → apps.trading.Trade
+  trading.StraddlePosition     → apps.trading.OptionsPosition + .OptionsLeg
   trading.AuditLog             → apps.events.Event
-  trading.PortfolioSnapshot    → apps.portfolio.PortfolioSnapshot
+  trading.PortfolioSnapshot    → apps.trading.PortfolioSnapshot
   trading.SystemControl        → apps.system.SystemControl
   trading.SignalLog            → apps.strategies.Signal
   trading.WatchlistEntry       → apps.strategies.WatchlistEntry
@@ -37,11 +37,11 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from apps.events.models import Event
-from apps.portfolio.models import Portfolio, PortfolioSnapshot
+from apps.trading.models import Portfolio, PortfolioSnapshot
 from apps.rag.models import KnowledgeDoc
 from apps.strategies.models import Signal, WatchlistEntry
 from apps.system.models import SystemControl
-from apps.trades.models import OptionsLeg, OptionsPosition, Trade
+from apps.trading.models import OptionsLeg, OptionsPosition, Trade
 
 logger = logging.getLogger(__name__)
 

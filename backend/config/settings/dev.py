@@ -18,7 +18,7 @@ DEBUG = True
 
 # ---------------------------------------------------------------------------
 # Database — single Postgres alias. The legacy SQLite + LegacyRouter were
-# retired once `apps.trades`, `apps.events`, `apps.strategies.Signal`,
+# retired once `apps.trading`, `apps.events`, `apps.strategies.Signal`,
 # `apps.strategies.WatchlistEntry`, `apps.rag.KnowledgeDoc`, and
 # `apps.system.*` absorbed all legacy data via `manage.py migrate_legacy`.
 # ---------------------------------------------------------------------------

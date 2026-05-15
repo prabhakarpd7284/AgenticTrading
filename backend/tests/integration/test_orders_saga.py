@@ -14,8 +14,8 @@ from unittest.mock import patch
 import pytest
 from django.utils import timezone
 
-from apps.orders.models import Order, OutboxEvent
-from apps.orders.services.order_saga import MAX_ATTEMPTS, OrderSaga
+from apps.trading.models import Order, OutboxEvent
+from apps.trading.services.order_saga import MAX_ATTEMPTS, OrderSaga
 from tests.factories import OrderFactory, OutboxEventFactory, PortfolioFactory
 
 
@@ -50,7 +50,7 @@ class _FailingBroker:
 def _with_broker(broker):
     """Patch broker_registry.get to return the given broker stub."""
     return patch(
-        "apps.orders.services.order_saga.broker_registry.get",
+        "apps.trading.services.order_saga.broker_registry.get",
         return_value=broker,
     )
 
@@ -138,8 +138,8 @@ def test_saga_sends_to_dlq_after_max_attempts(tenant, paper_portfolio, owner):
 # entry point. We prove the entry-point dedupe in this test.
 # ---------------------------------------------------------------------------
 def test_place_order_dedupes_on_idempotency_key(tenant, paper_portfolio, owner):
-    from apps.orders.domain.entities import OrderDraft
-    from apps.orders.services.place_order import PlaceOrder
+    from apps.trading.domain.entities import OrderDraft
+    from apps.trading.services.place_order import PlaceOrder
 
     class _AlwaysApprove:
         # PlaceOrder calls `risk.validate(trade_draft, portfolio_id=...)`

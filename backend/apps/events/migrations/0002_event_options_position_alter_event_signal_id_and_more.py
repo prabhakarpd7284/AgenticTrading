@@ -8,14 +8,14 @@ class Migration(migrations.Migration):
 
     dependencies = [
         ('events', '0001_initial'),
-        ('trades', '0001_initial'),
+        ('trading', '0002_trades'),
     ]
 
     operations = [
         migrations.AddField(
             model_name='event',
             name='options_position',
-            field=models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='events', to='trades.optionsposition'),
+            field=models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='events', to='trading.optionsposition'),
         ),
         migrations.AlterField(
             model_name='event',

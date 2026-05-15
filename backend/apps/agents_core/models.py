@@ -18,7 +18,7 @@ class AgentRun(TenantModel):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     strategy_name = models.CharField(max_length=128, db_index=True)
     strategy_version = models.CharField(max_length=32)
-    portfolio = models.ForeignKey("portfolio.Portfolio", on_delete=models.PROTECT)
+    portfolio = models.ForeignKey("trading.Portfolio", on_delete=models.PROTECT)
     triggered_by = models.ForeignKey("accounts.User", on_delete=models.PROTECT)
     config = models.JSONField(default=dict, blank=True)
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.QUEUED)

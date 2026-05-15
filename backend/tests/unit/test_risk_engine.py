@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from apps.trades.services.risk_engine import (
+from apps.trading.services.risk_engine import (
     PortfolioSnapshot,
     RegimeSnapshot,
     RiskEngine,

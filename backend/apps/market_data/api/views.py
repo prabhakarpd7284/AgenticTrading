@@ -367,7 +367,7 @@ def _portfolio_context(request) -> tuple[float, float, int]:
     if tenant is None:
         return default_cap, 0.0, 0
     try:
-        from apps.portfolio.models import Portfolio, Position
+        from apps.trading.models import Portfolio, Position
     except Exception:  # noqa: BLE001
         return default_cap, 0.0, 0
     pf = (

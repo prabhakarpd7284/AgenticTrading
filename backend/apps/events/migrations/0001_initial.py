@@ -11,7 +11,7 @@ class Migration(migrations.Migration):
 
     dependencies = [
         ('agents_core', '0001_initial'),
-        ('orders', '0001_initial'),
+        ('trading', '0001_initial'),
         ('tenants', '0001_initial'),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
@@ -35,7 +35,7 @@ class Migration(migrations.Migration):
                 ('ip', models.GenericIPAddressField(blank=True, null=True)),
                 ('request_id', models.CharField(blank=True, default='', max_length=64)),
                 ('actor_user', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='+', to=settings.AUTH_USER_MODEL)),
-                ('order', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='+', to='orders.order')),
+                ('order', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='+', to='trading.order')),
                 ('tenant', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='+', to='tenants.tenant')),
                 ('workflow_run', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='events', to='agents_core.agentrun')),
             ],

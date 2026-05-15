@@ -1,7 +1,7 @@
 """Deterministic RiskGuard — DEPRECATED tests.
 
 This test module exercises the legacy `DeterministicRiskGuard` shim which now
-delegates to the canonical `apps.trades.services.risk_engine.RiskEngine`. The
+delegates to the canonical `apps.trading.services.risk_engine.RiskEngine`. The
 new engine has stricter 10-criterion validation, so drafts must carry full
 trade economics (entry_price + stop_loss + target) — not just `price`.
 
@@ -21,7 +21,7 @@ from decimal import Decimal
 import pytest
 from django.test import override_settings
 
-from apps.orders.services.risk_guard import (
+from apps.trading.services.risk_guard import (
     DeterministicRiskGuard,
     PortfolioSnapshot,
 )

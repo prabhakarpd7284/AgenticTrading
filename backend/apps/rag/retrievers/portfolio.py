@@ -8,7 +8,7 @@ class PortfolioRetriever:
     name = "portfolio"
 
     def retrieve(self, q: RetrievalQuery, k: int = 5) -> list[RetrievedDoc]:
-        from apps.portfolio.models import Portfolio, Position
+        from apps.trading.models import Portfolio, Position
 
         tenant_id = q.filters.get("tenant_id")
         if not tenant_id:

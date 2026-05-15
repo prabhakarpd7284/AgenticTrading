@@ -9,7 +9,7 @@ class Migration(migrations.Migration):
     dependencies = [
         ('strategies', '0001_initial'),
         ('tenants', '0001_initial'),
-        ('trades', '0001_initial'),
+        ('trading', '0002_trades'),
     ]
 
     operations = [
@@ -39,7 +39,7 @@ class Migration(migrations.Migration):
                 ('max_adverse_move', models.FloatField(blank=True, null=True)),
                 ('legacy_signal_log_id', models.IntegerField(blank=True, db_index=True, null=True)),
                 ('tenant', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='+', to='tenants.tenant')),
-                ('trade', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='signals', to='trades.trade')),
+                ('trade', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='signals', to='trading.trade')),
             ],
             options={
                 'ordering': ['-signal_time'],

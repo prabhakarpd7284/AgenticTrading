@@ -20,8 +20,11 @@ api_v1 = [
     # /brokers/ — broker linking was absorbed into market_data in Phase 4b.
     path("brokers/", include("apps.market_data.api.broker_urls")),
     path("market-data/", include("apps.market_data.api.urls")),
-    path("portfolios/", include("apps.portfolio.api.urls")),
-    path("orders/", include("apps.orders.api.urls")),
+    # /portfolios/ + /orders/ — the portfolio, orders and trades apps were
+    # merged into a single `trading` app in Phase 4c; their REST surfaces
+    # stay split so frontend routes don't change.
+    path("portfolios/", include("apps.trading.api.portfolio_urls")),
+    path("orders/", include("apps.trading.api.orders_urls")),
     path("strategies/", include("apps.strategies.api.urls")),
     path("agents/", include("apps.agents_core.api.urls")),
     path("rag/", include("apps.rag.api.urls")),

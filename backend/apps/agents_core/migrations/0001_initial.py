@@ -11,7 +11,7 @@ class Migration(migrations.Migration):
     initial = True
 
     dependencies = [
-        ('portfolio', '0001_initial'),
+        ('trading', '0001_initial'),
         ('tenants', '0001_initial'),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
@@ -31,7 +31,7 @@ class Migration(migrations.Migration):
                 ('error', models.TextField(blank=True)),
                 ('started_at', models.DateTimeField(blank=True, null=True)),
                 ('completed_at', models.DateTimeField(blank=True, null=True)),
-                ('portfolio', models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, to='portfolio.portfolio')),
+                ('portfolio', models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, to='trading.portfolio')),
                 ('tenant', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='+', to='tenants.tenant')),
                 ('triggered_by', models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, to=settings.AUTH_USER_MODEL)),
             ],

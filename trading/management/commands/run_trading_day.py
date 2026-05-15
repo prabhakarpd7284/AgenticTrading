@@ -716,7 +716,7 @@ class Command(BaseCommand):
                     "run_straddle_analysis() lived in dashboard_utils.data_layer "
                     "(legacy SQLite era). Phase 6 dropped the legacy DB. "
                     "Run the short_straddle plugin via the strategies app instead, "
-                    "or refactor this command to use apps.trades.OptionsPosition."
+                    "or refactor this command to use apps.trading.OptionsPosition."
                 )
                 result = {}  # unreachable
                 if "error" not in result:

@@ -50,7 +50,7 @@ class ChannelsPublisher:
 
 def build_context(run: AgentRun, publisher: ChannelsPublisher) -> AgentContext:
     from apps.market_data.services.data_port import DefaultMarketData
-    from apps.trades.services.risk_engine import RiskEngine
+    from apps.trading.services.risk_engine import RiskEngine
     from apps.rag.services.router import DefaultRAGRouter
     from apps.events.services.journal_port import JournalAdapter
 

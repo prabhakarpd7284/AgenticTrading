@@ -47,14 +47,12 @@ LOCAL_APPS = [
     "apps.tenants",
     "apps.billing",
     "apps.market_data",  # absorbed the broker app in Phase 4b (BrokerLink + adapters)
-    "apps.portfolio",
-    "apps.orders",
+    "apps.trading",      # Phase 4c: portfolio + orders + trades merged into one
     "apps.strategies",
     "apps.agents_core",
     "apps.rag",
-    "apps.events",  # unified event log — absorbed journals + audit in Phase 4a
-    "apps.trades",  # Trade + OptionsPosition + OptionsLeg (redesign-v2; will absorb portfolio.Position)
-    "apps.system",  # SystemControl + TraderNote (redesign-v2; will fold into apps.core later)
+    "apps.events",       # unified event log — absorbed journals + audit in Phase 4a
+    "apps.system",       # SystemControl + TraderNote
     "apps.notifications",
 ]
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
@@ -167,11 +165,11 @@ CELERY_TASK_REJECT_ON_WORKER_LOST = True
 CELERY_WORKER_PREFETCH_MULTIPLIER = 1
 CELERY_BEAT_SCHEDULE = {
     "process-order-outbox": {
-        "task": "apps.orders.tasks.outbox.process_outbox",
+        "task": "apps.trading.tasks.outbox.process_outbox",
         "schedule": 1.0,
     },
     "refresh-portfolio-snapshots": {
-        "task": "apps.portfolio.tasks.snapshots.refresh_all",
+        "task": "apps.trading.tasks.snapshots.refresh_all",
         "schedule": 60.0,
     },
     "expire-old-agent-runs": {

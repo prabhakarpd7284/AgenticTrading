@@ -75,7 +75,7 @@ class Signal(TenantModel):
     outcome = models.CharField(max_length=10, choices=Outcome.choices, default=Outcome.PENDING)
     outcome_reason = models.TextField(blank=True, default="")
     trade = models.ForeignKey(
-        "trades.Trade", null=True, blank=True,
+        "trading.Trade", null=True, blank=True,
         on_delete=models.SET_NULL, related_name="signals",
     )
 
