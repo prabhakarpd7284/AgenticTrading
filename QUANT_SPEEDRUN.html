@@ -1,0 +1,890 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>How To Speedrun a Quant Trader Career With AI</title>
+<style>
+  :root{
+    --bg:#0d1117; --surface:#161b22; --surface-2:#1c2128;
+    --border:#30363d; --border-strong:#484f58;
+    --fg:#e6edf3; --fg-muted:#8b949e; --fg-subtle:#6e7681;
+    --accent:#58a6ff; --accent-soft:rgba(88,166,255,.12);
+    --ok:#3fb950; --warn:#d29922; --bad:#f85149; --info:#79c0ff; --gold:#e3b341;
+    --code-bg:#1c2128;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.65 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;-webkit-font-smoothing:antialiased}
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+  code,pre,kbd{font-family:'JetBrains Mono','SF Mono',Menlo,Monaco,Consolas,monospace;font-size:.86em}
+  code{background:var(--code-bg);border:1px solid var(--border);padding:1px 5px;border-radius:4px;color:#cdd9e5}
+  pre{background:var(--code-bg);border:1px solid var(--border);border-radius:8px;padding:14px 16px;overflow-x:auto;line-height:1.55;font-size:13px;color:#bcc8d4}
+  pre code{background:none;border:none;padding:0}
+  h1,h2,h3,h4{font-weight:600;letter-spacing:-.01em;margin:0}
+  h1{font-size:34px}
+  h2{font-size:23px;border-bottom:1px solid var(--border);padding-bottom:8px;margin:48px 0 18px}
+  h3{font-size:18px;color:var(--fg);margin:28px 0 10px}
+  h4{font-size:14px;color:var(--fg-muted);text-transform:uppercase;letter-spacing:.04em;margin:22px 0 8px}
+  p{margin:0 0 12px}
+  ul,ol{margin:0 0 14px;padding-left:22px}
+  li{margin:3px 0}
+
+  /* Layout */
+  .layout{display:grid;grid-template-columns:260px 1fr;min-height:100vh}
+  nav.toc{position:sticky;top:0;height:100vh;overflow-y:auto;background:var(--surface);border-right:1px solid var(--border);padding:24px 18px}
+  nav.toc h1{font-size:16px;margin-bottom:4px}
+  nav.toc .sub{color:var(--fg-subtle);font-size:12px;margin-bottom:18px}
+  nav.toc ol{list-style:none;padding-left:0;counter-reset:s}
+  nav.toc ol li{counter-increment:s;font-size:13px;margin:0}
+  nav.toc ol li a{display:block;padding:5px 8px;border-radius:6px;color:var(--fg-muted)}
+  nav.toc ol li a:hover{background:var(--surface-2);color:var(--fg);text-decoration:none}
+  nav.toc ol li a:before{content:counter(s,decimal-leading-zero) "  ";color:var(--fg-subtle)}
+  main{padding:36px 56px 120px;max-width:1100px}
+  @media (max-width:980px){
+    .layout{grid-template-columns:1fr}
+    nav.toc{position:static;height:auto;border-right:none;border-bottom:1px solid var(--border)}
+    main{padding:24px 18px}
+  }
+
+  /* Hero */
+  .hero{background:linear-gradient(135deg,rgba(88,166,255,.06),rgba(227,179,65,.05));border:1px solid var(--border);border-radius:14px;padding:34px;margin-bottom:24px}
+  .hero h1{margin-bottom:10px}
+  .hero .lede{color:var(--fg-muted);font-size:16.5px;max-width:780px}
+  .hero .chips{margin-top:18px;display:flex;flex-wrap:wrap;gap:8px}
+  .chip{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border:1px solid var(--border);border-radius:999px;background:var(--surface);font-size:12px;color:var(--fg-muted)}
+  .chip strong{color:var(--fg)}
+  .source-byline{margin-top:14px;color:var(--fg-subtle);font-size:12.5px}
+
+  /* Tables */
+  table{width:100%;border-collapse:collapse;font-size:13.5px;margin:8px 0 14px;background:var(--surface);border:1px solid var(--border);border-radius:8px;overflow:hidden}
+  th,td{padding:9px 12px;text-align:left;vertical-align:top;border-bottom:1px solid var(--border)}
+  thead th{background:var(--surface-2);font-weight:600;color:var(--fg);font-size:12.5px;text-transform:uppercase;letter-spacing:.03em}
+  tbody tr:last-child td{border-bottom:none}
+  tbody tr:hover{background:var(--surface-2)}
+  td code{font-size:12.5px}
+
+  /* Grid + cards */
+  .grid{display:grid;gap:14px}
+  .cols-2{grid-template-columns:repeat(auto-fit,minmax(320px,1fr))}
+  .cols-3{grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}
+  .cols-4{grid-template-columns:repeat(auto-fit,minmax(200px,1fr))}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px}
+  .card h3{margin-top:0}
+  .card .meta{color:var(--fg-subtle);font-size:12px;margin-bottom:6px}
+
+  /* Stat cards */
+  .stat{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px}
+  .stat .label{color:var(--fg-subtle);font-size:11px;text-transform:uppercase;letter-spacing:.06em}
+  .stat .value{color:var(--fg);font-size:22px;font-weight:600;margin-top:4px;font-family:'JetBrains Mono',Menlo,monospace}
+  .stat .note{color:var(--fg-muted);font-size:12px;margin-top:4px}
+
+  /* Badges */
+  .badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11.5px;font-weight:500;letter-spacing:.02em;border:1px solid var(--border);background:var(--surface)}
+  .badge.ok{color:var(--ok);border-color:rgba(63,185,80,.4);background:rgba(63,185,80,.08)}
+  .badge.warn{color:var(--warn);border-color:rgba(210,153,34,.4);background:rgba(210,153,34,.08)}
+  .badge.bad{color:var(--bad);border-color:rgba(248,81,73,.4);background:rgba(248,81,73,.08)}
+  .badge.info{color:var(--info);border-color:rgba(121,192,255,.4);background:rgba(121,192,255,.08)}
+  .badge.gold{color:var(--gold);border-color:rgba(227,179,65,.45);background:rgba(227,179,65,.08)}
+  .badge.muted{color:var(--fg-muted)}
+
+  /* Diagrams */
+  .diagram{background:var(--code-bg);border:1px solid var(--border);border-radius:10px;padding:18px;overflow-x:auto;line-height:1.4}
+  .diagram pre{background:transparent;border:none;padding:0;font-size:13px;color:#bcc8d4}
+  .formula{background:var(--code-bg);border:1px solid var(--border);border-left:3px solid var(--gold);border-radius:6px;padding:12px 16px;margin:10px 0;font-family:'JetBrains Mono',Menlo,monospace;color:#cdd9e5;font-size:14px;letter-spacing:.02em}
+
+  /* Section labels */
+  .kicker{color:var(--fg-subtle);font-size:11.5px;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px}
+
+  /* Callouts */
+  .callout{border:1px solid var(--border);border-left:3px solid var(--accent);background:var(--accent-soft);padding:13px 16px;border-radius:6px;margin:14px 0}
+  .callout.warn{border-left-color:var(--warn);background:rgba(210,153,34,.07)}
+  .callout.bad{border-left-color:var(--bad);background:rgba(248,81,73,.07)}
+  .callout.ok{border-left-color:var(--ok);background:rgba(63,185,80,.07)}
+  .callout strong{color:var(--fg)}
+
+  /* Step blocks */
+  .step{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:18px;margin:14px 0}
+  .step header{display:flex;align-items:baseline;gap:12px;margin-bottom:10px}
+  .step .num{font-family:'JetBrains Mono',Menlo,monospace;color:var(--gold);font-weight:600;font-size:13px;letter-spacing:.04em}
+  .step h3{margin:0;flex:1}
+  .step .duration{color:var(--fg-subtle);font-size:12px;font-family:'JetBrains Mono',Menlo,monospace}
+
+  /* Checklist */
+  .checklist{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px 18px;margin:10px 0}
+  .checklist h4{margin:6px 0 6px;color:var(--gold)}
+  .checklist ul{list-style:none;padding-left:4px}
+  .checklist li{position:relative;padding-left:24px;color:var(--fg-muted);font-size:13.5px}
+  .checklist li:before{content:"☐";position:absolute;left:0;color:var(--fg-subtle);font-size:14px}
+
+  /* Resource list */
+  .resources li{font-size:13.5px}
+  .resources li::marker{color:var(--gold)}
+
+  /* Prompt box */
+  .prompt{background:var(--code-bg);border:1px solid var(--border);border-left:3px solid var(--info);border-radius:6px;padding:12px 14px;font-family:'JetBrains Mono',Menlo,monospace;font-size:12.5px;color:#cdd9e5;white-space:pre-wrap;line-height:1.5;margin:10px 0}
+
+  footer{margin-top:60px;padding-top:18px;border-top:1px solid var(--border);color:var(--fg-subtle);font-size:12.5px}
+</style>
+</head>
+<body>
+<div class="layout">
+
+<nav class="toc">
+  <h1>Quant Speedrun</h1>
+  <div class="sub">AI-augmented path to the trading floor</div>
+  <ol>
+    <li><a href="#numbers">The 2026 numbers</a></li>
+    <li><a href="#role">What a quant trader is</a></li>
+    <li><a href="#aishift">How AI changed the work</a></li>
+    <li><a href="#ladder">The 7-step ladder</a></li>
+    <li><a href="#math">Step 1 · Math</a></li>
+    <li><a href="#code">Step 2 · Programming</a></li>
+    <li><a href="#finance">Step 3 · Finance &amp; microstructure</a></li>
+    <li><a href="#portfolio">Step 4 · Portfolio &amp; competitions</a></li>
+    <li><a href="#aifluency">Step 5 · AI fluency (new)</a></li>
+    <li><a href="#interview">Step 6 · Interview prep</a></li>
+    <li><a href="#apply">Step 7 · Where to apply</a></li>
+    <li><a href="#mistakes">Main mistakes</a></li>
+    <li><a href="#checklist">Readiness checklist</a></li>
+    <li><a href="#tonight">Start tonight</a></li>
+    <li><a href="#sources">Sources</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<section class="hero">
+  <div class="kicker">Speedrun guide · 2026 edition</div>
+  <h1>How to speedrun a quant trader career with AI</h1>
+  <p class="lede">A speedrun in gaming means completing the game in minimum time using every legitimate optimisation the system allows — not cheats, not shortcuts that break the experience, just deep system knowledge plus tools that turn dead time into progress. This guide applies the same frame to becoming a quant trader. The "skips" are AI tools that compress months of solo grinding into days of guided learning.</p>
+  <div class="chips">
+    <span class="chip"><strong>Time</strong> 18–24 months with a STEM background</span>
+    <span class="chip"><strong>Floor</strong> $336–642 k entry comp at Citadel</span>
+    <span class="chip"><strong>5-year</strong> $800 k – $1.2 M at top prop shops</span>
+    <span class="chip"><strong>Ceiling</strong> 8 figures for top P&amp;L</span>
+  </div>
+  <div class="source-byline">Based on the article by <a href="https://x.com/zostaff" target="_blank" rel="noopener">@zostaff</a> · <a href="https://x.com/zostaff/status/2052757482661888230" target="_blank" rel="noopener">original tweet</a></div>
+</section>
+
+<!-- ============================================== -->
+<h2 id="numbers">1 · The 2026 numbers</h2>
+
+<h3>What the industry pays</h3>
+<div class="grid cols-3">
+  <div class="stat"><div class="label">Citadel · entry total comp</div><div class="value">$336–642 k</div><div class="note">including bonus, from public H1B data</div></div>
+  <div class="stat"><div class="label">Jane Street · 2024 average per-employee payout</div><div class="value">$1.4 M</div></div>
+  <div class="stat"><div class="label">Five Rings · base for quant trader</div><div class="value">$300 k</div></div>
+  <div class="stat"><div class="label">IMC Trading · interns (annualised)</div><div class="value">$240 k+</div></div>
+  <div class="stat"><div class="label">5-year benchmark · top prop shops</div><div class="value">$800 k – $1.2 M / yr</div></div>
+  <div class="stat"><div class="label">Top traders with strong P&amp;L</div><div class="value">8 figures / yr</div></div>
+</div>
+
+<h3>What's happening in the industry right now</h3>
+<div class="grid cols-2">
+  <div class="card">
+    <span class="badge gold">Citadel Securities</span>
+    <h3>Google Cloud migration</h3>
+    <p>Access to 1M+ cores for parallel backtesting. A backtest that took 8 hours on 100 dedicated servers now runs in <strong>5 minutes on 10,000 ephemeral cores — a 96× speedup</strong>. Teams now test 50+ strategy variations per day instead of 3–5.</p>
+  </div>
+  <div class="card">
+    <span class="badge gold">Man Group · $151 B AUM</span>
+    <h3>AlphaGPT</h3>
+    <p>Multi-agent system that replaces a research pod. Agent 1 generates 50–100 strategy ideas per day. Agent 2 turns each into Python backtest code. Agent 3 evaluates for overfitting and robustness. Idea-to-P&amp;L cycle compressed from weeks to hours.</p>
+  </div>
+  <div class="card">
+    <span class="badge gold">Bridgewater</span>
+    <h3>AIA Labs (17 people)</h3>
+    <p>Already trading client money via LLM workflows. Insiders describe it as <em>"working like millions of 80th-percentile associates in parallel."</em> First public demonstration that a macro fund will entrust the entire investment loop to an LLM-heavy stack.</p>
+  </div>
+  <div class="card">
+    <span class="badge gold">Point72</span>
+    <h3>GPT in a locked Azure V-Net</h3>
+    <p>Follow-the-sun hubs in Warsaw and Bengaluru. NLP models analyse earnings calls, regulatory filings, news sentiment — now baseline expectation, no longer an edge.</p>
+  </div>
+  <div class="card">
+    <span class="badge gold">D.E. Shaw</span>
+    <h3>LLM Gateway</h3>
+    <p>Brokers requests to 24+ external models with PII stripping. The internal <strong>DocLab</strong> retrieves answers across all internal research notes with audit hashes and confidence scores.</p>
+  </div>
+  <div class="card">
+    <span class="badge gold">Balyasny (BAM)</span>
+    <h3>In-house AI gateway</h3>
+    <p>10 data sources unified through one AI interface. A junior analyst now starts the day with a Bloomberg-equivalent on top of every internal research note ever written.</p>
+  </div>
+</div>
+
+<div class="callout">
+  Two connected shifts make the speedrun viable: the industry is moving to AI, <em>and</em> the same AI has opened access to the profession for people without an MIT diploma. Both are happening right now.
+</div>
+
+<!-- ============================================== -->
+<h2 id="role">2 · What a quant trader actually is</h2>
+
+<p>Four roles in the quant industry that often get confused:</p>
+
+<table>
+  <thead><tr><th>Role</th><th>What they do</th><th>Who fits</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Quant Trader</strong></td><td>Makes trade decisions · market making · risk management</td><td>STEM bachelor's with olympiad background · fast reactions</td></tr>
+    <tr><td>Quant Researcher</td><td>Finds alpha signals · builds models</td><td>PhD/Master's · research mindset</td></tr>
+    <tr><td>Quant Developer</td><td>Infrastructure · low-latency systems</td><td>Strong SWE background (C++/Rust)</td></tr>
+    <tr><td>Quant Analyst</td><td>Derivatives pricing · risk (sell-side)</td><td>Strong stochastic calculus</td></tr>
+  </tbody>
+</table>
+
+<h3>Why the trader role is the most accessible</h3>
+<ul>
+  <li>A STEM bachelor's is enough. Jane Street explicitly states <em>"prior knowledge of finance or economics is not expected or required."</em> Two-thirds of their intern class is CS and math, not finance.</li>
+  <li>No PhD gating — unlike research positions at Renaissance, Two Sigma, D.E. Shaw.</li>
+  <li>Highest variance career path. Exceptional traders make 8 figures; ordinary ones $200–400 k entry, $800 k – 1.2 M after 5 years.</li>
+  <li>Most "real-time mathematical" role — probability puzzles, mental math, decisions under pressure.</li>
+</ul>
+
+<h3>What a trader does day-to-day</h3>
+<ul>
+  <li>Market making — quotes bid/ask, manages inventory, hedges risk.</li>
+  <li>Implements strategies built by researchers.</li>
+  <li>Makes fast decisions: pricing nuances, order book dynamics, rare events.</li>
+  <li>Manages P&amp;L on their book in real time.</li>
+  <li>Pairs with researchers to improve models from live data.</li>
+</ul>
+
+<div class="callout ok">
+  <strong>Core frame.</strong> A trader doesn't predict the market. A trader finds situations where the mathematical probability is shifted in their favour, sizes the position correctly, and repeats the process thousands of times until EV accumulates into real returns. It's a casino from the other side of the table.
+</div>
+
+<!-- ============================================== -->
+<h2 id="aishift">3 · How AI changed the work</h2>
+
+<p>Most "how to become a quant" content skirts the most important thing: the 2026 profession is no longer the 2020 profession. If you're learning by a 2018 plan, you're learning for a role that has already transformed. Five concrete shifts:</p>
+
+<div class="grid cols-2">
+  <div class="card">
+    <span class="badge info">Baseline · already in place at all top firms</span>
+    <h3>1. AI as research co-pilot</h3>
+    <p>Every analyst has an internal LLM tool: D.E. Shaw's <strong>DocLab</strong> (vector DB over all internal research, queries return structured answers with confidence scores), Point72's locked-VNet GPT, Balyasny's unified gateway, Bridgewater's compliance + research co-pilots (70% reduction in manual review time).</p>
+    <p style="color:var(--fg-muted);font-size:13px;margin-bottom:0"><strong>Today:</strong> use Claude or ChatGPT for research and you have the same capability as a junior at a fund, minus the private data.</p>
+  </div>
+  <div class="card">
+    <span class="badge info">Man Group AlphaGPT</span>
+    <h3>2. AI generates trading ideas</h3>
+    <ul style="margin-bottom:0">
+      <li><strong>Agent 1</strong> · idea generation — GPT-4 fine-tuned on historical research notes. 50–100 strategy ideas/day.</li>
+      <li><strong>Agent 2</strong> · implementation — converts natural-language idea to Python backtest code.</li>
+      <li><strong>Agent 3</strong> · risk evaluation — checks for overfitting, factor exposures, robustness.</li>
+    </ul>
+  </div>
+  <div class="card">
+    <span class="badge info">Citadel Securities</span>
+    <h3>3. Production AI infrastructure</h3>
+    <p>Backtest that took 8 hours on 100 dedicated servers → <strong>5 minutes on 10,000 ephemeral cores</strong>. 96× wall-clock speedup. 50+ strategy variations per day. The edge is no longer the idea — it's the speed at which you test it.</p>
+  </div>
+  <div class="card">
+    <span class="badge info">Bridgewater AIA Labs</span>
+    <h3>4. Full replication of the human process</h3>
+    <p>Goal: fully replicate Ray Dalio's macro-investment process through machines. Running on AWS EKS, already trading client money. Described as <em>"millions of 80th-percentile associates in parallel."</em></p>
+  </div>
+  <div class="card" style="grid-column:1/-1">
+    <span class="badge info">NLP + alternative data</span>
+    <h3>5. From "read 10-Ks" to "query the LLM that read every 10-K"</h3>
+    <p>A 2026 trader doesn't sit reading 10-Ks. The trader queries an AI system that has read every 10-K from every year and highlights changes in wording between quarterly reports. <strong>Signal in those wording shifts is real alpha being actively exploited right now.</strong></p>
+  </div>
+</div>
+
+<div class="callout warn">
+  <strong>What this means for your skill set.</strong> Previously: math, mental math, market intuition. Now (still): math, mental math, market intuition — <em>plus</em> AI fluency. LLM-driven research, vector DBs + RAG, agent workflows, fine-tuning, model validation. This shifted from "nice to have" to baseline expectation at Citadel, Man Group, Bridgewater, Point72.
+</div>
+
+<!-- ============================================== -->
+<h2 id="ladder">4 · The ladder — 7 steps from zero to offer</h2>
+
+<p>The biggest mistake people make is the vertical jump — submit a résumé to Citadel without credentials, get rejected, conclude the path is closed. The path isn't closed. It's a ladder; you can't skip steps.</p>
+
+<div class="diagram"><pre>
+   Step 7    Offer at a top firm
+              ▲
+   Step 6    Interview prep + applications
+              ▲
+   Step 5    AI fluency for finance       ← new in 2026
+              ▲
+   Step 4    Portfolio + competitions
+              ▲
+   Step 3    Finance + market structure
+              ▲
+   Step 2    Programming (Python primary, C++ optional)
+              ▲
+   Step 1    Math foundation
+</pre></div>
+
+<!-- ============================================== -->
+<h2 id="math">5 · Step 1 — Math foundation</h2>
+
+<p>The longest and most unforgiving step. At an interview at Jane Street or Optiver it shows in 5 minutes whether you went through this honestly or jumped past it. Five layers, in strict order:</p>
+
+<div class="diagram"><pre>
+   Stochastic calculus       ← Black–Scholes, asset price modelling
+              ▲
+   Calculus + optimisation   ← portfolio construction
+              ▲
+   Linear algebra            ← covariance, PCA, factors
+              ▲
+   Statistics                ← hypothesis testing, regression
+              ▲
+   Probability               ← the heart of the profession
+</pre></div>
+
+<div class="step">
+  <header>
+    <span class="num">1.1</span>
+    <h3>Probability</h3>
+    <span class="duration">8–12 weeks</span>
+  </header>
+  <p>The most important layer. Everything reduces to one question: <em>what are the odds, and are they in my favour?</em></p>
+  <p><strong>Conditional thinking.</strong></p>
+  <div class="formula">P(A | B) = P(A ∩ B) / P(B)</div>
+  <p>Unconditional probability the market moves sharply after an economic announcement is 40%. Conditional on options implied vol being elevated beforehand, the probability becomes 68%. Those <strong>28 percentage points are real alpha</strong>.</p>
+  <p><strong>Bayes' theorem.</strong> Traders who update beliefs faster and more accurately consistently outperform.</p>
+  <div class="formula">Posterior = (Likelihood × Prior) / Evidence</div>
+  <p><strong>Expected value and variance.</strong> Two numbers you'll think about for the rest of your career. Positive EV + survivable variance = money. Position too large relative to variance = bankruptcy before EV gets a chance to work.</p>
+  <h4>Resources</h4>
+  <ul class="resources">
+    <li>Blitzstein &amp; Hwang — <a href="https://stat110.hsites.harvard.edu/" target="_blank" rel="noopener">Introduction to Probability</a> (Harvard, free) — ch. 1–6</li>
+    <li><a href="https://projects.iq.harvard.edu/stat110" target="_blank" rel="noopener">Harvard Stat 110</a> (Joe Blitzstein) — best probability course in the world, <a href="https://www.youtube.com/playlist?list=PL2SOU6wwxB0uwwH80KTQ6ht66KWxbzTIo" target="_blank" rel="noopener">full YouTube playlist</a></li>
+    <li>DeGroot &amp; Schervish — <em>Probability and Statistics</em> (the standard)</li>
+  </ul>
+</div>
+
+<div class="step">
+  <header>
+    <span class="num">1.2</span>
+    <h3>Statistics</h3>
+    <span class="duration">4–6 weeks</span>
+  </header>
+  <p>Probability is theory. Statistics is the practice of listening to data. The main lesson: <strong>most things that look like signal are actually noise.</strong></p>
+  <ul>
+    <li><strong>Hypothesis testing.</strong> You've built a strategy, backtest shows 15% annual returns. Real edge or luck? If you tested 1,000 random strategies, 50 of them will show a "significant" result at 5% by pure chance. This is the multiple-comparisons problem — the main reason backtests look great and live results are terrible.</li>
+    <li><strong>Linear regression.</strong> Regress strategy returns on known risk factors. If alpha == 0 after accounting for all factors, your "edge" is hidden exposure to something already known.</li>
+  </ul>
+  <h4>Resource</h4>
+  <ul class="resources"><li>Wasserman — <em>All of Statistics</em> (fast and dense), ch. 1–13</li></ul>
+</div>
+
+<div class="step">
+  <header>
+    <span class="num">1.3</span>
+    <h3>Linear algebra</h3>
+    <span class="duration">4–6 weeks</span>
+  </header>
+  <p>Portfolio construction, PCA, neural networks, covariance matrices.</p>
+  <div class="formula">σ²(portfolio) = wᵀ Σ w</div>
+  <p>Heart of Markowitz portfolio theory. <strong>Eigenvalues show what actually matters.</strong> In 500 stocks, the first 5 eigenvectors explain ~70% of all variance. The rest is noise. This is the foundation of factor investing.</p>
+  <h4>Resources</h4>
+  <ul class="resources">
+    <li>Gilbert Strang — <a href="https://ocw.mit.edu/courses/18-06-linear-algebra-spring-2010/" target="_blank" rel="noopener">MIT 18.06</a> (OCW free) + <em>Introduction to Linear Algebra</em></li>
+    <li><a href="https://www.3blue1brown.com/topics/linear-algebra" target="_blank" rel="noopener">3Blue1Brown — Essence of Linear Algebra</a> (visual intuition)</li>
+  </ul>
+</div>
+
+<div class="step">
+  <header>
+    <span class="num">1.4</span>
+    <h3>Calculus + optimisation</h3>
+    <span class="duration">4–5 weeks</span>
+  </header>
+  <p>Almost every problem in quant finance reduces to <em>maximise X subject to constraints</em>. Key idea: a convex problem has a unique global solution that can be found efficiently.</p>
+  <h4>Resource</h4>
+  <ul class="resources">
+    <li>Boyd &amp; Vandenberghe — <a href="https://web.stanford.edu/~boyd/cvxbook/" target="_blank" rel="noopener">Convex Optimization</a> (Stanford, free), ch. 1–5</li>
+    <li><a href="https://web.stanford.edu/class/ee364a/" target="_blank" rel="noopener">Stanford EE364A</a> (Boyd's course)</li>
+  </ul>
+</div>
+
+<div class="step">
+  <header>
+    <span class="num">1.5</span>
+    <h3>Stochastic calculus</h3>
+    <span class="duration">6–8 weeks</span>
+  </header>
+  <p>After this layer you can derive how financial instruments are priced from first principles. Central idea: in a world with randomness, the <em>square of a small random increment is not negligible</em>. This produces Itô's lemma — the chain rule of stochastic calculus. Apply it to an option price:</p>
+  <div class="formula">∂V/∂t + ½ σ² S² (∂²V/∂S²) + r S (∂V/∂S) − r V = 0</div>
+  <p>What's remarkable: the expected return of the stock <strong>disappears completely</strong>. The option price doesn't depend on where you think the stock is going. Only on how much it moves.</p>
+  <h4>Resource</h4>
+  <ul class="resources"><li>Steven Shreve — <a href="https://link.springer.com/book/10.1007/978-0-387-22527-2" target="_blank" rel="noopener">Stochastic Calculus for Finance II</a> · industry standard</li></ul>
+</div>
+
+<div class="callout">
+  <strong>How AI changes the math.</strong> Before: stuck on a Shreve proof → days alone, forums, often give up. Now → 30-second prompt:
+  <div class="prompt">I'm stuck on a proof: [text]
+My level: I know definitions through chapter X.
+Explain this step three ways:
+  1. Formally with definitions
+  2. Geometrically or through intuition
+  3. With a concrete numerical example
+Then give me 3 increasingly difficult exercises for comprehension.</div>
+  Same applies to probability paradoxes, regression derivations, eigenvector intuition.
+</div>
+
+<!-- ============================================== -->
+<h2 id="code">6 · Step 2 — Programming</h2>
+
+<p>In parallel with math, not sequentially. Two different worlds, often confused:</p>
+
+<div class="grid cols-2">
+  <div class="card">
+    <h3>Research programming</h3>
+    <p>Python, clean code, statistics, ML. The trader's and researcher's main tool.</p>
+  </div>
+  <div class="card">
+    <h3>Production programming</h3>
+    <p>C++ or Rust, microsecond latency. For quant developers; for traders, basic understanding is a plus.</p>
+  </div>
+</div>
+
+<h3>Python for traders</h3>
+<table>
+  <thead><tr><th>Library</th><th>Why</th></tr></thead>
+  <tbody>
+    <tr><td><a href="https://numpy.org/" target="_blank" rel="noopener">NumPy</a></td><td>Vectorisation — 10–100× faster than ordinary Python</td></tr>
+    <tr><td><a href="https://pandas.pydata.org/" target="_blank" rel="noopener">Pandas</a></td><td>Time series, multi-index, groupby</td></tr>
+    <tr><td><a href="https://pola.rs/" target="_blank" rel="noopener">Polars</a></td><td>Modern Pandas replacement, 10–50× faster on large datasets. <strong>Must-have in 2026.</strong></td></tr>
+    <tr><td><a href="https://scipy.org/" target="_blank" rel="noopener">SciPy</a></td><td>Statistics, optimisation</td></tr>
+    <tr><td><a href="https://www.statsmodels.org/" target="_blank" rel="noopener">statsmodels</a></td><td>Statistical tests</td></tr>
+    <tr><td><a href="https://www.cvxpy.org/" target="_blank" rel="noopener">cvxpy</a></td><td>Convex optimisation</td></tr>
+    <tr><td><a href="https://xgboost.readthedocs.io/" target="_blank" rel="noopener">xgboost</a> · <a href="https://lightgbm.readthedocs.io/" target="_blank" rel="noopener">lightgbm</a></td><td>Tabular ML</td></tr>
+  </tbody>
+</table>
+<p><strong>Resource.</strong> Wes McKinney — <a href="https://wesmckinney.com/book/" target="_blank" rel="noopener">Python for Data Analysis</a> (from the author of Pandas, free online).</p>
+
+<h3>SQL + big data</h3>
+<p>Joins, window functions, CTEs, parquet handling, basic <a href="https://clickhouse.com/" target="_blank" rel="noopener">ClickHouse</a> (standard for financial time-series). Resources: <a href="https://mode.com/sql-tutorial/" target="_blank" rel="noopener">Mode Analytics SQL Tutorial</a>, <a href="https://leetcode.com/studyplan/top-sql-50/" target="_blank" rel="noopener">LeetCode SQL</a>.</p>
+
+<h3>C++ / Rust</h3>
+<p>For a trader: not critical, but a plus. C++ has been the HFT standard for decades. Rust is gaining ground — <a href="https://nautilustrader.io/" target="_blank" rel="noopener">NautilusTrader</a> (open-source production-grade trading platform) uses a Rust core + Python API; the pattern is becoming standard.</p>
+
+<div class="callout">
+  <strong>How AI changes programming.</strong> This is the most AI-transformed area in the whole roadmap.
+  <ul style="margin-bottom:0">
+    <li><strong>Code review.</strong> Previously needed a senior. Now: <em>"here's my backtester, find look-ahead bias, survivorship bias, where transaction costs are wrong"</em> — answer in a minute, more accurate than half the seniors.</li>
+    <li><strong>Debugging.</strong> Ask for <em>"5 hypotheses for why this test fails"</em> instead of <em>"fix the bug."</em> Forces you to think, accelerates massively.</li>
+    <li><strong>Reproducing algorithms.</strong> Academic paper → pseudocode → implementation. Used to take weeks. Now an evening.</li>
+    <li><strong>Boilerplate.</strong> Data loading, viz, configs — 30 seconds via prompt. Frees you for the core logic.</li>
+  </ul>
+</div>
+
+<!-- ============================================== -->
+<h2 id="finance">7 · Step 3 — Finance &amp; market structure</h2>
+
+<p>STEM candidates are often weakest here. They arrive with strong math but don't understand option Greeks or yield curves.</p>
+
+<div class="grid cols-2">
+  <div class="card">
+    <h3>Foundations</h3>
+    <ul>
+      <li>Hull — <a href="https://www.pearson.com/en-us/subject-catalog/p/options-futures-and-other-derivatives/P200000005938" target="_blank" rel="noopener">Options, Futures, and Other Derivatives</a>. The main book. Everyone reads it.</li>
+      <li>Bodie, Kane, Marcus — <em>Investments</em> (standard textbook)</li>
+      <li>Time value of money · NPV · bond pricing · duration · MPT (Markowitz) · CAPM · Fama–French</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3>Options &amp; volatility (trader-specific)</h3>
+    <ul>
+      <li>Natenberg — <a href="https://www.mhprofessional.com/option-volatility-and-pricing-advanced-trading-strategies-and-techniques-2nd-edition-9780071818773-usa" target="_blank" rel="noopener">Option Volatility and Pricing</a></li>
+      <li>The Greeks (delta, gamma, vega, theta, rho) — interpret <em>and</em> use</li>
+      <li>Implied vol · vol surface · smile / skew</li>
+      <li>Put-call parity · exotic options (conceptually)</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3>Market microstructure (critical for traders)</h3>
+    <ul>
+      <li>Cartea, Jaimungal, Penalva — <a href="https://www.cambridge.org/core/books/algorithmic-and-highfrequency-trading/1CB57C5ED7C2C2F36BA092A55E5B5B47" target="_blank" rel="noopener">Algorithmic and High-Frequency Trading</a></li>
+      <li>Order-book mechanics · market makers · liquidity</li>
+      <li>Bid-ask spread · market impact · adverse selection</li>
+      <li>Order types and how to use them</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3>Industry understanding</h3>
+    <ul>
+      <li>Rishi Narang — <em>Inside the Black Box</em> (how quant funds are built)</li>
+      <li>Scott Patterson — <em>The Quants</em> (industry documentary)</li>
+      <li>Greg Zuckerman — <em>The Man Who Solved the Market</em> (Renaissance)</li>
+    </ul>
+  </div>
+</div>
+
+<div class="callout">
+  <strong>How AI changes this.</strong> Finance literature is dense and opaque. A prompt:
+  <div class="prompt">Explain the [theta hedging] concept in Hull chapter X.
+Level: I know Black–Scholes, don't understand how to apply in practice.
+Give me: 1) intuition  2) concrete numeric example  3) common mistakes</div>
+  breaks down a chapter in an evening that previously took a week. Especially powerful for papers:
+  <div class="prompt">Attached paper [PDF]. I want to reproduce it for portfolio.
+Background: [background].
+1. Key idea in 3 paragraphs
+2. Math I need to know
+3. What data is needed and where to get it
+4. Algorithm pseudocode
+5. What simulated data to verify correctness
+6. Main implementation pitfalls (look-ahead bias)
+7. How to visualise results well</div>
+  Previously a serious paper was a week-long task. Now an hour.
+</div>
+
+<!-- ============================================== -->
+<h2 id="portfolio">8 · Step 4 — Portfolio &amp; competitions</h2>
+
+<p>Without GitHub projects, your résumé has no weight. But for trader roles there's something more important than projects: <strong>competitions.</strong></p>
+
+<h3>Trading competitions = recruitment pipeline</h3>
+<p>Companies watch the leaderboards. Strong performance brings direct recruiter DMs.</p>
+
+<table>
+  <thead><tr><th>Competition</th><th>Notes</th></tr></thead>
+  <tbody>
+    <tr><td><a href="https://www.kaggle.com/c/jane-street-real-time-market-data-forecasting" target="_blank" rel="noopener">Jane Street Kaggle</a></td><td>$100 k prize pool</td></tr>
+    <tr><td><a href="https://platform.worldquantbrain.com/" target="_blank" rel="noopener">WorldQuant BRAIN</a></td><td>Cash for alpha signals you submit</td></tr>
+    <tr><td><a href="https://www.citadel.com/careers/students/datathon/" target="_blank" rel="noopener">Citadel Datathon / Terminal</a></td><td>Explicitly fast-tracks winners into the interview pipeline</td></tr>
+    <tr><td><a href="https://prosperity.imc.com/" target="_blank" rel="noopener">IMC Prosperity</a></td><td>Annual trading game · top performers → interviews</td></tr>
+    <tr><td><a href="https://optiver.com/working-at-optiver/career-opportunities/" target="_blank" rel="noopener">Optiver competitions</a></td><td>Multiple events year-round</td></tr>
+  </tbody>
+</table>
+
+<h3>Projects (minimum 3, with READMEs)</h3>
+<div class="grid cols-3">
+  <div class="card">
+    <span class="badge muted">Project 1</span>
+    <h3>Reproduce an academic paper</h3>
+    <p>From top journals (Journal of Finance, RFS, JFE). E.g. momentum factor (Jegadeesh–Titman) or any equity factor from SSRN.</p>
+  </div>
+  <div class="card">
+    <span class="badge muted">Project 2</span>
+    <h3>Statistical arbitrage</h3>
+    <p>Pairs trading with cointegration, mean-reverting spread, backtest with <strong>realistic transaction costs.</strong></p>
+  </div>
+  <div class="card">
+    <span class="badge gold">Project 3 · 2026 differentiator</span>
+    <h3>Something non-standard</h3>
+    <ul style="margin-bottom:0">
+      <li>LLM-based alpha from earnings call text (hot in 2026)</li>
+      <li>AI agent for research workflow (idea → backtest → sanity check)</li>
+      <li>RL for market making</li>
+      <li>Anomaly detection in HF data</li>
+    </ul>
+  </div>
+</div>
+
+<h3>Where to get data</h3>
+<div class="grid cols-3">
+  <div class="card">
+    <span class="badge ok">Free</span>
+    <p>Yahoo Finance (<a href="https://github.com/ranaroussi/yfinance" target="_blank" rel="noopener">yfinance</a>) · <a href="https://fred.stlouisfed.org/" target="_blank" rel="noopener">FRED</a> · <a href="https://www.sec.gov/edgar" target="_blank" rel="noopener">SEC EDGAR</a></p>
+  </div>
+  <div class="card">
+    <span class="badge warn">Cheap</span>
+    <p><a href="https://polygon.io/" target="_blank" rel="noopener">Polygon.io</a> ($200/mo · serious-retail standard) · <a href="https://www.tiingo.com/" target="_blank" rel="noopener">Tiingo</a> · <a href="https://www.alphavantage.co/" target="_blank" rel="noopener">Alpha Vantage</a></p>
+  </div>
+  <div class="card">
+    <span class="badge bad">Institutional</span>
+    <p><a href="https://wrds-www.wharton.upenn.edu/" target="_blank" rel="noopener">WRDS</a> · <a href="https://www.crsp.org/" target="_blank" rel="noopener">CRSP</a> · Bloomberg ($32 k / yr)</p>
+  </div>
+</div>
+
+<!-- ============================================== -->
+<h2 id="aifluency">9 · Step 5 — AI fluency for finance <span class="badge gold" style="vertical-align:middle">new in 2026</span></h2>
+
+<p>This step didn't exist in 2020 roadmaps. In 2026, without it you don't get hired at Citadel, Man Group, Bridgewater, Point72.</p>
+
+<div class="grid cols-2">
+  <div class="card">
+    <h3>LLM for financial data</h3>
+    <ul style="margin-bottom:0">
+      <li>Structuring prompts for financial analysis</li>
+      <li>Validating outputs (where AI hallucinates · where it's reliable)</li>
+      <li>Limitations: what AI can't do and why</li>
+      <li>Cost optimisation (GPT-4 vs Claude vs specialised models)</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3>Vector DBs &amp; RAG</h3>
+    <ul style="margin-bottom:0">
+      <li>Embedding models &amp; semantic similarity</li>
+      <li>Chunking strategies for financial docs</li>
+      <li>Hybrid search (semantic + keyword)</li>
+      <li>Confidence scoring</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3>Agent workflows</h3>
+    <ul style="margin-bottom:0">
+      <li>Task decomposition</li>
+      <li>Tool use (LLM calls Python/SQL/APIs)</li>
+      <li>Validation loops (one agent critiques another)</li>
+      <li>Human-in-the-loop checkpoints</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3>AI risk &amp; model validation</h3>
+    <ul style="margin-bottom:0">
+      <li>Overfitting checks on financial data</li>
+      <li>Look-ahead bias in LLM-generated code</li>
+      <li>Interpretability (XAI for regulators)</li>
+      <li>Black-box problem in practice</li>
+    </ul>
+  </div>
+</div>
+
+<div class="callout ok">
+  <strong>Build something real — Minimal AlphaGPT clone.</strong> A 3-agent system you can build in a weekend with the Claude API:
+  <ul style="margin-bottom:0">
+    <li><strong>Agent 1</strong> · generates hypotheses in free form ("mean reversion in morning hours for small-caps")</li>
+    <li><strong>Agent 2</strong> · writes backtest code on historical data</li>
+    <li><strong>Agent 3</strong> · critiques the result — overfitting, leakage, transaction costs</li>
+  </ul>
+  This is the single most impressive project you can show a Citadel recruiter in 2026.
+</div>
+
+<!-- ============================================== -->
+<h2 id="interview">10 · Step 6 — Interview prep</h2>
+
+<p>Its own genre. You can know everything and still fail interviews. <strong>Citadel Super Days are 6 consecutive 45-minute interviews</strong> — probability proofs, coding, behavioural.</p>
+
+<div class="grid cols-2">
+  <div class="card">
+    <h3>Probability puzzles &amp; brainteasers</h3>
+    <ul>
+      <li>Xinfeng Zhou — <em>A Practical Guide to Quantitative Finance Interviews</em> (the <strong>Green Book</strong>). 200+ real problems.</li>
+      <li>Timothy Crack — <em>Heard on the Street</em></li>
+      <li>Mark Joshi — <a href="https://www.markjoshi.com/RecruitmentPage.html" target="_blank" rel="noopener">Quant Job Interview Questions and Answers</a></li>
+      <li><a href="https://brainstellar.com/" target="_blank" rel="noopener">brainstellar.com</a> — interview-difficulty problems with solutions</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3>Mental math (critical, not optional)</h3>
+    <p>Trainer: <a href="https://arithmetic.zetamac.com/" target="_blank" rel="noopener">Zetamac</a>.</p>
+    <p><strong>Goal: 50+ correct answers/min</strong> before you start applying. Without this you can't pass trader interviews at Optiver / IMC / Jane Street.</p>
+  </div>
+  <div class="card">
+    <h3>Coding interviews</h3>
+    <p><a href="https://leetcode.com/" target="_blank" rel="noopener">LeetCode</a> medium-hard. Especially: arrays, dynamic programming, graphs. <strong>DP is the most common failure point</strong> in final rounds at Citadel and Jane Street.</p>
+    <p>Often asked: implement a numerical algorithm — Black–Scholes, Monte Carlo, optimisation.</p>
+  </div>
+  <div class="card">
+    <h3>Behavioural · Jane Street specifics</h3>
+    <p>Seriously underestimated. Jane Street deliberately makes problems too hard for one person — they watch how you use hints, reason under pressure, take criticism. A candidate who narrates their thinking and acknowledges uncertainty consistently outperforms one who goes silent.</p>
+  </div>
+</div>
+
+<div class="callout">
+  <strong>How AI changes preparation.</strong> Biggest acceleration anywhere in the roadmap.
+  <div class="prompt">Play a senior quant trader at Citadel.
+Conduct a final-round interview for an entry-level trader position.
+
+Structure (1 hour):
+  1. Probability puzzle (5–10 min) — no hints until requested
+  2. Mental math (rapid fire, 2 min)
+  3. Market-making case study (15 min)
+  4. Coding on numerical algorithm (15 min)
+  5. Behavioural (10 min)
+
+Don't give hints without request.
+At the end — feedback: what's strong, weak, what to brush up on.</div>
+  Previously: find a partner, schedule, one hour a week. Now: an hour every day with infinite question variation.
+</div>
+
+<!-- ============================================== -->
+<h2 id="apply">11 · Step 7 — Where to apply</h2>
+
+<div class="grid cols-2">
+  <div class="card">
+    <h3>Top prop trading firms <span class="badge ok">most accessible for trader roles</span></h3>
+    <ul>
+      <li><a href="https://www.janestreet.com/join-jane-street/" target="_blank" rel="noopener">Jane Street</a></li>
+      <li><a href="https://www.hudsonrivertrading.com/careers/" target="_blank" rel="noopener">Hudson River Trading</a></li>
+      <li><a href="https://optiver.com/working-at-optiver/career-opportunities/" target="_blank" rel="noopener">Optiver</a></li>
+      <li><a href="https://www.imc.com/us/careers" target="_blank" rel="noopener">IMC</a></li>
+      <li><a href="https://fiveringsllc.com/careers" target="_blank" rel="noopener">Five Rings</a></li>
+      <li><a href="https://www.jumptrading.com/careers/" target="_blank" rel="noopener">Jump Trading</a></li>
+      <li><a href="https://www.tower-research.com/open-positions/" target="_blank" rel="noopener">Tower Research</a></li>
+      <li><a href="https://drw.com/work-at-drw" target="_blank" rel="noopener">DRW</a></li>
+      <li><a href="https://akunacapital.com/careers" target="_blank" rel="noopener">Akuna Capital</a></li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3>Multi-strat hedge funds</h3>
+    <ul>
+      <li><a href="https://www.citadel.com/careers/" target="_blank" rel="noopener">Citadel</a> (especially <a href="https://www.citadelsecurities.com/careers/" target="_blank" rel="noopener">Citadel Securities</a>)</li>
+      <li><a href="https://www.mlp.com/careers/" target="_blank" rel="noopener">Millennium</a></li>
+      <li><a href="https://careers.point72.com/" target="_blank" rel="noopener">Point72</a></li>
+      <li><a href="https://www.exoduspoint.com/careers" target="_blank" rel="noopener">ExodusPoint</a></li>
+      <li>Balyasny (BAM)</li>
+    </ul>
+  </div>
+  <div class="card" style="grid-column:1/-1">
+    <h3>Channels</h3>
+    <ul style="margin-bottom:0">
+      <li><strong>Trading competitions = fastest path</strong> (see Step 4)</li>
+      <li>Direct career sites (above)</li>
+      <li>LinkedIn for networking (not for applying)</li>
+      <li>University career services</li>
+      <li><a href="https://quantnet.com/forum/" target="_blank" rel="noopener">QuantNet forum</a></li>
+      <li><a href="https://www.wallstreetoasis.com/forum/hedge-fund" target="_blank" rel="noopener">Wall Street Oasis</a> — process discussions</li>
+      <li>Referrals from current employees</li>
+    </ul>
+  </div>
+</div>
+
+<!-- ============================================== -->
+<h2 id="mistakes">12 · Main mistakes</h2>
+
+<ol>
+  <li><strong>Skipping math.</strong> Visible at interview in 5 minutes.</li>
+  <li><strong>Ignoring mental math.</strong> Trader interviews without 50+ Zetamac are impossible to pass.</li>
+  <li><strong>Toy projects.</strong> Backtests on S&amp;P without costs, without realistic execution. Zero résumé value.</li>
+  <li><strong>Not entering competitions.</strong> Most direct path, yet many ignore it.</li>
+  <li><strong>Ignoring the AI step.</strong> In 2026 top firms won't hire without it. Learn it in the process, not "later."</li>
+  <li><strong>Ignoring soft skills.</strong> Technical people with zero communication don't pass final rounds.</li>
+  <li><strong>Not applying early.</strong> "Getting fully ready" is forever. After 5–10 interviews you learn more about your gaps than after half a year of theory.</li>
+  <li><strong>Using AI wrong.</strong> Don't use it → lose 5–10× acceleration. Over-rely → never learn to think. AI accelerates learning, but you still have to do the thinking.</li>
+</ol>
+
+<!-- ============================================== -->
+<h2 id="checklist">13 · Readiness checklist</h2>
+<p style="color:var(--fg-muted)">If under 80% checked — too early to apply.</p>
+
+<div class="grid cols-2">
+  <div class="checklist">
+    <h4>Math</h4>
+    <ul>
+      <li>I solve medium probability puzzles in 5–10 minutes</li>
+      <li>I can derive Black–Scholes from stochastic calculus</li>
+      <li>I know time-series methods (ARIMA, GARCH)</li>
+    </ul>
+  </div>
+  <div class="checklist">
+    <h4>Programming</h4>
+    <ul>
+      <li>Clean Python with typing, NumPy / Polars vectorisation</li>
+      <li>Pandas advanced (multi-index, time-aware ops)</li>
+      <li>SQL on large tables</li>
+    </ul>
+  </div>
+  <div class="checklist">
+    <h4>Finance &amp; microstructure</h4>
+    <ul>
+      <li>I can explain all option Greeks and their interpretation</li>
+      <li>I understand vol surface and smile / skew</li>
+      <li>I know order-book mechanics, market impact</li>
+      <li>I read Hull without difficulty</li>
+    </ul>
+  </div>
+  <div class="checklist">
+    <h4>Portfolio + competitions</h4>
+    <ul>
+      <li>3+ GitHub projects with READMEs</li>
+      <li>≥ 1 serious AI / LLM project (2026 differentiator)</li>
+      <li>Top 10% in at least one trading competition</li>
+    </ul>
+  </div>
+  <div class="checklist">
+    <h4>AI fluency</h4>
+    <ul>
+      <li>I understand architectures like AlphaGPT</li>
+      <li>I built at least 1 multi-agent project</li>
+      <li>I know where AI errors on financial data</li>
+    </ul>
+  </div>
+  <div class="checklist">
+    <h4>Interview</h4>
+    <ul>
+      <li>Mental math · 50+/min on Zetamac</li>
+      <li>LeetCode medium · 20–30 minutes</li>
+      <li>DP · confident on medium</li>
+      <li>10+ mock interviews completed</li>
+    </ul>
+  </div>
+</div>
+
+<!-- ============================================== -->
+<h2 id="tonight">14 · Where to start tonight</h2>
+
+<p>Free resources you can open today and work through without paying a dollar.</p>
+
+<div class="grid cols-2">
+  <div class="card">
+    <h3>Open-access textbooks</h3>
+    <ul>
+      <li>Blitzstein &amp; Hwang — <a href="https://stat110.hsites.harvard.edu/" target="_blank" rel="noopener">Introduction to Probability</a> (Harvard)</li>
+      <li>Hastie, Tibshirani, Friedman — <a href="https://hastie.su.domains/ElemStatLearn/" target="_blank" rel="noopener">Elements of Statistical Learning</a> (Stanford)</li>
+      <li>Boyd &amp; Vandenberghe — <a href="https://web.stanford.edu/~boyd/cvxbook/" target="_blank" rel="noopener">Convex Optimization</a> (Stanford)</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3>Courses</h3>
+    <ul>
+      <li><a href="https://projects.iq.harvard.edu/stat110" target="_blank" rel="noopener">Harvard Stat 110</a> — probability · <a href="https://www.youtube.com/playlist?list=PL2SOU6wwxB0uwwH80KTQ6ht66KWxbzTIo" target="_blank" rel="noopener">YouTube playlist</a></li>
+      <li><a href="https://ocw.mit.edu/courses/18-06-linear-algebra-spring-2010/" target="_blank" rel="noopener">MIT 18.06 (Strang)</a> — linear algebra</li>
+      <li><a href="https://karpathy.ai/zero-to-hero.html" target="_blank" rel="noopener">Karpathy — Neural Networks: Zero to Hero</a></li>
+      <li><a href="https://www.3blue1brown.com/topics/linear-algebra" target="_blank" rel="noopener">3Blue1Brown — Essence of Linear Algebra</a></li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3>Trainers</h3>
+    <ul>
+      <li><a href="https://arithmetic.zetamac.com/" target="_blank" rel="noopener">Zetamac</a> — mental math (target 50+/min)</li>
+      <li><a href="https://brainstellar.com/" target="_blank" rel="noopener">Brainstellar</a> — probability puzzles at interview difficulty</li>
+      <li><a href="https://leetcode.com/" target="_blank" rel="noopener">LeetCode</a> — coding interviews</li>
+      <li><a href="https://www.kaggle.com/" target="_blank" rel="noopener">Kaggle</a> — practice on real data</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3>Trading competitions (direct path to recruiters)</h3>
+    <ul>
+      <li><a href="https://www.kaggle.com/c/jane-street-real-time-market-data-forecasting" target="_blank" rel="noopener">Jane Street Kaggle</a> — $100 k prize pool</li>
+      <li><a href="https://prosperity.imc.com/" target="_blank" rel="noopener">IMC Prosperity</a> — annual trading game</li>
+      <li><a href="https://optiver.com/working-at-optiver/career-opportunities/" target="_blank" rel="noopener">Optiver competitions</a></li>
+      <li><a href="https://www.citadel.com/careers/students/datathon/" target="_blank" rel="noopener">Citadel Datathon</a> — winners → interview pipeline</li>
+      <li><a href="https://platform.worldquantbrain.com/" target="_blank" rel="noopener">WorldQuant BRAIN</a> — cash for alpha signals</li>
+    </ul>
+  </div>
+</div>
+
+<div class="callout ok">
+  The speedrun doesn't make the profession easy. Math still requires months. Mental math still needs drilling to 50+/min. Trading competitions still filter 99% of participants. P&amp;L is still the only judge. <strong>What AI does is remove the dead time between effort and feedback</strong> — the part of traditional learning where most people gave up. For the first time in history the path from zero to Jane Street is technically possible for someone without an MIT diploma. The condition: walk all 7 steps without skipping, and use AI as a real acceleration tool rather than a replacement for your own thinking.
+</div>
+
+<!-- ============================================== -->
+<h2 id="sources">15 · Sources</h2>
+
+<h3>Industry transformation</h3>
+<ul>
+  <li>Man Group — <a href="https://www.man.com/insights/what-ai-can-do-for-alpha" target="_blank" rel="noopener">What AI Can (and Can't Yet) Do for Alpha</a> · official AlphaGPT post</li>
+  <li>Man Group — <a href="https://www.man.com/insights/ai-agents-trend" target="_blank" rel="noopener">A Trend Following Deep Dive: AI, Agents and Trend</a></li>
+  <li>Bloomberg — <a href="https://www.bloomberg.com/news/articles/2025-07-10/man-group-says-agentic-ai-is-now-devising-quant-trading-signals" target="_blank" rel="noopener">Man Group Says Agentic AI Is Now Devising Quant Trading Signals</a> (July 2025)</li>
+  <li>Hedgeweek — <a href="https://www.hedgeweek.com/man-group-deploys-agentic-ai-for-quant-signal-discovery/" target="_blank" rel="noopener">Man Group deploys agentic AI for quant signal discovery</a></li>
+  <li>AI Street — <a href="https://www.ai-street.co/p/inside-man-group-s-alphagpt" target="_blank" rel="noopener">Inside Man Group's AlphaGPT</a></li>
+  <li>Bridgewater — <a href="https://www.bridgewater.com/research-and-insights" target="_blank" rel="noopener">research insights · AIA Labs publications</a></li>
+</ul>
+
+<h3>Salary data</h3>
+<ul>
+  <li><a href="https://h1bdata.info/" target="_blank" rel="noopener">H1B Salary Database</a></li>
+  <li><a href="https://www.selbyjennings.com/" target="_blank" rel="noopener">Selby Jennings — Compensation Reports</a></li>
+</ul>
+
+<h3>Recruiting &amp; interview data</h3>
+<ul>
+  <li><a href="https://quantnet.com/" target="_blank" rel="noopener">QuantNet — MFE Rankings &amp; Forum</a></li>
+  <li><a href="https://www.wallstreetoasis.com/" target="_blank" rel="noopener">Wall Street Oasis</a></li>
+  <li><a href="https://www.youtube.com/@janestreet" target="_blank" rel="noopener">Jane Street — Tech talks (YouTube)</a></li>
+</ul>
+
+<footer>
+  Article by <a href="https://x.com/zostaff" target="_blank" rel="noopener">@zostaff</a> · <a href="https://x.com/zostaff/status/2052757482661888230" target="_blank" rel="noopener">original on X</a>. This page is a styled rendering of that article for offline reading. All external links open in a new tab.
+</footer>
+
+</main>
+</div>
+</body>
+</html>

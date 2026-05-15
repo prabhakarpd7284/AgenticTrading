@@ -1,0 +1,831 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AgenticTrading — Codebase Overview</title>
+<style>
+  :root{
+    --bg:#0d1117; --surface:#161b22; --surface-2:#1c2128;
+    --border:#30363d; --border-strong:#484f58;
+    --fg:#e6edf3; --fg-muted:#8b949e; --fg-subtle:#6e7681;
+    --accent:#58a6ff; --accent-soft:rgba(88,166,255,.12);
+    --ok:#3fb950; --warn:#d29922; --bad:#f85149; --info:#79c0ff;
+    --code:#1f6feb; --code-bg:#1c2128;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--fg);font:14.5px/1.6 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;-webkit-font-smoothing:antialiased}
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+  code,pre,kbd{font-family:'JetBrains Mono','SF Mono',Menlo,Monaco,Consolas,monospace;font-size:.86em}
+  code{background:var(--code-bg);border:1px solid var(--border);padding:1px 5px;border-radius:4px;color:#cdd9e5}
+  pre{background:var(--code-bg);border:1px solid var(--border);border-radius:8px;padding:14px 16px;overflow-x:auto;line-height:1.55;font-size:13px}
+  pre code{background:none;border:none;padding:0}
+  h1,h2,h3,h4{font-weight:600;letter-spacing:-.01em;margin:0}
+  h1{font-size:32px}
+  h2{font-size:22px;border-bottom:1px solid var(--border);padding-bottom:8px;margin:48px 0 18px}
+  h3{font-size:17px;color:var(--fg);margin:28px 0 10px}
+  h4{font-size:14px;color:var(--fg-muted);text-transform:uppercase;letter-spacing:.04em;margin:22px 0 8px}
+  p{margin:0 0 10px}
+  ul,ol{margin:0 0 12px;padding-left:22px}
+  li{margin:2px 0}
+
+  /* Layout */
+  .layout{display:grid;grid-template-columns:260px 1fr;min-height:100vh}
+  nav.toc{position:sticky;top:0;height:100vh;overflow-y:auto;background:var(--surface);border-right:1px solid var(--border);padding:24px 18px}
+  nav.toc h1{font-size:17px;margin-bottom:4px}
+  nav.toc .sub{color:var(--fg-subtle);font-size:12px;margin-bottom:18px}
+  nav.toc ol{list-style:none;padding-left:0;counter-reset:s}
+  nav.toc ol li{counter-increment:s;font-size:13px;margin:0}
+  nav.toc ol li a{display:block;padding:5px 8px;border-radius:6px;color:var(--fg-muted)}
+  nav.toc ol li a:hover{background:var(--surface-2);color:var(--fg);text-decoration:none}
+  nav.toc ol li a:before{content:counter(s,decimal-leading-zero) "  ";color:var(--fg-subtle)}
+  main{padding:36px 56px 120px;max-width:1100px}
+  @media (max-width:980px){
+    .layout{grid-template-columns:1fr}
+    nav.toc{position:static;height:auto;border-right:none;border-bottom:1px solid var(--border)}
+    main{padding:24px 18px}
+  }
+
+  /* Hero */
+  .hero{background:linear-gradient(135deg,rgba(88,166,255,.06),rgba(63,185,80,.04));border:1px solid var(--border);border-radius:14px;padding:32px;margin-bottom:24px}
+  .hero h1{margin-bottom:8px}
+  .hero .lede{color:var(--fg-muted);font-size:16px;max-width:780px}
+  .hero .chips{margin-top:18px;display:flex;flex-wrap:wrap;gap:8px}
+  .chip{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border:1px solid var(--border);border-radius:999px;background:var(--surface);font-size:12px;color:var(--fg-muted)}
+  .chip strong{color:var(--fg)}
+
+  /* Tables */
+  table{width:100%;border-collapse:collapse;font-size:13.5px;margin:8px 0 14px;background:var(--surface);border:1px solid var(--border);border-radius:8px;overflow:hidden}
+  th,td{padding:9px 12px;text-align:left;vertical-align:top;border-bottom:1px solid var(--border)}
+  thead th{background:var(--surface-2);font-weight:600;color:var(--fg);font-size:12.5px;text-transform:uppercase;letter-spacing:.03em}
+  tbody tr:last-child td{border-bottom:none}
+  tbody tr:hover{background:var(--surface-2)}
+  td code{font-size:12.5px}
+
+  /* Cards */
+  .grid{display:grid;gap:14px}
+  .cols-2{grid-template-columns:repeat(auto-fit,minmax(320px,1fr))}
+  .cols-3{grid-template-columns:repeat(auto-fit,minmax(260px,1fr))}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px}
+  .card h3{margin-top:0}
+  .card .file{font-family:'JetBrains Mono',Menlo,monospace;font-size:12px;color:var(--fg-subtle);margin-bottom:6px;word-break:break-all}
+
+  /* Badges */
+  .badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11.5px;font-weight:500;letter-spacing:.02em;border:1px solid var(--border);background:var(--surface)}
+  .badge.ok{color:var(--ok);border-color:rgba(63,185,80,.4);background:rgba(63,185,80,.08)}
+  .badge.warn{color:var(--warn);border-color:rgba(210,153,34,.4);background:rgba(210,153,34,.08)}
+  .badge.bad{color:var(--bad);border-color:rgba(248,81,73,.4);background:rgba(248,81,73,.08)}
+  .badge.info{color:var(--info);border-color:rgba(121,192,255,.4);background:rgba(121,192,255,.08)}
+  .badge.muted{color:var(--fg-muted)}
+
+  /* Diagrams */
+  .diagram{background:var(--code-bg);border:1px solid var(--border);border-radius:10px;padding:18px;overflow-x:auto;line-height:1.4}
+  .diagram pre{background:transparent;border:none;padding:0;font-size:12.5px;color:#bcc8d4}
+
+  /* Section labels */
+  .kicker{color:var(--fg-subtle);font-size:11.5px;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px}
+
+  /* Callouts */
+  .callout{border:1px solid var(--border);border-left:3px solid var(--accent);background:var(--accent-soft);padding:12px 16px;border-radius:6px;margin:12px 0}
+  .callout.warn{border-left-color:var(--warn);background:rgba(210,153,34,.07)}
+  .callout.bad{border-left-color:var(--bad);background:rgba(248,81,73,.07)}
+
+  /* Mini lists */
+  .filetree{font-family:'JetBrains Mono',Menlo,monospace;font-size:12.5px;line-height:1.65;color:var(--fg-muted)}
+  .filetree b{color:var(--fg);font-weight:500}
+  .filetree em{color:var(--accent);font-style:normal}
+
+  /* Footer */
+  footer{margin-top:60px;padding-top:18px;border-top:1px solid var(--border);color:var(--fg-subtle);font-size:12.5px}
+</style>
+</head>
+<body>
+<div class="layout">
+
+<nav class="toc">
+  <h1>AgenticTrading</h1>
+  <div class="sub">Codebase overview · v0.2.0</div>
+  <ol>
+    <li><a href="#what">What this is</a></li>
+    <li><a href="#arch">Architecture</a></li>
+    <li><a href="#run">How to run</a></li>
+    <li><a href="#layout">Repo layout</a></li>
+    <li><a href="#team">AI virtual team</a></li>
+    <li><a href="#cascade">The Cascade</a></li>
+    <li><a href="#strategies">Strategies</a></li>
+    <li><a href="#workflows">LangGraph workflows</a></li>
+    <li><a href="#legacy">Legacy <code>trading/</code></a></li>
+    <li><a href="#backend">v2 backend</a></li>
+    <li><a href="#frontend">Frontend SPA</a></li>
+    <li><a href="#models">Data models</a></li>
+    <li><a href="#cli">CLI commands</a></li>
+    <li><a href="#invariants">Key invariants</a></li>
+    <li><a href="#stack">Tech stack</a></li>
+    <li><a href="#further">Further reading</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<section class="hero">
+  <div class="kicker">AlphaDesk · Agentic Trading System</div>
+  <h1>AI-driven Indian market trading platform</h1>
+  <p class="lede">Three trading workflows, two API surfaces, one risk gate. Django + LangGraph for the trading core, a v2 multi-tenant Django stack for the trader UI, and a React SPA on top. Talks to Angel One SmartAPI, in paper or live mode.</p>
+  <div class="chips">
+    <span class="chip"><strong>Capital</strong> ₹500,000</span>
+    <span class="chip"><strong>Mode</strong> paper (default)</span>
+    <span class="chip"><strong>Markets</strong> NSE · NFO · BSE · BFO</span>
+    <span class="chip"><strong>Broker</strong> Angel One SmartAPI</span>
+    <span class="chip"><strong>LLM</strong> Claude (Anthropic)</span>
+    <span class="chip"><strong>Lots</strong> NIFTY 65 · BANKNIFTY 30 · SENSEX 20</span>
+  </div>
+</section>
+
+<!-- ========================================================= -->
+<h2 id="what">1 · What this is</h2>
+
+<p>AlphaDesk is an end-to-end intraday + swing trading system for the Indian markets. It combines three things:</p>
+
+<ul>
+  <li><strong>A deterministic trading engine</strong> (the legacy <code>trading/</code> package) — strategies, risk validation, broker integration, journaling.</li>
+  <li><strong>An LLM agent layer</strong> using LangGraph + Claude — for trade planning (directional) and options-position management (straddle), with a deterministic guardrail (<code>@RiskGuard</code>) as the last gate.</li>
+  <li><strong>A modern operator UI</strong> — React + Vite SPA over a v2 multi-tenant Django stack (Postgres, Channels for WebSockets, Celery for async order execution).</li>
+</ul>
+
+<p>It supports three trading workflows in parallel:</p>
+
+<div class="grid cols-3">
+  <div class="card">
+    <span class="badge info">Equity intraday</span>
+    <h3>Directional trades</h3>
+    <p>BUY/SELL plans on NSE cash, generated by the <code>@DirectionalTrader</code> LLM agent, validated by <code>@RiskGuard</code>, executed via Angel One.</p>
+  </div>
+  <div class="card">
+    <span class="badge info">Options</span>
+    <h3>Short straddle</h3>
+    <p>Sell ATM call + put on NIFTY/BANKNIFTY, then manage the position every 15–30 min: hold, close, hedge, or roll.</p>
+  </div>
+  <div class="card">
+    <span class="badge info">Options</span>
+    <h3>Pyramid options</h3>
+    <p>Aggressive momentum pyramiding on intraday NIFTY / BANKNIFTY / SENSEX options. Pure-Python, no LLM in the loop.</p>
+  </div>
+</div>
+
+<!-- ========================================================= -->
+<h2 id="arch">2 · Architecture</h2>
+
+<div class="diagram"><pre>
+                                                  [ Angel One SmartAPI ]
+                                                     NSE · NFO · BSE · BFO
+                                                            ▲ ▼
+   Browser  ──────  Vite dev (:5173)  ───  React SPA  ───┐  │
+                                                         │  │
+                                                  /api/v1│  │
+                                                         ▼  ▼
+       ┌─────────────────────────────┐    ┌───────────────────────────────┐
+       │ Legacy bridge (:8001)       │    │ v2 backend (:8000)            │
+       │ Django · config.settings    │    │ Django · ASGI (daphne)        │
+       │   .legacy                   │    │ DRF · Channels · Celery       │
+       │ Read-only /api/v1/legacy/*  │    │ Multi-tenant · 15 apps        │
+       └───────────────┬─────────────┘    └─────┬────────────┬────────────┘
+                       │ trading.*              │ default    │ legacy alias
+                       ▼                        ▼            ▼
+                 ┌────────────┐         ┌──────────────┐ ┌────────────┐
+                 │ SQLite     │◄────────│ LegacyRouter │ │ Postgres   │
+                 │ db.sqlite3 │  trading│              │ │ alphadesk  │
+                 │ (legacy)   │  models │              │ │ (v2 data)  │
+                 └────────────┘         └──────────────┘ └────────────┘
+                                                              ▲
+                                                              │
+                                                         ┌────────┐
+                                                         │ Redis  │  channels + celery
+                                                         └────────┘
+
+   ┌──────────────────────────────────────────────────────────────────┐
+   │ Streamlit dashboard (:8501) — operator console, talks direct ORM │
+   └──────────────────────────────────────────────────────────────────┘
+</pre></div>
+
+<p>The legacy <code>trading/</code> package owns all strategy logic and the deterministic risk engine. The v2 backend wraps it with a multi-tenant API layer; during the migration the legacy bridge on port 8001 exposes the seeded SQLite tables to the React UI through <code>/api/v1/legacy/*</code>. Postgres holds new v2 data (orders, agent runs, journals); SQLite holds historical legacy data — joined by <code>LegacyRouter</code>.</p>
+
+<!-- ========================================================= -->
+<h2 id="run">3 · How to run</h2>
+
+<table>
+  <thead><tr><th>Surface</th><th>URL</th><th>Command</th></tr></thead>
+  <tbody>
+    <tr><td>React SPA</td><td><code>http://localhost:5173</code></td><td><code>cd frontend && npm run dev</code></td></tr>
+    <tr><td>v2 backend (Daphne ASGI)</td><td><code>:8000/api/docs/</code></td><td><code>cd backend && python manage.py runserver 0.0.0.0:8000</code></td></tr>
+    <tr><td>Legacy bridge</td><td><code>:8001/api/v1/legacy/*</code></td><td><code>cd backend && DJANGO_SETTINGS_MODULE=config.settings.legacy python manage.py runserver 0.0.0.0:8001</code></td></tr>
+    <tr><td>One-shot dev</td><td>all three above</td><td><code>bash scripts/dev_up.sh</code> · stop: <code>scripts/dev_down.sh</code></td></tr>
+    <tr><td>Streamlit (operator)</td><td><code>:8501</code></td><td><code>streamlit run dashboard.py</code></td></tr>
+    <tr><td>Postgres + Redis</td><td><code>:5436 · :6379</code></td><td><code>docker compose -f docker-compose.local.yml up -d</code></td></tr>
+    <tr><td>Celery worker</td><td>—</td><td><code>cd backend && celery -A config worker -Q default,agents,orders -l info</code></td></tr>
+  </tbody>
+</table>
+
+<div class="callout">
+  Settings profiles live under <code>backend/config/settings/{base,dev,legacy,prod,test}.py</code>. <strong>dev</strong> falls back to SQLite if <code>DATABASE_URL</code> is unset and uses an in-memory Channels layer; <strong>legacy</strong> narrows the URL conf to just <code>/api/v1/legacy/*</code> + auth + health; <strong>prod</strong> turns on SSL + Sentry.
+</div>
+
+<!-- ========================================================= -->
+<h2 id="layout">4 · Repo layout</h2>
+
+<div class="filegrid">
+<pre class="filetree">
+AgenticTrading/
+├── <b>trading/</b>                  <em>Legacy trading core — strategies, risk, broker, models</em>
+│   ├── agents/                  @DirectionalTrader (LLM planner)
+│   ├── graph/                   LangGraph equity workflow (6 nodes)
+│   ├── services/                data_service, broker_service, risk_engine, backtester
+│   ├── options/straddle/        @OptionsStrategist + straddle lifecycle graph
+│   ├── pyramid/                 Pyramid options strategy (no LLM)
+│   ├── intraday/                ORB / VWAP / level patterns with LLM confirmation
+│   ├── screener/                Live 5-min screener (8 strategies)
+│   ├── swing/                   Oliver Kell daily/weekly cycle scanner
+│   ├── basket/                  Premarket mood + multi-leg basket
+│   ├── backtester/              Generic v2 walk-forward engine
+│   ├── rag/retriever.py         RAG context builder (Postgres, no vector DB yet)
+│   ├── models.py                Django models (TradeJournal, StraddlePosition, ...)
+│   └── management/commands/     15 CLI entry points
+│
+├── <b>backend/</b>                  <em>v2 multi-tenant Django stack (Postgres + Redis)</em>
+│   ├── config/                  settings/, urls.py, asgi.py, channels_router.py
+│   └── apps/                    accounts · tenants · broker · portfolio · orders
+│                                market_data · strategies · agents_core · rag
+│                                journals · notifications · legacy · billing
+│                                audit · common
+│
+├── <b>frontend/</b>                 <em>React + Vite SPA</em>
+│   └── src/
+│       ├── app/router.tsx       16 routes (login, pulse, rotation, shortlist, ...)
+│       ├── features/            One folder per page (market-pulse, rotation, ...)
+│       ├── lib/                 api · ws · market-config · market-pulse · monthly
+│       ├── components/ui/       Radix + Tailwind primitives
+│       └── stores/auth.ts       Zustand auth store with JWT persistence
+│
+├── <b>dashboard.py</b>              <em>Streamlit operator console</em>
+├── <b>dashboard_utils/</b>          Streamlit components + candle cache + scanner
+├── <b>scripts/</b>                  dev_up.sh · dev_down.sh · diagnose_legacy.sh
+├── <b>docker-compose.local.yml</b>  Postgres + Redis (local dev)
+├── <b>docs/</b>                     ADRs · ARCHITECTURE · MIND_PALACE · strategies
+└── <b>CLAUDE.md</b>                 Project instructions for Claude Code
+</pre>
+</div>
+
+<!-- ========================================================= -->
+<h2 id="team">5 · AI Virtual Team</h2>
+
+<p>Each "agent" is a named role with a single responsibility. Agents don't cross domains, and the deterministic <code>@RiskGuard</code> is always the last gate before any order.</p>
+
+<table>
+  <thead><tr><th>Agent</th><th>Role</th><th>LLM?</th><th>Where it lives</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>@DataAnalyst</strong></td>
+      <td>Fetches and enriches market data from Angel One. Runs first in every workflow.</td>
+      <td><span class="badge muted">No</span></td>
+      <td><code>trading/services/data_service.py</code><br><code>trading/options/data_service.py</code></td>
+    </tr>
+    <tr>
+      <td><strong>@DirectionalTrader</strong></td>
+      <td>Plans BUY/SELL equity trades from intraday structure. Outputs a structured <code>TradePlan</code>.</td>
+      <td><span class="badge info">Claude</span></td>
+      <td><code>trading/agents/planner.py</code><br><code>trading/graph/trading_graph.py</code></td>
+    </tr>
+    <tr>
+      <td><strong>@OptionsStrategist</strong></td>
+      <td>Manages live straddle positions — HOLD / CLOSE / HEDGE / ROLL — every 15–30 min.</td>
+      <td><span class="badge info">Claude</span></td>
+      <td><code>trading/options/straddle/graph.py</code><br><code>trading/options/straddle/prompts.py</code></td>
+    </tr>
+    <tr>
+      <td><strong>@RiskGuard</strong></td>
+      <td>Deterministic 10-criteria validation. Cannot be bypassed by any LLM.</td>
+      <td><span class="badge bad">Never</span></td>
+      <td><code>trading/services/risk_engine.py</code></td>
+    </tr>
+    <tr>
+      <td><strong>@PortfolioTracker</strong></td>
+      <td>Capital, daily loss, open positions. Read-only during planning.</td>
+      <td><span class="badge muted">No</span></td>
+      <td><code>trading/rag/retriever.py</code><br><code>trading/models.py:PortfolioSnapshot</code></td>
+    </tr>
+    <tr>
+      <td><strong>@PyramidOperator</strong></td>
+      <td>Pure-Python pyramid strategy on intraday options. No LLM in the loop.</td>
+      <td><span class="badge bad">Never</span></td>
+      <td><code>trading/pyramid/strategy.py</code></td>
+    </tr>
+  </tbody>
+</table>
+
+<!-- ========================================================= -->
+<h2 id="cascade">6 · The Cascade — 6-stage pre-trade framework</h2>
+
+<p>The React SPA is organised around a 6-stage workflow. Each stage is a page; each page consumes a single API endpoint, and the stages cascade — a green light at stage <em>N</em> is required to act at stage <em>N+1</em>.</p>
+
+<table>
+  <thead><tr><th>Stage</th><th>Question</th><th>Page</th><th>Endpoint</th></tr></thead>
+  <tbody>
+    <tr><td>1 · Regime</td><td>Is this a day to trade at all?</td><td><code>/pulse</code></td><td><code>GET /api/v1/market-data/pulse/</code></td></tr>
+    <tr><td>2 · Context</td><td>What kind of day is it?</td><td><code>/pulse</code> (same payload)</td><td><code>GET /api/v1/market-data/pulse/</code></td></tr>
+    <tr><td>3 · Rotation</td><td>Which sectors are leading?</td><td><code>/rotation</code></td><td><code>GET /api/v1/market-data/rotation/</code></td></tr>
+    <tr><td>4 · Shortlist</td><td>Which tickers in those sectors?</td><td><code>/shortlist</code></td><td><code>GET /api/v1/market-data/shortlist/</code></td></tr>
+    <tr><td>5 · Setup</td><td>Does this specific trade pass @RiskGuard?</td><td><code>/setup/:symbol</code></td><td><code>GET /api/v1/market-data/setup/?symbol=X&side=BUY</code></td></tr>
+    <tr><td>6 · Execute</td><td>Place the order, journal, monitor.</td><td><code>/agents</code> · <code>/positions</code></td><td><code>POST /api/v1/orders/</code></td></tr>
+  </tbody>
+</table>
+
+<!-- ========================================================= -->
+<h2 id="strategies">7 · Strategies</h2>
+
+<div class="grid cols-2">
+
+  <div class="card">
+    <h3>A · Directional equity <span class="badge info">LLM</span></h3>
+    <p>LLM-driven plans for individual stocks. The planner reads market data + recent trade history (RAG), produces a structured plan (entry, SL, target, qty, confidence). <code>@RiskGuard</code> rejects ~30% of plans deterministically.</p>
+    <div class="file">trading/graph/trading_graph.py · trading/agents/planner.py · trading/services/risk_engine.py</div>
+  </div>
+
+  <div class="card">
+    <h3>B · Short straddle <span class="badge info">LLM</span></h3>
+    <p>Sells ATM CE + PE on NIFTY/BANKNIFTY for time decay. A management loop runs every 15–30 min: analyse P&amp;L + delta + VIX, prompt Claude for <code>HOLD / CLOSE / CLOSE_CE / CLOSE_PE / ROLL_* / HEDGE</code>. Hard rules override the LLM (underwater → force CLOSE_BOTH, ROLL on expiry → reject).</p>
+    <div class="file">trading/options/straddle/graph.py · analyzer.py · lifecycle.py · prompts.py</div>
+  </div>
+
+  <div class="card">
+    <h3>C · Pyramid options <span class="badge muted">Deterministic</span></h3>
+    <p>Aggressive momentum capture on 5-min option candles. Entry: 5 EMA + Bollinger Bands + RSI momentum aligned. Pyramids risk 80% of unrealized profit on each add. Trails SL at higher lows + 3-candle floor.</p>
+    <div class="file">trading/pyramid/strategy.py · trading/pyramid/telegram.py</div>
+  </div>
+
+  <div class="card">
+    <h3>D · Intraday structure screener <span class="badge muted">Deterministic + LLM confirm</span></h3>
+    <p>Real-time 5-min pattern detection: ORB (open-range breakout), VWAP fade, level bounce, level retest, swing high/low. Premarket scanner builds a watchlist from prior-day OHLC; LLM confirms each fire.</p>
+    <div class="file">trading/intraday/{scanner,structures,levels,monitor,agent}.py · trading/screener/engine.py</div>
+  </div>
+
+  <div class="card">
+    <h3>E · Oliver Kell swing cycles <span class="badge muted">Deterministic</span></h3>
+    <p>Daily/weekly cycle phase detection — 8 phases (RE · WP · EC · BB bullish, EX · WD · EC_BEAR · BB_BEAR bearish). Actionable phases + trend alignment = high-conviction swing trades. Walk-forward backtester validates phase timing.</p>
+    <div class="file">trading/swing/ok_cycles.py · ok_scanner.py · ok_backtest.py</div>
+  </div>
+
+  <div class="card">
+    <h3>F · Morning basket <span class="badge muted">Deterministic</span></h3>
+    <p>Premarket mood (BULLISH / NEUTRAL / BEARISH) drives 3–5 correlated leg signals. Manages SL with 5 EMA trail; breakeven at +0.5R; pyramids winners; closes all at 15:15 EOD.</p>
+    <div class="file">trading/basket/manager.py · mood.py · signals.py · executor.py</div>
+  </div>
+
+</div>
+
+<!-- ========================================================= -->
+<h2 id="workflows">8 · LangGraph workflows</h2>
+
+<h3>Equity directional — <code>trading/graph/trading_graph.py</code></h3>
+<div class="diagram"><pre>
+  fetch_data ──► retrieve_context ──► planner ──► risk ──► execute ──► journal
+       │              │ (RAG)         │ (LLM)    │ (10pt)   │           │
+       │              │               │          │          │           │
+       └──@DataAnalyst────────────────┴──────────┴─@RiskGuard───────────┘
+                                                   │
+                                                   └─reject─► (skip execute) ─► journal
+</pre></div>
+
+<table>
+  <thead><tr><th>Node</th><th>What it does</th><th>Path</th></tr></thead>
+  <tbody>
+    <tr><td><code>fetch_data_node</code></td><td>Pulls OHLCV + enriched summary from Angel One</td><td><code>graph/trading_graph.py:138</code></td></tr>
+    <tr><td><code>retrieve_context_node</code></td><td>RAG: recent trades for symbol + active strategy docs</td><td><code>graph/trading_graph.py:209</code></td></tr>
+    <tr><td><code>planner_node</code></td><td>Claude CLI/API → structured <code>TradePlan</code></td><td><code>graph/trading_graph.py:231</code></td></tr>
+    <tr><td><code>risk_node</code></td><td>10-criteria deterministic gate (pos size, daily loss, R:R, regime, …)</td><td><code>graph/trading_graph.py:275</code></td></tr>
+    <tr><td><code>execute_node</code></td><td>Places order with broker (paper or live)</td><td><code>graph/trading_graph.py:356</code></td></tr>
+    <tr><td><code>journal_node</code></td><td>Saves <code>TradeJournal</code> + <code>AuditLog</code></td><td><code>graph/trading_graph.py:398</code></td></tr>
+  </tbody>
+</table>
+
+<h3>Short straddle — <code>trading/options/straddle/graph.py</code></h3>
+<div class="diagram"><pre>
+  fetch_market_data ──► analyze_position ──► generate_action ──► validate_action ──► execute_action ──► journal_action
+        │ NIFTY+VIX        │ P&L, delta,        │ Claude            │ hard rules       │ broker fills      │ update
+        │ CE+PE LTP        │ market phase       │ HOLD/CLOSE/ROLL   │ (override LLM)   │                   │ management_log
+        │
+        └─@DataAnalyst (options)
+</pre></div>
+
+<table>
+  <thead><tr><th>Node</th><th>What it does</th><th>Path</th></tr></thead>
+  <tbody>
+    <tr><td><code>fetch_market_data_node</code></td><td>NIFTY spot · VIX · CE/PE live prices · 5-min candles</td><td><code>options/straddle/graph.py:96</code></td></tr>
+    <tr><td><code>analyze_position_node</code></td><td>P&amp;L · delta · market phase · expiry scenarios (pure Python)</td><td><code>options/straddle/graph.py:160</code></td></tr>
+    <tr><td><code>generate_action_node</code></td><td>LLM decides: HOLD · CLOSE_BOTH · CLOSE_CE/PE · ROLL_* · HEDGE · REENTER</td><td><code>options/straddle/graph.py:218</code></td></tr>
+    <tr><td><code>validate_action_node</code></td><td>Hard rules: if underwater → force CLOSE; expiry + ROLL → reject; conf &lt; 0.6 → MONITOR</td><td><code>options/straddle/graph.py:459</code></td></tr>
+    <tr><td><code>execute_action_node</code></td><td>BUY-to-close legs, place futures hedge</td><td><code>options/straddle/graph.py:751</code></td></tr>
+    <tr><td><code>journal_action_node</code></td><td>Updates <code>StraddlePosition</code> status + appends event to <code>management_log</code></td><td><code>options/straddle/graph.py:869</code></td></tr>
+  </tbody>
+</table>
+
+<!-- ========================================================= -->
+<h2 id="legacy">9 · Legacy <code>trading/</code> package</h2>
+
+<p>This is the original engine — pure Python (+ Django ORM for persistence). Every strategy, every broker call, every risk check lives here. The v2 backend on port 8000 is a thin multi-tenant layer over this code.</p>
+
+<table>
+  <thead><tr><th>Submodule</th><th>Purpose</th><th>Key files / classes</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>agents/</strong></td>
+      <td>@DirectionalTrader LLM planner (dual-mode CLI/API).</td>
+      <td><code>planner.py</code> — <code>build_planner_prompt()</code> (L115), <code>run_planner()</code> (L555), <code>_run_planner_cli()</code> (L215), <code>_run_planner_api()</code> (L430)</td>
+    </tr>
+    <tr>
+      <td><strong>graph/</strong></td>
+      <td>LangGraph orchestration for equity directional trading.</td>
+      <td><code>trading_graph.py</code>, <code>state.py</code> — <code>TradingState</code>, <code>TradePlan</code>, <code>RiskResult</code>, <code>ExecutionResult</code></td>
+    </tr>
+    <tr>
+      <td><strong>services/</strong></td>
+      <td>Data, broker, backtester, risk.</td>
+      <td><code>data_service.py:DataService:525</code>, <code>broker_service.py:BrokerService:20</code>, <code>risk_engine.py:validate_trade:48</code></td>
+    </tr>
+    <tr>
+      <td><strong>options/straddle/</strong></td>
+      <td>@OptionsStrategist — full straddle lifecycle.</td>
+      <td><code>graph.py</code> (7 nodes, ~1000 LOC), <code>analyzer.py</code>, <code>lifecycle.py</code>, <code>prompts.py</code></td>
+    </tr>
+    <tr>
+      <td><strong>pyramid/</strong></td>
+      <td>Pyramid options strategy.</td>
+      <td><code>strategy.py</code> — <code>compute_indicators()</code> (L113), <code>find_higher_low()</code> (L163), <code>run_pyramid()</code> (L217)</td>
+    </tr>
+    <tr>
+      <td><strong>intraday/</strong></td>
+      <td>ORB · VWAP fade · level bounce · level retest with LLM confirm.</td>
+      <td><code>scanner.py:PremarketScanner:34</code>, <code>monitor.py:IntradayMonitor:37</code>, <code>level_bounce.py:36</code>, <code>level_retest.py:33</code>, <code>vwap_fade.py:31</code></td>
+    </tr>
+    <tr>
+      <td><strong>screener/</strong></td>
+      <td>Real-time 5-min screener (8 strategies).</td>
+      <td><code>engine.py:ScreenerEngine:29</code>, <code>candle_store.py:CandleStore:49</code>, <code>indicator_engine.py:98</code>, <code>strategies.py:Strategy:139</code></td>
+    </tr>
+    <tr>
+      <td><strong>swing/</strong></td>
+      <td>Oliver Kell daily/weekly cycle scanner.</td>
+      <td><code>ok_cycles.py:CycleDetector:107</code>, <code>CyclePhase</code> enum (L25), <code>ok_scanner.py:OKScanner:76</code>, <code>ok_backtest.py:run_ok_backtest:276</code></td>
+    </tr>
+    <tr>
+      <td><strong>basket/</strong></td>
+      <td>Morning mood + multi-leg basket.</td>
+      <td><code>manager.py:BasketPositionManager:55</code>, <code>mood.py:MarketMoodAssessor:66</code>, <code>signals.py:BasketSignalGenerator:59</code>, <code>executor.py:BasketExecutor:44</code></td>
+    </tr>
+    <tr>
+      <td><strong>backtester/</strong></td>
+      <td>Strategy-agnostic walk-forward engine.</td>
+      <td><code>engine.py:BacktestEngine:42</code>, <code>entry.py:OKCycleAdapter:42</code>, <code>trade.py:Trade:11</code>, <code>stats.py:BacktestStats:21</code></td>
+    </tr>
+    <tr>
+      <td><strong>rag/</strong></td>
+      <td>RAG context builder (Postgres-backed, no vector DB yet).</td>
+      <td><code>retriever.py:retrieve_context:26</code>, <code>retrieve_portfolio_context:124</code></td>
+    </tr>
+  </tbody>
+</table>
+
+<!-- ========================================================= -->
+<h2 id="backend">10 · v2 backend (<code>backend/</code>)</h2>
+
+<p>15 Django apps under <code>backend/apps/</code>, all of them tenant-scoped. The v2 stack runs on Daphne (ASGI) so it can serve HTTP + WebSocket from the same process. Postgres for v2 data, SQLite (via a router) for legacy <code>trading.*</code> models.</p>
+
+<h3>App map</h3>
+
+<table>
+  <thead><tr><th>App</th><th>Purpose</th><th>Highlights</th></tr></thead>
+  <tbody>
+    <tr><td><code>accounts</code></td><td>User identity. Email-based auth, MFA support.</td><td><code>User</code> (UUID PK), <code>UserManager</code>, <code>AuthViewSet.signup</code></td></tr>
+    <tr><td><code>tenants</code></td><td>Org / billing entity. Three kinds: retail · advisor · prop.</td><td><code>Tenant</code>, <code>Membership</code> (roles: owner/admin/trader/viewer/rm/client)</td></tr>
+    <tr><td><code>broker</code></td><td>OAuth/secrets for broker connections.</td><td><code>BrokerLink</code> with AWS Secrets Manager ARN</td></tr>
+    <tr><td><code>portfolio</code></td><td>Holdings, snapshots, P&amp;L. Paper or live mode.</td><td><code>Portfolio</code>, <code>Position</code>, <code>PortfolioSnapshot</code>, <code>MonthlyReportView</code></td></tr>
+    <tr><td><code>orders</code></td><td>Place / track orders via <strong>Outbox saga</strong>.</td><td><code>Order</code>, <code>OutboxEvent</code> (PENDING/IN_FLIGHT/SUCCEEDED/FAILED/DLQ), <code>PlaceOrder.execute</code>, <code>OrderSaga.handle</code></td></tr>
+    <tr><td><code>market_data</code></td><td>Symbol master + candles + Cascade stage services.</td><td><code>MarketPulseView</code>, <code>SectorRotationView</code>, <code>ShortlistView</code>, <code>SetupPreviewView</code>, pulse/rotation/shortlist/setup services</td></tr>
+    <tr><td><code>strategies</code></td><td>Strategy catalog + backtests.</td><td><code>StrategyInstance</code>, <code>Backtest</code>, <code>run_backtest</code> Celery task</td></tr>
+    <tr><td><code>agents_core</code></td><td>Async strategy execution + event streaming.</td><td><code>AgentRun</code>, <code>AgentStep</code>, <code>build_context</code>, <code>AgentRunConsumer</code>, <code>execute_run</code> task</td></tr>
+    <tr><td><code>rag</code></td><td>Retrieval fan-out + dedup + rerank.</td><td><code>Embedding</code>, <code>DefaultRAGRouter.retrieve</code></td></tr>
+    <tr><td><code>journals</code></td><td>Append-only decision log.</td><td><code>JournalEntry</code>, <code>JournalAdapter</code></td></tr>
+    <tr><td><code>notifications</code></td><td>In-app alerts.</td><td><code>Alert</code>, <code>AlertsConsumer</code></td></tr>
+    <tr><td><code>billing</code></td><td>Plans + subscription.</td><td><code>Plan</code>, <code>Subscription</code>, Razorpay webhook</td></tr>
+    <tr><td><code>audit</code></td><td>Security ledger (non-blocking writes).</td><td><code>AuditEvent</code></td></tr>
+    <tr><td><code>common</code></td><td>Cross-cutting: tenancy, db router, JWT, middleware.</td><td><code>TenantModel</code>, <code>LegacyRouter</code>, <code>TenantMiddleware</code>, <code>RequestIdMiddleware</code></td></tr>
+    <tr><td><code>legacy</code></td><td>Read-only bridge to seeded SQLite for the React UI.</td><td>Wraps <code>TradeJournal</code>, <code>StraddlePosition</code>, <code>AuditLog</code>, <code>PortfolioSnapshot</code> as DRF endpoints</td></tr>
+  </tbody>
+</table>
+
+<h3>URL surface (<code>/api/v1/*</code>)</h3>
+
+<div class="grid cols-2">
+
+<div class="card">
+  <h4>Auth</h4>
+  <ul>
+    <li><code>POST /auth/token/</code> — JWT obtain pair</li>
+    <li><code>POST /auth/token/refresh/</code> — refresh token</li>
+    <li><code>POST /auth/auth/signup/</code> — register</li>
+    <li><code>GET  /auth/me/</code> — current user</li>
+  </ul>
+</div>
+
+<div class="card">
+  <h4>Tenants &amp; Billing</h4>
+  <ul>
+    <li><code>GET/POST /tenants/</code></li>
+    <li><code>GET/POST /tenants/memberships/</code></li>
+    <li><code>GET /billing/plans/</code></li>
+    <li><code>GET /billing/subscription/</code></li>
+    <li><code>POST /billing/webhook/{provider}/</code></li>
+  </ul>
+</div>
+
+<div class="card">
+  <h4>Market data</h4>
+  <ul>
+    <li><code>GET /market-data/symbols/?q=TCS</code></li>
+    <li><code>GET /market-data/candles/?symbol=…&amp;interval=5m</code></li>
+    <li><code>GET /market-data/pulse/</code> · stage 1+2</li>
+    <li><code>GET /market-data/rotation/</code> · stage 3</li>
+    <li><code>GET /market-data/shortlist/</code> · stage 4</li>
+    <li><code>GET /market-data/setup/</code> · stage 5</li>
+    <li><code>GET /market-data/swing-scanner/</code></li>
+    <li><code>GET /market-data/ok-backtest/</code></li>
+    <li><code>GET /market-data/basket/</code></li>
+    <li><code>GET /market-data/pyramid/</code></li>
+  </ul>
+</div>
+
+<div class="card">
+  <h4>Portfolio</h4>
+  <ul>
+    <li><code>GET/POST /portfolios/</code></li>
+    <li><code>GET /portfolios/positions/</code></li>
+    <li><code>GET /portfolios/snapshots/</code></li>
+    <li><code>GET /portfolios/monthly/?month=2026-04</code></li>
+  </ul>
+</div>
+
+<div class="card">
+  <h4>Orders &amp; Strategies</h4>
+  <ul>
+    <li><code>POST /orders/</code> — returns 202 (Outbox)</li>
+    <li><code>GET  /orders/{id}/</code></li>
+    <li><code>GET/POST /strategies/instances/</code></li>
+    <li><code>POST /strategies/backtests/</code> — queues task</li>
+  </ul>
+</div>
+
+<div class="card">
+  <h4>Agents · RAG · Journals · Alerts</h4>
+  <ul>
+    <li><code>GET /agents/catalog/</code> — available strategies</li>
+    <li><code>POST /agents/runs/</code> — start run (returns 202)</li>
+    <li><code>GET /agents/runs/{id}/</code></li>
+    <li><code>POST /rag/index/</code></li>
+    <li><code>GET/POST /journals/</code></li>
+    <li><code>GET /notifications/</code></li>
+  </ul>
+</div>
+
+<div class="card">
+  <h4>Legacy bridge (port 8001)</h4>
+  <ul>
+    <li><code>GET /legacy/portfolio/</code></li>
+    <li><code>GET /legacy/positions/</code></li>
+    <li><code>GET /legacy/trades/</code></li>
+    <li><code>GET /legacy/straddles/</code></li>
+    <li><code>GET /legacy/audit/</code></li>
+    <li><code>GET /legacy/strategies/</code></li>
+  </ul>
+</div>
+
+<div class="card">
+  <h4>WebSocket channels (<code>/ws/*</code>)</h4>
+  <ul>
+    <li><code>/ws/ticks/</code> — <code>TickConsumer</code> — live LTP per tenant</li>
+    <li><code>/ws/pnl/</code> — <code>PnLConsumer</code> — portfolio MTM stream</li>
+    <li><code>/ws/agents/&lt;run_id&gt;/</code> — <code>AgentRunConsumer</code> — step events</li>
+    <li><code>/ws/alerts/</code> — <code>AlertsConsumer</code></li>
+  </ul>
+  <p style="margin-top:6px;color:var(--fg-muted);font-size:12px">JWT auth via <code>Sec-WebSocket-Protocol</code> subprotocol: <code>["jwt", access_token]</code></p>
+</div>
+
+</div>
+
+<h3>Celery + Beat</h3>
+
+<table>
+  <thead><tr><th>Task</th><th>Queue</th><th>Cadence</th><th>What it does</th></tr></thead>
+  <tbody>
+    <tr><td><code>process_outbox</code></td><td><code>orders</code></td><td>every 1s</td><td>Dequeue PENDING <code>OutboxEvent</code>s, run <code>OrderSaga</code>, retry with exp. backoff (max 5)</td></tr>
+    <tr><td><code>refresh_all</code></td><td>default</td><td>every 60s</td><td>Hourly portfolio snapshots — equity, day P&amp;L, unrealized, position count</td></tr>
+    <tr><td><code>expire_runs</code></td><td>default</td><td>every 300s</td><td>Fail <code>AgentRun</code>s older than 30 min that are still RUNNING/QUEUED</td></tr>
+    <tr><td><code>execute_run</code></td><td><code>agents</code></td><td>on demand</td><td>Run a strategy from the registry, stream <code>AgentStep</code>s to WebSocket</td></tr>
+    <tr><td><code>run_backtest</code></td><td><code>backtests</code></td><td>on demand</td><td>Load <code>Backtest</code>, compute metrics, store equity curve</td></tr>
+  </tbody>
+</table>
+
+<h3>DB routing</h3>
+
+<p><code>backend/apps/common/db_router.py:LegacyRouter</code> pins every model with <code>app_label=="trading"</code> to the <code>legacy</code> alias (SQLite at repo root <code>db.sqlite3</code>); everything else stays on <code>default</code> (Postgres in dev/prod, in-memory SQLite in tests). Cross-DB relations are rejected — there is no JOIN across the boundary.</p>
+
+<div class="callout warn">
+  <strong>Settings caveat.</strong> The legacy bridge process (<code>config.settings.legacy</code>, port 8001) still needs the v2 <code>default</code> DB so JWT auth + tenant lookups work. It just narrows <code>ROOT_URLCONF</code> to <code>config.urls_legacy</code> so only <code>/api/v1/legacy/*</code> + auth + health are served from that process.
+</div>
+
+<!-- ========================================================= -->
+<h2 id="frontend">11 · Frontend SPA (<code>frontend/</code>)</h2>
+
+<p>Vite + React 18 + TypeScript. <strong>TanStack Query</strong> for server state, <strong>Zustand</strong> for auth tokens, <strong>Axios</strong> for HTTP with a JWT interceptor + auto-refresh, and a tiny <strong>auto-reconnecting WebSocket</strong> client for live updates. UI on Radix + Tailwind; charts via Recharts and lightweight-charts.</p>
+
+<h3>Routes (<code>src/app/router.tsx</code>)</h3>
+
+<table>
+  <thead><tr><th>Path</th><th>Component</th><th>Feature dir</th></tr></thead>
+  <tbody>
+    <tr><td><code>/login</code> · <code>/signup</code> · <code>/onboarding</code></td><td><code>LoginPage · SignupPage · OnboardingPage</code></td><td><code>features/auth</code></td></tr>
+    <tr><td><code>/</code> · <code>/pulse</code></td><td><code>MarketPulsePage</code> — "What's happening today"</td><td><code>features/market-pulse</code></td></tr>
+    <tr><td><code>/rotation</code></td><td><code>RotationPage</code> — sector leaders / laggards</td><td><code>features/rotation</code></td></tr>
+    <tr><td><code>/shortlist</code></td><td><code>ShortlistPage</code> — 10-15 tradeable names</td><td><code>features/shortlist</code></td></tr>
+    <tr><td><code>/setup/:symbol</code></td><td><code>SetupPage</code> — @RiskGuard preview</td><td><code>features/setup</code></td></tr>
+    <tr><td><code>/dashboard</code></td><td><code>DashboardPage</code> — capital + positions + equity curve</td><td><code>features/dashboard</code></td></tr>
+    <tr><td><code>/positions</code></td><td><code>PositionsPage</code> — open + closed (with live LTP)</td><td><code>features/positions</code></td></tr>
+    <tr><td><code>/monthly</code></td><td><code>MonthlyPage</code> — monthly feedback report</td><td><code>features/monthly</code></td></tr>
+    <tr><td><code>/agents</code> · <code>/agents/:runId</code></td><td><code>AgentConsolePage</code> — start runs · stream events</td><td><code>features/agents</code></td></tr>
+    <tr><td><code>/strategies</code></td><td><code>StrategyBuilderPage</code></td><td><code>features/strategies</code></td></tr>
+    <tr><td><code>/swing-scanner</code></td><td><code>SwingScannerPage</code> — live OK cycles</td><td><code>features/swing-scanner</code></td></tr>
+    <tr><td><code>/basket</code></td><td><code>BasketPage</code></td><td><code>features/basket</code></td></tr>
+    <tr><td><code>/backtester</code></td><td><code>BacktesterPage</code></td><td><code>features/backtester</code></td></tr>
+    <tr><td><code>/pyramid</code></td><td><code>PyramidPage</code> — scale-in tracker + P&amp;L curves</td><td><code>features/pyramid</code></td></tr>
+    <tr><td><code>/brokers</code></td><td><code>BrokerLinkPage</code></td><td><code>features/broker</code></td></tr>
+  </tbody>
+</table>
+
+<h3>Shared <code>src/lib/</code></h3>
+
+<table>
+  <thead><tr><th>File</th><th>Purpose</th><th>Key exports</th></tr></thead>
+  <tbody>
+    <tr><td><code>api.ts</code></td><td>Axios client + JWT auth + auto-refresh + pagination unwrap.</td><td><code>api</code>, <code>legacyApi</code>, <code>list&lt;T&gt;()</code></td></tr>
+    <tr><td><code>ws.ts</code></td><td>Auto-reconnecting WebSocket. JWT via subprotocol. Ping every 30s, exponential backoff (1–30s).</td><td><code>connect(path, onMessage, opts)</code></td></tr>
+    <tr><td><code>market-config.ts</code></td><td>Single source of truth for index metadata.</td><td><code>INDICES</code>, <code>getLotSize</code>, <code>getExpiryWeekday</code>, <code>getSector</code></td></tr>
+    <tr><td><code>market-pulse.ts</code></td><td>Data layer for all 5 Cascade stages + scanner + backtester.</td><td><code>useMarketPulse</code>, <code>useSectorRotation</code>, <code>useShortlist</code>, <code>useSetupPreview</code>, <code>useSwingScanner</code>, <code>useOKBacktest</code>, <code>useBasketStatus</code></td></tr>
+    <tr><td><code>legacy.ts</code></td><td>React-Query hooks for the legacy <code>/api/v1/legacy/*</code> bridge.</td><td><code>useLegacyPortfolio</code>, <code>useLegacyPositions</code>, <code>useLegacyTrades</code>, <code>useLegacyStraddles</code>, <code>useLegacyAudit</code></td></tr>
+    <tr><td><code>monthly.ts</code></td><td>Monthly performance view (mock-first, ready to flip live).</td><td><code>useMonthlyView</code>, <code>YtdSummary</code>, <code>UnderlyingRoll</code></td></tr>
+    <tr><td><code>utils.ts</code></td><td>Formatters + className helpers.</td><td><code>cn</code>, <code>fmtInr</code>, <code>fmtPct</code>, <code>fmtRel</code>, <code>clsPnl</code></td></tr>
+  </tbody>
+</table>
+
+<h3>WebSocket usage</h3>
+
+<table>
+  <thead><tr><th>Page</th><th>Channel</th><th>Message → effect</th></tr></thead>
+  <tbody>
+    <tr><td><code>DashboardPage</code></td><td><code>/ws/pnl/</code></td><td><code>{portfolio_id, mtm, day_pnl}</code> → append to 200-point rolling equity curve</td></tr>
+    <tr><td><code>PositionsPage</code></td><td><code>/ws/ticks/</code></td><td><code>{token, ltp}</code> → recompute unrealised P&amp;L per open equity row</td></tr>
+    <tr><td><code>AgentConsolePage</code></td><td><code>/ws/agents/{run_id}/</code></td><td><code>{seq, node, type, payload}</code> → append to event stream, auto-scroll</td></tr>
+  </tbody>
+</table>
+
+<h3>Vite proxy</h3>
+<pre><code>/api/v1/legacy/*  →  http://localhost:8001   (legacy bridge)
+/api/v1/*         →  http://localhost:8000   (v2 backend)
+/ws/*             →  ws://localhost:8000     (Daphne ASGI)</code></pre>
+
+<h3>UI primitives — <code>src/components/ui/</code></h3>
+<p><code>Button</code> · <code>Card</code> · <code>Badge</code> · <code>Input</code> · <code>Dialog</code> · <code>Tabs</code> · <code>Tooltip</code> · <code>Skeleton</code> · <code>EmptyState</code> · <code>ErrorState</code> · <code>DataTable</code> · <code>KPI</code> · <code>CommandPalette</code> — Radix + Tailwind, dark-first.</p>
+
+<!-- ========================================================= -->
+<h2 id="models">12 · Data models</h2>
+
+<h3>Legacy (<code>trading/models.py</code> — SQLite via <code>LegacyRouter</code>)</h3>
+
+<table>
+  <thead><tr><th>Model</th><th>Purpose</th></tr></thead>
+  <tbody>
+    <tr><td><code>TradeJournal</code></td><td>Every trade decision: side, entry, SL, target, qty, confidence, status, fills, P&amp;L, risk approval. Links to <code>AuditLog</code>.</td></tr>
+    <tr><td><code>StrategyDoc</code></td><td>Rules / patterns (ENTRY, EXIT, RISK, FILTER, PATTERN, STRATEGY). Injected into planner RAG context.</td></tr>
+    <tr><td><code>PortfolioSnapshot</code></td><td>Point-in-time portfolio state — capital, invested, cash, daily P&amp;L, open positions. Drives daily-loss gate.</td></tr>
+    <tr><td><code>AuditLog</code></td><td>Full trail of every LLM prompt/response, risk decision, order execution. Types: PLANNER_REQ/RES, RISK_APPROVE/REJECT, EXECUTION.</td></tr>
+    <tr><td><code>StraddlePosition</code></td><td>Short straddle lifecycle (CE+PE). Status: ACTIVE / PARTIAL / HEDGED / CLOSED. JSON <code>management_log</code> of actions.</td></tr>
+    <tr><td><code>WatchlistEntry</code></td><td>Daily premarket watchlist with setup type and outcome (WATCHING / TRIGGERED / TRADED / SKIPPED).</td></tr>
+    <tr><td><code>SignalLog</code></td><td>Every signal fired by screeners / scanners. Tracks <code>max_favorable_move</code>, <code>max_adverse_move</code>, EOD outcome.</td></tr>
+    <tr><td><code>TraderNote</code></td><td>Persistent per-ticker notes.</td></tr>
+    <tr><td><code>SystemControl</code></td><td>Global flags (JSON) — AI pause/resume, force-close triggers.</td></tr>
+  </tbody>
+</table>
+
+<h3>v2 (Postgres)</h3>
+
+<table>
+  <thead><tr><th>App</th><th>Model</th><th>Notes</th></tr></thead>
+  <tbody>
+    <tr><td>accounts</td><td><code>User</code></td><td>UUID PK, email-based auth, MFA fields.</td></tr>
+    <tr><td>tenants</td><td><code>Tenant</code>, <code>Membership</code></td><td>Three kinds: retail / advisor / prop. Roles: owner · admin · trader · viewer · rm · client.</td></tr>
+    <tr><td>portfolio</td><td><code>Portfolio</code>, <code>Position</code>, <code>PortfolioSnapshot</code></td><td>paper/live mode; hourly equity curve.</td></tr>
+    <tr><td>orders</td><td><code>Order</code>, <code>OutboxEvent</code></td><td>Saga states: PENDING · IN_FLIGHT · SUCCEEDED · FAILED · DLQ.</td></tr>
+    <tr><td>market_data</td><td><code>Symbol</code>, <code>Candle</code></td><td>NSE/BSE/NFO/MCX catalog + OHLCV.</td></tr>
+    <tr><td>strategies</td><td><code>StrategyInstance</code>, <code>Backtest</code></td><td>Params JSON + schedule; backtest metrics + equity curve.</td></tr>
+    <tr><td>agents_core</td><td><code>AgentRun</code>, <code>AgentStep</code></td><td>Run status + ordered step events.</td></tr>
+    <tr><td>broker</td><td><code>BrokerLink</code></td><td>Credential ARN + status (active/expired/disabled).</td></tr>
+    <tr><td>rag</td><td><code>Embedding</code></td><td>Namespace + vector JSON + payload, tenant-isolated.</td></tr>
+    <tr><td>journals</td><td><code>JournalEntry</code></td><td>Append-only decision log; links to <code>AgentRun</code> + <code>Order</code>.</td></tr>
+    <tr><td>notifications</td><td><code>Alert</code></td><td>severity info/warn/crit.</td></tr>
+    <tr><td>billing</td><td><code>Plan</code>, <code>Subscription</code></td><td>Codes: paper · trader · pro · advisor · desk. Razorpay.</td></tr>
+    <tr><td>audit</td><td><code>AuditEvent</code></td><td>Fire-and-forget security ledger.</td></tr>
+  </tbody>
+</table>
+
+<!-- ========================================================= -->
+<h2 id="cli">13 · CLI commands</h2>
+
+<p>All under <code>trading/management/commands/</code> — run with <code>python manage.py &lt;command&gt;</code>.</p>
+
+<table>
+  <thead><tr><th>Command</th><th>Purpose</th></tr></thead>
+  <tbody>
+    <tr><td><code>run_trading_agent</code></td><td>Single-shot trade planning: <code>"Plan a BUY trade for HDFCBANK"</code>. Also <code>--seed-strategies</code>, <code>--init-portfolio</code>, <code>--show-journal</code>.</td></tr>
+    <tr><td><code>run_trading_day</code></td><td>Persistent all-day orchestrator: premarket scan → equities + straddle monitor (5–10 min cycles) until 15:30.</td></tr>
+    <tr><td><code>run_intraday</code></td><td>Intraday agent: premarket scan → LLM analysis → 5-min monitor → structure detect → confirm → risk → execute.</td></tr>
+    <tr><td><code>run_morning_basket</code></td><td>Mood assessment + multi-leg execution. <code>--dry-run</code> for signals only.</td></tr>
+    <tr><td><code>run_screener</code></td><td>Live 5-min screener over WebSocket ticks → conditions → signals (DB + Telegram).</td></tr>
+    <tr><td><code>run_ok_scanner</code></td><td>Batch scan for Oliver Kell cycle phases on daily/weekly candles.</td></tr>
+    <tr><td><code>run_straddle_monitor</code></td><td>Continuous straddle babysitter: full graph every 15–30 min or on NIFTY move &gt; 0.5%.</td></tr>
+    <tr><td><code>manage_straddle</code></td><td>Manual lifecycle: <code>--register</code>, <code>--analyze</code>, <code>--status</code>, <code>--execute</code>, <code>--list</code>.</td></tr>
+    <tr><td><code>run_pyramid</code></td><td>Pyramid simulation on 5-min option candles.</td></tr>
+    <tr><td><code>run_backtest</code></td><td>Walk-forward equity backtest on CSV candles.</td></tr>
+    <tr><td><code>run_backtest_intraday</code></td><td>Backtest intraday structures on last 3 trading days.</td></tr>
+    <tr><td><code>run_ok_backtest</code></td><td>Oliver Kell cycle backtest. <code>--from 2026-04-01 --to 2026-04-30</code>.</td></tr>
+    <tr><td><code>run_ok_intraday_backtest</code></td><td>Multi-TF optimization (3m/5m/15m × 3 SL × 3 R:R = 27 combos).</td></tr>
+    <tr><td><code>enrich_signals</code></td><td>EOD: enrich <code>SignalLog</code> rows with max favorable/adverse moves + outcome.</td></tr>
+  </tbody>
+</table>
+
+<!-- ========================================================= -->
+<h2 id="invariants">14 · Key invariants (never break these)</h2>
+
+<ol>
+  <li><strong>@RiskGuard is the last gate</strong> before every order — paper or live. No bypass, no override.</li>
+  <li><strong><code>TRADING_MODE=paper</code> is the default.</strong> Live is opt-in and explicit.</li>
+  <li><strong>Position sizing is deterministic</strong> (% of capital). The LLM never touches it.</li>
+  <li><strong>Every decision is journaled</strong> — including rejected trades.</li>
+  <li><strong>Audit-log failures never block trading</strong> — non-blocking writes.</li>
+  <li><strong>Expiry-day options must close before 15:15 IST</strong> — gamma risk explodes after.</li>
+  <li><strong>Short straddle hard stop</strong> — if combined premium &gt; 1.3 × what was sold, close immediately.</li>
+</ol>
+
+<!-- ========================================================= -->
+<h2 id="stack">15 · Tech stack</h2>
+
+<table>
+  <thead><tr><th>Layer</th><th>Tech</th></tr></thead>
+  <tbody>
+    <tr><td>Backend (v2)</td><td>Django 5 · DRF · Channels · Celery · Postgres · Redis · Daphne (ASGI)</td></tr>
+    <tr><td>Backend (legacy)</td><td>Django 5 · LangGraph · SQLite</td></tr>
+    <tr><td>Frontend</td><td>Vite · React 18 · TypeScript · TanStack Query · Zustand · Axios · Tailwind · Radix</td></tr>
+    <tr><td>Charting</td><td>Recharts · TradingView lightweight-charts</td></tr>
+    <tr><td>LLM</td><td>Claude (Anthropic) — Claude CLI (Max plan) or Anthropic SDK</td></tr>
+    <tr><td>Broker</td><td>Angel One SmartAPI (<code>SmartApi</code> Python SDK)</td></tr>
+    <tr><td>Real-time</td><td>Django Channels · Redis pub/sub · WebSocket (JWT subprotocol auth)</td></tr>
+    <tr><td>Background jobs</td><td>Celery + Beat (queues: <code>orders</code>, <code>agents</code>, <code>backtests</code>, default)</td></tr>
+    <tr><td>Logging / errors</td><td>structlog (JSON) · Logzero · Sentry (prod)</td></tr>
+    <tr><td>Testing</td><td>pytest · pytest-django · pytest-asyncio · factory-boy · schemathesis · Vitest · jsdom · @testing-library/react</td></tr>
+    <tr><td>Deploy</td><td>Docker · ECS Fargate · Amplify · CloudWatch · Terraform</td></tr>
+  </tbody>
+</table>
+
+<!-- ========================================================= -->
+<h2 id="further">16 · Further reading (in <code>docs/</code>)</h2>
+
+<table>
+  <thead><tr><th>File</th><th>What it covers</th></tr></thead>
+  <tbody>
+    <tr><td><code>docs/MIND_PALACE.md</code></td><td>Spatial mental map of the whole system — every floor, every desk, every data pipe.</td></tr>
+    <tr><td><code>docs/architecture/ARCHITECTURE.md</code></td><td>Formal architecture spec — components, security, SLOs, capacity.</td></tr>
+    <tr><td><code>docs/architecture/BACKEND_STRUCTURE.md</code></td><td>v2 Django app layout in depth.</td></tr>
+    <tr><td><code>docs/api/WEBSOCKETS.md</code></td><td>WebSocket channel spec.</td></tr>
+    <tr><td><code>docs/SCREENER_SPEC.md</code></td><td>Live screener strategy + filter spec.</td></tr>
+    <tr><td><code>docs/TESTING_STRATEGY.md</code></td><td>Test pyramid + coverage targets.</td></tr>
+    <tr><td><code>docs/strategies/DIRECTIONAL_VERTICAL_SPREAD.md</code></td><td>Strategy playbook.</td></tr>
+    <tr><td><code>docs/adr/</code></td><td>ADR-0001 tenancy · ADR-0002 agentic RAG plugins · ADR-0003 real-time layer · ADR-0004 order saga · ADR-0005 deployment target · ADR-0006 truthful ledger + broker integration.</td></tr>
+    <tr><td><code>TRADING_FRAMEWORK.md</code></td><td>The Cascade — 6-stage pre-trade framework.</td></tr>
+    <tr><td><code>CLAUDE.md</code></td><td>Project instructions for Claude Code (the AI assistant).</td></tr>
+  </tbody>
+</table>
+
+<footer>
+  Generated overview · derived from a tour of <code>trading/</code>, <code>backend/apps/</code>, and <code>frontend/src/</code> · all line numbers reference the <code>dev</code> branch at the time of writing.
+</footer>
+
+</main>
+</div>
+</body>
+</html>

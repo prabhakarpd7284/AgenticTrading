@@ -37,3 +37,6 @@ dependencies = [
 [project.optional-dependencies]
 postgres = ["psycopg2-binary>=2.9"]
 celery = ["celery>=5.3", "redis>=5.0"]
+
+[tool.setuptools.packages.find]
+include = ["trading*", "config*", "dashboard_utils*"]

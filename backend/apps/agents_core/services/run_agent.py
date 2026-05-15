@@ -2,10 +2,13 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 from uuid import UUID
 
 import structlog
+from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
+from django.db import close_old_connections
 from django.utils import timezone
 
 from apps.agents_core.domain.contracts import AgentContext, AgentEvent
@@ -23,25 +26,47 @@ class ChannelsPublisher:
         self._layer = get_channel_layer()
 
     def emit(self, event: AgentEvent) -> None:
-        # Persist and publish. Never block on DB failure.
+        # `emit()` is called synchronously from inside async LangGraph nodes,
+        # so the caller's event loop is already running. asyncio.run() errors
+        # in that case, and direct ORM calls trip SynchronousOnlyOperation.
+        # Fix: ORM write happens on a worker thread; channel send uses
+        # async_to_sync which handles a running loop correctly.
         try:
-            AgentStep.objects.create(
-                run_id=self.run_id,
-                seq=event.seq,
-                node=event.node,
-                event_type=event.type,
-                payload=event.payload,
-            )
+            self._save_step_off_loop(event)
         except Exception:  # noqa: BLE001
             log.exception("agentstep.save_failed", run_id=str(self.run_id))
 
         group = f"agent.{self.tenant_id}.{self.run_id}"
         try:
-            asyncio.run(
-                self._layer.group_send(group, {"type": "agent.event", "event": event.model_dump()})
+            async_to_sync(self._layer.group_send)(
+                group, {"type": "agent.event", "event": event.model_dump()},
             )
         except Exception:  # noqa: BLE001
             log.exception("channel.group_send_failed", run_id=str(self.run_id))
+
+    def _save_step_off_loop(self, event: AgentEvent) -> None:
+        err: dict = {}
+
+        def _work():
+            close_old_connections()
+            try:
+                AgentStep.objects.create(
+                    run_id=self.run_id,
+                    seq=event.seq,
+                    node=event.node,
+                    event_type=event.type,
+                    payload=event.payload,
+                )
+            except Exception as e:  # noqa: BLE001
+                err["e"] = e
+            finally:
+                close_old_connections()
+
+        t = threading.Thread(target=_work)
+        t.start()
+        t.join()
+        if "e" in err:
+            raise err["e"]
 
     def next_seq(self) -> int:
         self._seq += 1
