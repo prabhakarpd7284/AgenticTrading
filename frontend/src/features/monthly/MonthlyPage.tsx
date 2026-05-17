@@ -41,7 +41,7 @@ import {
   type UnderlyingRoll, type YtdMonthBar, type YtdSummary,
 } from "@/lib/monthly";
 import { useQueryClient } from "@tanstack/react-query";
-import { clsPnl, cn, fmtInr, fmtNum, fmtPct, fmtRel } from "@/lib/utils";
+import { clsPnl, cn, fmtInr, fmtNum, fmtPct } from "@/lib/utils";
 import {
   Card, CardContent, CardDescription, CardHeader, CardTitle,
 } from "@/components/ui/Card";
@@ -51,6 +51,7 @@ import { Skeleton } from "@/components/ui/Skeleton";
 import { OpButton } from "@/features/ops/OpButton";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/Tabs";
+import { FreshnessIndicator } from "@/components/ui/FreshnessIndicator";
 
 /* ================================================================== */
 /* Page                                                                 */
@@ -201,9 +202,14 @@ function Header({
             Paper
           </Badge>
         )}
-        <span className="text-caption text-fg-subtle">
-          {fmtRel(new Date(dataUpdatedAt).toISOString())}
-        </span>
+        {/* Reports are aggregated EOD — softer thresholds (5min fresh, 1h
+            stale) match how often the data could realistically change. */}
+        <FreshnessIndicator
+          label="Report as of"
+          timestamp={dataUpdatedAt}
+          freshMs={5 * 60_000}
+          staleMs={60 * 60_000}
+        />
 
         {/* Re-run the signal-outcome enrichment (capture rates, win/loss labels)
             then re-fetch the monthly view so the new numbers appear inline. */}

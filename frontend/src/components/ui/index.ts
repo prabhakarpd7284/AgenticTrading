@@ -11,3 +11,4 @@ export * from "./Tabs";
 export * from "./Tooltip";
 export * from "./DataTable";
 export * from "./CommandPalette";
+export * from "./FreshnessIndicator";
