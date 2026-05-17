@@ -157,22 +157,57 @@ export function OpRunPanel(props: OpRunPanelProps) {
         )}
       </div>
 
-      {/* ── args input ── */}
+      {/* ── args input ──
+         Promoted to a high-contrast, taller textarea with a live preview of
+         the full argv so the operator sees exactly what will execute.       */}
       <div className="flex flex-col gap-2">
-        <label className="text-xs font-medium uppercase tracking-wide text-fg-muted">
-          Arguments
-        </label>
-        <input
-          value={args}
-          onChange={(e) => setArgs(e.target.value)}
-          disabled={status === "running"}
-          spellCheck={false}
-          placeholder="(no args)"
-          className="rounded-md border border-border bg-bg-subtle px-3 py-2 font-mono text-sm outline-none focus:border-fg-muted disabled:opacity-50"
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && status !== "running") start();
-          }}
-        />
+        <div className="flex items-baseline justify-between">
+          <label
+            htmlFor={`op-args-${command}`}
+            className="text-xs font-semibold uppercase tracking-wider text-fg"
+          >
+            Arguments
+          </label>
+          <span className="text-xs text-fg-muted">
+            Press <kbd className="rounded border border-border bg-bg-subtle px-1 py-px font-mono text-[10px]">⏎</kbd> to run
+          </span>
+        </div>
+        <div
+          className={cn(
+            "flex items-start gap-2 rounded-md border-2 bg-bg-subtle px-3 py-3 transition-colors",
+            "focus-within:border-accent",
+            status === "running"
+              ? "border-border opacity-60"
+              : "border-border hover:border-fg-muted",
+          )}
+        >
+          <span className="select-none font-mono text-sm text-fg-muted">
+            $&nbsp;manage.py {command}
+          </span>
+          <textarea
+            id={`op-args-${command}`}
+            value={args}
+            onChange={(e) => setArgs(e.target.value)}
+            disabled={status === "running"}
+            spellCheck={false}
+            placeholder="--option value …"
+            rows={1}
+            className="min-h-[1.5rem] w-full resize-none bg-transparent font-mono text-base leading-6 text-fg outline-none placeholder:text-fg-subtle disabled:cursor-not-allowed"
+            onKeyDown={(e) => {
+              // Enter runs; Shift+Enter inserts a newline (for very long arg lines).
+              if (e.key === "Enter" && !e.shiftKey && status !== "running") {
+                e.preventDefault();
+                start();
+              }
+            }}
+            onInput={(e) => {
+              // Grow with content (up to ~6 lines).
+              const ta = e.currentTarget;
+              ta.style.height = "auto";
+              ta.style.height = Math.min(ta.scrollHeight, 144) + "px";
+            }}
+          />
+        </div>
         {!hideHelp && (
           <>
             <button

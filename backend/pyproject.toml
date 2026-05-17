@@ -39,6 +39,17 @@ dependencies = [
     "cryptography>=42.0",
     "pyotp>=2.9",
     "logzero>=1.7",
+    # Legacy CLI commands at `trading/management/commands/*` flow through
+    # trading.services.data_service which imports SmartApi at module load.
+    # The ops console (apps.system.consumers.OpsConsumer) spawns those
+    # commands as subprocesses using this venv's Python, so the runtime
+    # deps need to be reachable from here too.
+    "smartapi-python>=1.5.5",
+    "websocket-client>=1.5",   # smartapi-python's optional dep, but its
+                               # SmartConnect import requires it at runtime.
+    "python-dotenv>=1.0",
+    "mplfinance>=0.12.10b0",
+    "matplotlib>=3.7",
 ]
 
 [project.optional-dependencies]
