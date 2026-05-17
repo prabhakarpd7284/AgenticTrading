@@ -14,6 +14,7 @@ from apps.trading.api.portfolio_views import (
     PositionViewSet,
     SnapshotViewSet,
 )
+from apps.trading.api import legacy_compat_views as _compat
 
 portfolio_router = DefaultRouter()
 portfolio_router.register("", PortfolioViewSet, basename="portfolio")
@@ -27,6 +28,8 @@ snapshot_router.register("", SnapshotViewSet, basename="snapshot")
 urlpatterns = [
     # Specific paths first; catchall portfolio detail last.
     path("monthly/", MonthlyReportView.as_view(), name="portfolio-monthly"),
+    # Single-tenant aggregate (capital, used, day P&L, equity, snapshot).
+    path("summary/", _compat.portfolio, name="portfolio-summary"),
     path("positions/", include(position_router.urls)),
     path("snapshots/", include(snapshot_router.urls)),
     path("", include(portfolio_router.urls)),

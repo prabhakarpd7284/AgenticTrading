@@ -36,10 +36,15 @@ api_v1 = [
     # /ops/ — owner-only dev console: list management commands + stream
     # subprocess output over /ws/ops/ (see apps.system.consumers).
     path("ops/", include("apps.system.api.urls")),
-    # Bridge to the legacy `trading` Django app — exposes the existing
-    # 700+ rows of TradeJournal / StraddlePosition / AuditLog data so
-    # the React UI shows real numbers immediately.  Will be folded into
-    # the v2 endpoints once schema migration is complete.
+    # /system/ — kill switch + AI pause/resume.
+    path("system/", include("apps.system.api.system_urls")),
+    # V2-native top-level endpoints absorbing the old /legacy/* surface.
+    # The view functions still live in apps.trading.api.legacy_compat_views
+    # for the migration window; they'll be refactored into per-resource
+    # viewsets in a follow-up once the frontend is fully on these URLs.
+    path("", include("apps.trading.api.extras_urls")),  # /positions/, /trades/, /options-positions/, /risk/
+    # /legacy/ kept alive for one commit cycle so the frontend doesn't
+    # break mid-migration. Deleted in the v1-cutover commit.
     path("legacy/", include("apps.legacy.api.urls")),
 ]
 

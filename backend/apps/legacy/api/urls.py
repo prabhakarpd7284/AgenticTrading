@@ -1,10 +1,16 @@
-"""URL routing for the legacy bridge.
+"""URL routing for the legacy bridge (deprecation phase).
 
-Mounted at /api/v1/legacy/ — see backend/config/urls.py.
+The views moved to apps/trading/api/legacy_compat_views.py — this module
+just re-routes the old /api/v1/legacy/* URLs at the same view functions
+so the frontend keeps working during the migration to native v2 URLs
+(see backend/config/urls.py for the new top-level routes).
+
+The whole `apps.legacy` app is deleted in the final cutover commit
+once the frontend no longer calls /legacy/* anywhere.
 """
 from django.urls import path
 
-from . import views
+from apps.trading.api import legacy_compat_views as views
 
 app_name = "legacy"
 
