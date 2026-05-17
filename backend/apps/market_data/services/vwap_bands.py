@@ -104,17 +104,24 @@ def build_vwap_bands(symbol: str) -> dict[str, Any]:
     last = series[-1]
     sd = last["sd"]
     dist_sigma = round((last["c"] - last["vwap"]) / sd, 2) if sd > 0 else 0.0
+    # z-score is the same as dist_sigma but clamped for alert purposes.
+    dist_zscore = dist_sigma   # explicit field so the FE can switch terminology
     state = (
         "stretched_up" if dist_sigma >= 2.0
         else "stretched_down" if dist_sigma <= -2.0
         else "neutral"
     )
+    # Alert level: 1 = warning (|z| >= 1.5), 2 = critical (|z| >= 2.5)
+    abs_z = abs(dist_sigma)
+    alert_level = 2 if abs_z >= 2.5 else 1 if abs_z >= 1.5 else 0
     return {
         "symbol": sym,
         "vwap": last["vwap"],
         "sigma1_up": last["sigma1_up"], "sigma1_dn": last["sigma1_dn"],
         "sigma2_up": last["sigma2_up"], "sigma2_dn": last["sigma2_dn"],
         "dist_sigma": dist_sigma,
+        "dist_zscore": dist_zscore,
+        "alert_level": alert_level,
         "state": state,
         "last_close": last["c"],
         "series": series[-200:],   # cap payload

@@ -54,11 +54,24 @@ def _fetch_daily(symbol: str, days: int = 80) -> list[dict]:
         cache.set(key, [], _TTL); return []
 
 
+def _atr14(daily: list[dict]) -> float:
+    """Simple ATR-14 on the last bars; 0 if insufficient data."""
+    if len(daily) < 15:
+        return 0.0
+    trs = []
+    for i in range(1, len(daily)):
+        h, l = daily[i]["h"], daily[i]["l"]
+        pc = daily[i - 1]["c"]
+        trs.append(max(h - l, abs(h - pc), abs(l - pc)))
+    return sum(trs[-14:]) / 14.0 if trs[-14:] else 0.0
+
+
 def _classify_one(symbol: str) -> dict:
     daily = _fetch_daily(symbol)
     if len(daily) < 25:
         return {"symbol": symbol, "state": "no_data",
-                "pct_from_pivot": 0.0, "pct_from_20dma": 0.0, "base_depth_pct": 0.0}
+                "pct_from_pivot": 0.0, "pct_from_20dma": 0.0, "base_depth_pct": 0.0,
+                "pct_from_pivot_atr": 0.0, "pct_from_20dma_atr": 0.0}
 
     highs = [b["h"] for b in daily]
     lows = [b["l"] for b in daily]
@@ -70,8 +83,11 @@ def _classify_one(symbol: str) -> dict:
     base_depth = ((pivot - min(post_pivot_lows)) / pivot * 100.0) if pivot > 0 else 0.0
 
     sma20 = sum(closes[-20:]) / 20.0
+    atr = _atr14(daily)
     pct_from_pivot = (close - pivot) / pivot * 100.0 if pivot > 0 else 0.0
     pct_from_20dma = (close - sma20) / sma20 * 100.0 if sma20 > 0 else 0.0
+    pct_from_pivot_atr = round((close - pivot) / atr, 2) if atr > 0 else 0.0
+    pct_from_20dma_atr = round((close - sma20) / atr, 2) if atr > 0 else 0.0
 
     if base_depth < 5.0:
         state = "base_too_shallow"
@@ -89,8 +105,11 @@ def _classify_one(symbol: str) -> dict:
         "close": round(close, 2),
         "pivot": round(pivot, 2),
         "sma20": round(sma20, 2),
+        "atr14": round(atr, 2),
         "pct_from_pivot": round(pct_from_pivot, 2),
         "pct_from_20dma": round(pct_from_20dma, 2),
+        "pct_from_pivot_atr": pct_from_pivot_atr,
+        "pct_from_20dma_atr": pct_from_20dma_atr,
         "base_depth_pct": round(base_depth, 2),
         "state": state,
     }

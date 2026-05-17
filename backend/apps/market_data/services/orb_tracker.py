@@ -131,7 +131,8 @@ def _classify(candles: list[dict]) -> dict:
 
     if not or_bars:
         return {"or_high": 0.0, "or_low": 0.0, "or_width": 0.0,
-                "state": "pre_open", "breakout_time": None, "retests": 0}
+                "state": "pre_open", "breakout_time": None, "retests": 0,
+                "state_transitions": []}
 
     or_high = max(b["h"] for b in or_bars)
     or_low = min(b["l"] for b in or_bars)
@@ -139,14 +140,15 @@ def _classify(candles: list[dict]) -> dict:
 
     state, breakout_time, broke_up = "inside", None, None
     retests = 0
+    transitions: list[dict] = [{"t": rest[0]["t"] if rest else "", "from": "pre", "to": "inside"}]
     for b in rest:
+        prev_state = state
         if state == "inside":
             if b["c"] > or_high:
                 state, breakout_time, broke_up = "breakout_up", b["t"], True
             elif b["c"] < or_low:
                 state, breakout_time, broke_up = "breakout_down", b["t"], False
         else:
-            # already broke — count retests where price re-enters the OR
             if broke_up and b["c"] <= or_high:
                 retests += 1
                 if b["c"] < or_low:
@@ -155,6 +157,8 @@ def _classify(candles: list[dict]) -> dict:
                 retests += 1
                 if b["c"] > or_high:
                     state = "failed_breakout"
+        if state != prev_state:
+            transitions.append({"t": b["t"], "from": prev_state, "to": state})
 
     return {
         "or_high": round(or_high, 2),
@@ -163,6 +167,7 @@ def _classify(candles: list[dict]) -> dict:
         "state": state,
         "breakout_time": breakout_time,
         "retests": retests,
+        "state_transitions": transitions,
     }
 
 

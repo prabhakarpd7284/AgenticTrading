@@ -74,6 +74,7 @@ def build_forced_flat(tenant=None) -> dict[str, Any]:
 
     rows = []
     total_pnl = 0.0
+    total_carry = 0.0
     for t in open_trades:
         entry = float(t.entry_price or 0)
         qty = int(t.quantity or 0)
@@ -81,6 +82,12 @@ def build_forced_flat(tenant=None) -> dict[str, Any]:
         sign = 1 if t.side == "BUY" else -1
         pnl = round(sign * (ltp - entry) * qty, 2)
         total_pnl += pnl
+        slip_bps = _est_slippage_bps(t.symbol)
+        # Closing-auction carry cost = position notional × slip_bps × 2
+        # (auction-matching slippage in + a separate exit print on T+1).
+        notional = ltp * qty
+        carry_cost = round(notional * slip_bps / 10_000.0 * 2.0, 2)
+        total_carry += carry_cost
         rows.append({
             "trade_id": t.id,
             "symbol": t.symbol,
@@ -89,7 +96,8 @@ def build_forced_flat(tenant=None) -> dict[str, Any]:
             "entry": entry,
             "ltp": round(ltp, 2),
             "pnl": pnl,
-            "est_slippage_bps": _est_slippage_bps(t.symbol),
+            "est_slippage_bps": slip_bps,
+            "closing_auction_carry_cost_inr": carry_cost,
             "status": t.status,
         })
 
@@ -100,11 +108,13 @@ def build_forced_flat(tenant=None) -> dict[str, Any]:
         "active": now_ist.hour >= 15 and (now_ist.hour > 15 or now_ist.minute >= 0),
         "count": len(rows),
         "total_pnl": round(total_pnl, 2),
+        "total_carry_cost_inr": round(total_carry, 2),
         "rows": rows,
         "note": (
             "Activates after 15:00 IST. After 15:15 the closing auction "
             "absorbs MIS holders at whatever clearing price prints — slippage "
-            "explodes. Flatten everything in the list before the deadline."
+            "explodes. carry-cost = notional × est-slippage × 2 (auction in + "
+            "exit print). Flatten before the deadline to avoid paying it."
         ),
     }
 

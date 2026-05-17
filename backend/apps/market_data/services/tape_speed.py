@@ -101,6 +101,12 @@ def build_tape_speed(symbol: str) -> dict[str, Any]:
     baseline = _baseline_turnover(sym)
     closes = [b["c"] for b in bars]
     rets = [0.0] + [(closes[i] - closes[i - 1]) / closes[i - 1] for i in range(1, len(closes))]
+    # 10s-equivalent EMA over per-minute samples: with α=1/6 ≈ 10-second
+    # decay relative to 1-min bars (since 60/6 = 10). Lets the trader spot
+    # intra-minute intensity shifts that a raw bar series hides.
+    alpha = 1.0 / 6.0
+    ema_tps = 0.0
+    ema_ratio = 0.0
     series: list[dict] = []
     for i, b in enumerate(bars):
         tps = round(b["v"] / 60.0, 1)
@@ -109,6 +115,8 @@ def build_tape_speed(symbol: str) -> dict[str, Any]:
         sd = statistics.pstdev(window) if len(window) >= 3 else 0.0
         realised_vol_pm = round(sd * math.sqrt(375) * 100.0, 3)   # %
         ratio = (rupees_pm / baseline) if baseline > 0 else 0.0
+        ema_tps = alpha * tps + (1 - alpha) * ema_tps if i else tps
+        ema_ratio = alpha * ratio + (1 - alpha) * ema_ratio if i else ratio
         if ratio == 0:
             state = "cold"
         elif ratio > 2.5:
@@ -122,8 +130,10 @@ def build_tape_speed(symbol: str) -> dict[str, Any]:
         series.append({
             "t": b["t"], "c": round(b["c"], 2),
             "trades_per_sec": tps,
+            "trades_per_sec_ema10s": round(ema_tps, 2),
             "rupees_per_min": rupees_pm,
             "ratio_to_baseline": round(ratio, 2),
+            "ratio_ema10s": round(ema_ratio, 2),
             "realised_vol_pm": realised_vol_pm,
             "state": state,
         })

@@ -36,7 +36,9 @@ from apps.portfolio.services.intraday_rotation import build_intraday_rotation
 from apps.portfolio.services.gap_risk import build_gap_risk_report
 from apps.portfolio.services.post_mortem import build_post_mortem_report
 from apps.portfolio.services.sizer_simulator import simulate as simulate_sizer
-from apps.portfolio.services.slippage_edge import compute as compute_slippage_edge
+from apps.portfolio.services.slippage_edge import (
+    compute as compute_slippage_edge, setup_catalog,
+)
 from apps.portfolio.services.structural_stops import build_structural_stops
 
 
@@ -224,9 +226,15 @@ class ForcedFlatFlattenView(_BaseCockpitView):
 
 
 class SlippageEdgeView(_BaseCockpitView):
-    """POST /api/v1/portfolios/slippage-edge/  body: {symbol, qty, setup_avg_r_inr}"""
+    """POST /api/v1/portfolios/slippage-edge/  body: {symbol, qty, setup_avg_r_inr | setup_family}"""
     def post(self, request):
         return Response(compute_slippage_edge(request.data or {}))
+
+
+class SlippageEdgeSetupsView(_BaseCockpitView):
+    """GET /api/v1/portfolios/slippage-edge/setups/ — setup-family catalog"""
+    def get(self, request):
+        return Response(setup_catalog())
 
 
 class EdgeLedgerView(_BaseCockpitView):

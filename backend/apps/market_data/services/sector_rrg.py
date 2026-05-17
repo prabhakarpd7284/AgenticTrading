@@ -23,6 +23,7 @@ from django.core.cache import cache
 
 _TTL = 300
 _LOOKBACK_DAYS = 60      # need ~50 daily closes to compute 10 weekly RRG points
+_WEEKLY_LOOKBACK_DAYS = 130     # ~26 weeks → enough for 13-week tails
 
 
 def _yf_history(yf_symbol: str, days: int = _LOOKBACK_DAYS) -> list[float]:
@@ -63,40 +64,46 @@ def _quadrant(rs_ratio: float, rs_mom: float) -> str:
     return "IMPROVING"
 
 
-def build_sector_rrg(tenant=None) -> dict[str, Any]:
+def build_sector_rrg(tenant=None, *, weekly: bool = False) -> dict[str, Any]:
+    """When `weekly=True`, samples every 5th daily close (≈ weekly) and uses
+    13 points of tail; otherwise daily resolution with 10-point tail."""
     from apps.market_data.services.pulse_service import SECTOR_TICKERS
 
-    bench = _yf_history("^NSEI")    # NIFTY 50
+    lookback = _WEEKLY_LOOKBACK_DAYS if weekly else _LOOKBACK_DAYS
+    tail_len = 13 if weekly else 10
+    momentum_lookback = 25 if weekly else 5  # 5w vs 5d
+
+    bench = _yf_history("^NSEI", days=lookback)
     if not bench:
-        return {"count": 0, "rows": [], "note": "NIFTY benchmark data unavailable."}
+        return {"count": 0, "rows": [], "mode": "weekly" if weekly else "daily",
+                "note": "NIFTY benchmark data unavailable."}
 
     rows: list[dict] = []
     for sector_key, yf_sym in SECTOR_TICKERS.items():
-        closes = _yf_history(yf_sym)
+        closes = _yf_history(yf_sym, days=lookback)
         if not closes:
             rows.append({"sector": sector_key, "quadrant": "no_data",
                          "rs_ratio": 0.0, "rs_momentum": 0.0, "tail": []})
             continue
 
         ratio_series = _rs_ratio_series(closes, bench)
-        if len(ratio_series) < 11:
+        if len(ratio_series) < momentum_lookback + 1:
             rows.append({"sector": sector_key, "quadrant": "no_data",
                          "rs_ratio": 0.0, "rs_momentum": 0.0, "tail": []})
             continue
 
-        # Approximate weekly samples by taking every 5th element from the tail.
-        weekly = ratio_series[::5][-10:]
-        # Momentum = current rs_ratio − 5-day-ago rs_ratio
+        # Sample every 5th element if weekly, otherwise keep daily.
+        step = 5 if weekly else 1
+        sampled = ratio_series[::step][-tail_len:]
         rs_now = ratio_series[-1]
-        rs_5ago = ratio_series[-6] if len(ratio_series) >= 6 else ratio_series[0]
-        rs_mom = round(rs_now - rs_5ago, 3)
+        rs_back = ratio_series[-(momentum_lookback + 1)]
+        rs_mom = round(rs_now - rs_back, 3)
 
-        # Build (rs_ratio, rs_mom) tail
         tail = []
-        for i, val in enumerate(weekly):
-            offset = max(0, len(ratio_series) - (len(weekly) - i) * 5 - 1)
-            past_5ago = ratio_series[max(0, offset - 5)]
-            tail.append({"rs_ratio": val, "rs_mom": round(val - past_5ago, 3)})
+        for i, val in enumerate(sampled):
+            offset = max(0, len(ratio_series) - (len(sampled) - i) * step - 1)
+            past = ratio_series[max(0, offset - momentum_lookback)]
+            tail.append({"rs_ratio": val, "rs_mom": round(val - past, 3)})
 
         rows.append({
             "sector": sector_key,
@@ -111,11 +118,13 @@ def build_sector_rrg(tenant=None) -> dict[str, Any]:
     rows.sort(key=lambda r: (quadrant_order.get(r["quadrant"], 4), -r.get("rs_ratio", 0)))
     return {
         "count": len(rows),
+        "mode": "weekly" if weekly else "daily",
+        "tail_length": tail_len,
         "rows": rows,
         "note": (
             "LEADING (top-right) sectors are outperforming and accelerating — "
             "trade their constituents long. IMPROVING (bottom-right) are early "
             "rotation candidates. LAGGING/WEAKENING = avoid or short the "
-            "weakest names."
+            "weakest names. " + ("Weekly mode with 13-week tail." if weekly else "Daily mode with 10-day tail.")
         ),
     }

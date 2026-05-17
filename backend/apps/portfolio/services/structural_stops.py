@@ -95,6 +95,7 @@ def _empty_row(*, position_id, symbol, entry, qty) -> dict:
         "entry": entry, "qty": qty,
         "swing_low": 0.0, "ten_wma": 0.0, "atr_trail": 0.0,
         "recommended": None, "r_distance": 0.0, "pct_loss": 0.0,
+        "ledger": [],
         "note": "no daily candles available",
     }
 
@@ -138,6 +139,18 @@ def build_structural_stops(tenant=None) -> dict[str, Any]:
         r_distance = abs(entry - rec_val) if rec_val > 0 else 0.0
         pct_loss = (r_distance / entry * 100.0) if entry > 0 and r_distance > 0 else 0.0
 
+        # Build a 10-bar history so the trader can see how each candidate
+        # stop has drifted — useful when deciding whether to ratchet up.
+        history: list[dict] = []
+        for i in range(max(0, len(daily) - 10), len(daily)):
+            slice_ = daily[:i + 1]
+            history.append({
+                "date": slice_[-1]["d"][:10] if "d" in slice_[-1] else "",
+                "swing_low": round(_swing_low(slice_), 2),
+                "ten_wma": _ten_week_ma(slice_),
+                "atr_trail": _atr_trail(slice_),
+            })
+
         rows.append({
             "position_id": t.id, "symbol": t.symbol, "side": t.side,
             "entry": entry, "qty": qty,
@@ -146,6 +159,7 @@ def build_structural_stops(tenant=None) -> dict[str, Any]:
             "r_distance": round(r_distance, 2),
             "pct_loss": round(pct_loss, 2),
             "loss_at_stop_inr": round(r_distance * qty, 2),
+            "ledger": history,
         })
 
     return {

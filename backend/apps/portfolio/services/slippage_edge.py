@@ -22,6 +22,32 @@ _BROKERAGE_PER_ORDER = 20.0
 _IMPACT_BPS = 5.0
 
 
+# Historical avg-R per setup family (INR per share). Values were derived
+# from typical published backtest expectations + the team's earlier runs;
+# they're the defaults the FE pre-fills when a setup is picked. Override
+# any of them per-call via the explicit `setup_avg_r_inr` field.
+SETUP_FAMILIES: dict[str, dict] = {
+    "ORB_BREAKOUT":         {"label": "Opening-Range Breakout",       "avg_r_inr": 5.5,  "description": "First 15-min OR breakout with vol confirmation"},
+    "VWAP_REVERSION":       {"label": "VWAP Mean-Reversion",          "avg_r_inr": 3.2,  "description": "Fade ≥2σ stretches back toward VWAP"},
+    "PIVOT_BREAKOUT":       {"label": "Pivot / Fresh-Breakout",       "avg_r_inr": 7.0,  "description": "Cup-with-handle / flat-base breakouts within 3% of pivot"},
+    "PYRAMID_MOMENTUM":     {"label": "Pyramid Momentum",             "avg_r_inr": 9.0,  "description": "Add to winners on EMA-5 retest with trail"},
+    "SHORT_STRADDLE":       {"label": "Short Index Straddle",         "avg_r_inr": 12.0, "description": "Weekly ATM straddle with delta-neutral hedges"},
+    "VERTICAL_SPREAD":      {"label": "Vertical Debit Spread",        "avg_r_inr": 6.5,  "description": "Directional weekly bull/bear vertical"},
+    "GAP_FADE":             {"label": "Gap-Fade",                     "avg_r_inr": 2.8,  "description": "Fade gaps with high historical fill-probability"},
+    "FAILED_BREAKOUT_FADE": {"label": "Failed-Breakout Fade",         "avg_r_inr": 4.0,  "description": "Fade OR or pivot failures back to the midpoint"},
+}
+
+
+def setup_catalog() -> dict[str, Any]:
+    """Return the SETUP_FAMILIES catalog for the FE picker."""
+    return {
+        "families": [
+            {"id": k, **v} for k, v in SETUP_FAMILIES.items()
+        ],
+        "note": "Pick a family to pre-fill the expected R per trade. Override via the form if your backtest says different.",
+    }
+
+
 def _live_quote(symbol: str) -> tuple[float, float]:
     """Reuse the liquidity_map cache so this stays cheap."""
     try:
@@ -38,10 +64,14 @@ def compute(payload: dict) -> dict[str, Any]:
         qty = int(payload.get("qty") or 0)
     except (TypeError, ValueError):
         qty = 0
+    setup_family = (payload.get("setup_family") or "").upper().strip()
     try:
         setup_r = float(payload.get("setup_avg_r_inr") or 0)
     except (TypeError, ValueError):
         setup_r = 0.0
+    # Setup family pre-fill — explicit setup_avg_r_inr always wins.
+    if not setup_r and setup_family and setup_family in SETUP_FAMILIES:
+        setup_r = float(SETUP_FAMILIES[setup_family]["avg_r_inr"])
 
     if not symbol or qty <= 0:
         return {"error": "symbol and qty>0 are required"}
@@ -69,6 +99,8 @@ def compute(payload: dict) -> dict[str, Any]:
 
     return {
         "symbol": symbol, "qty": qty,
+        "setup_family": setup_family or None,
+        "setup_avg_r_inr": setup_r,
         "bid": bid, "ask": ask, "mid": round(mid, 2),
         "half_spread_inr": half_spread_inr,
         "impact_inr": impact_inr,

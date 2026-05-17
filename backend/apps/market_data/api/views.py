@@ -526,10 +526,11 @@ class VolRegimeView(APIView):
 
 
 class SectorRRGView(APIView):
-    """GET /api/v1/market-data/sector-rrg/"""
+    """GET /api/v1/market-data/sector-rrg/?weekly=1"""
     permission_classes = [IsAuthenticated]
     def get(self, request):
-        return Response(build_sector_rrg(getattr(request, "tenant", None)))
+        weekly = request.query_params.get("weekly", "").lower() in ("1", "true", "yes")
+        return Response(build_sector_rrg(getattr(request, "tenant", None), weekly=weekly))
 
 
 class SectorDispersionView(APIView):
