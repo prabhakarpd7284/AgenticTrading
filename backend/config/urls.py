@@ -38,14 +38,10 @@ api_v1 = [
     path("ops/", include("apps.system.api.urls")),
     # /system/ — kill switch + AI pause/resume.
     path("system/", include("apps.system.api.system_urls")),
-    # V2-native top-level endpoints absorbing the old /legacy/* surface.
-    # The view functions still live in apps.trading.api.legacy_compat_views
-    # for the migration window; they'll be refactored into per-resource
-    # viewsets in a follow-up once the frontend is fully on these URLs.
-    path("", include("apps.trading.api.extras_urls")),  # /positions/, /trades/, /options-positions/, /risk/
-    # /legacy/ kept alive for one commit cycle so the frontend doesn't
-    # break mid-migration. Deleted in the v1-cutover commit.
-    path("legacy/", include("apps.legacy.api.urls")),
+    # V2-native top-level endpoints (positions, trades, options-positions,
+    # risk). The view functions still live in apps.trading.api.legacy_compat_views
+    # for one more cycle while we refactor them into per-resource viewsets.
+    path("", include("apps.trading.api.extras_urls")),
 ]
 
 urlpatterns = [

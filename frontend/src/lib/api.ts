@@ -1,23 +1,8 @@
 import axios, { AxiosError, AxiosInstance, AxiosRequestConfig, AxiosResponse } from "axios";
 import { useAuthStore } from "@/stores/auth";
 
-// ---------------------------------------------------------------------------
-// Two base URLs in local dev:
-//   v2 stack (Postgres)     → http://localhost:8000/api/v1   (VITE_API_URL)
-//   legacy sqlite bridge    → http://localhost:8001/api/v1   (VITE_LEGACY_API_URL)
-// In prod both point at the same origin via the reverse proxy — leave
-// VITE_LEGACY_API_URL unset and it falls back to VITE_API_URL.
-// ---------------------------------------------------------------------------
 export const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL || "/api/v1",
-  timeout: 30_000,
-});
-
-export const legacyApi = axios.create({
-  baseURL:
-    import.meta.env.VITE_LEGACY_API_URL ||
-    import.meta.env.VITE_API_URL ||
-    "/api/v1",
   timeout: 30_000,
 });
 
@@ -34,7 +19,6 @@ function attachAuth(client: AxiosInstance) {
 }
 
 attachAuth(api);
-attachAuth(legacyApi);
 
 let refreshing: Promise<string | null> | null = null;
 
@@ -86,7 +70,6 @@ function attachResponse(client: AxiosInstance) {
 }
 
 attachResponse(api);
-attachResponse(legacyApi);
 
 // ---------------------------------------------------------------------------
 // `list<T>(url)` — tiny helper for list GETs that should always hand back an
