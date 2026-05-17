@@ -89,6 +89,20 @@ class DirectionalStrategy:
                 candles = []
             md["candles"] = candles
 
+            # For the indicator panel we need ≥ 50 bars (SMA-50). The 5-min
+            # intraday window collapses to ~5 daily bars after-hours, so
+            # also pull 60 days of ONE_DAY candles and compute indicators
+            # on those — sma_20, sma_50, rsi_14, atr_14 will populate.
+            try:
+                daily_start = (date.today() - timedelta(days=90)).strftime("%Y-%m-%d")
+                daily = await asyncio.to_thread(
+                    ds.fetch_historical, symbol, daily_start, today, "ONE_DAY",
+                )
+            except Exception:  # noqa: BLE001
+                daily = []
+            md["daily_candles"] = daily
+            state["indicators"] = _compute_indicators(daily if daily else candles)
+
             state["symbol"] = symbol
             state["market_data"] = md
 
@@ -98,6 +112,7 @@ class DirectionalStrategy:
                     "candle_count": md.get("candle_count"),
                     "last_close": md.get("last_close"),
                     "range_pct": md.get("range_pct"),
+                    "indicators": {k: v for k, v in (state["indicators"] or {}).items() if k in ("sma_5", "sma_20", "rsi_14", "atr_14", "vwap")},
                     "error": md.get("error"),
                 },
             ))
@@ -172,6 +187,25 @@ class DirectionalStrategy:
             approved, reason, details = await asyncio.to_thread(
                 validate_trade, plan, capital, daily_loss, open_positions,
             )
+            details = dict(details or {})
+
+            # Compute margin + leverage and attach so the UI can show what
+            # buying-power this trade would consume. Also enforces a
+            # secondary leverage gate in addition to legacy validate_trade.
+            try:
+                from apps.common.margin_calc import equity_margin
+                product = "MIS" if (cfg.get("product") or "MIS").upper() == "MIS" else "CNC"
+                m = equity_margin(plan["side"], int(plan["quantity"]), float(plan["entry_price"]), product=product)
+                details["margin"] = m.as_dict()
+                details["margin_pct_of_capital"] = round((m.total_margin / capital) * 100, 2) if capital else 0
+                # Hard leverage cap — 10× for equity intraday is already extreme.
+                max_leverage = float(cfg.get("max_leverage", 10))
+                if m.leverage > max_leverage and approved:
+                    approved = False
+                    reason = f"Leverage {m.leverage:.2f}× exceeds cap {max_leverage:.0f}×"
+            except Exception as e:  # noqa: BLE001
+                details["margin_error"] = str(e)
+
             state["risk"] = {"approved": approved, "reason": reason, "details": details}
 
             ctx.publisher.emit(AgentEvent(
@@ -242,6 +276,87 @@ class DirectionalStrategy:
 def _next(state: dict) -> int:
     state["_seq"] = state.get("_seq", 0) + 1
     return state["_seq"]
+
+
+def _compute_indicators(candles: list) -> dict:
+    """Snapshot indicator values from a candle list.
+
+    Returns the values at the *latest* bar. Empty if not enough bars.
+    Candle shape (from legacy fetch_historical): dict with open/high/low/close/volume,
+    OR list[ts,o,h,l,c,v].
+    """
+    if not candles:
+        return {}
+
+    def _close(c):
+        return float(c["close"] if isinstance(c, dict) else c[4])
+
+    def _high(c):
+        return float(c["high"] if isinstance(c, dict) else c[2])
+
+    def _low(c):
+        return float(c["low"] if isinstance(c, dict) else c[3])
+
+    def _vol(c):
+        try:
+            return float(c.get("volume", 0) if isinstance(c, dict) else (c[5] if len(c) > 5 else 0))
+        except (ValueError, TypeError):
+            return 0.0
+
+    closes = [_close(c) for c in candles]
+    highs = [_high(c) for c in candles]
+    lows = [_low(c) for c in candles]
+    vols = [_vol(c) for c in candles]
+    n = len(closes)
+
+    def sma(period: int) -> float | None:
+        return sum(closes[-period:]) / period if n >= period else None
+
+    def rsi(period: int = 14) -> float | None:
+        if n < period + 1:
+            return None
+        gains, losses = [], []
+        for i in range(-period, 0):
+            delta = closes[i] - closes[i - 1]
+            (gains if delta > 0 else losses).append(abs(delta))
+        avg_gain = sum(gains) / period if gains else 0.0
+        avg_loss = sum(losses) / period if losses else 0.0
+        if avg_loss == 0:
+            return 100.0
+        rs = avg_gain / avg_loss
+        return round(100 - (100 / (1 + rs)), 2)
+
+    def atr(period: int = 14) -> float | None:
+        if n < period + 1:
+            return None
+        trs = []
+        for i in range(-period, 0):
+            tr = max(
+                highs[i] - lows[i],
+                abs(highs[i] - closes[i - 1]),
+                abs(lows[i] - closes[i - 1]),
+            )
+            trs.append(tr)
+        return round(sum(trs) / period, 2)
+
+    def vwap() -> float | None:
+        tot_pv = sum((highs[i] + lows[i] + closes[i]) / 3 * vols[i] for i in range(n))
+        tot_v = sum(vols)
+        return round(tot_pv / tot_v, 2) if tot_v else None
+
+    return {
+        "last_close": round(closes[-1], 2),
+        "sma_5":   round(sma(5), 2) if sma(5) is not None else None,
+        "sma_20":  round(sma(20), 2) if sma(20) is not None else None,
+        "sma_50":  round(sma(50), 2) if sma(50) is not None else None,
+        "rsi_14":  rsi(14),
+        "atr_14":  atr(14),
+        "vwap":    vwap(),
+        "prev_close": round(closes[-2], 2) if n >= 2 else None,
+        "day_high": round(max(highs), 2),
+        "day_low":  round(min(lows), 2),
+        "candles_used": n,
+    }
 
 
 def _write_journals(state: dict, ctx: AgentContext) -> None:

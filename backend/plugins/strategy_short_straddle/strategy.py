@@ -302,7 +302,19 @@ def _next(state: dict) -> int:
 
 
 def _load_position_and_snapshot(position_id: int):
-    """Sync helper — runs inside asyncio.to_thread."""
+    """Sync helper — runs inside asyncio.to_thread.
+
+    Builds the snapshot via individual `ltpData` calls rather than
+    `market_data_batch`. The batch endpoint returns an empty list outside
+    market hours (Angel One quirk) which would cascade into the analyzer
+    seeing zero LTPs. Individual `ltpData` calls return the last-close
+    OHLC even after-hours, which is what we want for review runs.
+
+    Also pulls 5-min candles for NIFTY, CE and PE over the last few
+    trading days so the React UI can render intraday close charts for
+    each leg + the underlying.
+    """
+    from datetime import datetime, timedelta
     from trading.models import StraddlePosition
     from trading.options.data_service import OptionsDataService
 
@@ -311,15 +323,55 @@ def _load_position_and_snapshot(position_id: int):
     except StraddlePosition.DoesNotExist:
         return None, {}
 
+    ods = OptionsDataService()
+    snapshot: dict = {"nifty": {}, "vix": {}, "ce": {}, "pe": {},
+                       "candles": [], "ce_candles": [], "pe_candles": []}
+
+    # ── 1. LTPs via individual ltpData calls (robust after-hours) ──
     try:
-        snapshot = OptionsDataService().fetch_straddle_snapshot(
-            position.ce_symbol, position.ce_token,
-            position.pe_symbol, position.pe_token,
-            date.today().strftime("%Y-%m-%d"),
-            include_candles=True,
-        )
+        snapshot["nifty"] = ods.fetch_nifty_spot()
     except Exception as e:  # noqa: BLE001
-        snapshot = {"error": str(e), "nifty": {}, "vix": {}, "ce": {}, "pe": {}, "candles": []}
+        snapshot["nifty_error"] = str(e)
+    try:
+        snapshot["vix"] = ods.fetch_vix()
+    except Exception as e:  # noqa: BLE001
+        snapshot["vix_error"] = str(e)
+    try:
+        snapshot["ce"] = ods.fetch_option_ltp(position.ce_symbol, position.ce_token)
+    except Exception as e:  # noqa: BLE001
+        snapshot["ce_error"] = str(e)
+    try:
+        snapshot["pe"] = ods.fetch_option_ltp(position.pe_symbol, position.pe_token)
+    except Exception as e:  # noqa: BLE001
+        snapshot["pe_error"] = str(e)
+
+    # ── 2. 5-min intraday close candles for the UI charts ──
+    # Window: last 5 days (handles weekends/holidays cleanly — broker
+    # collapses to daily bars after-hours but we still get something
+    # plottable). Pulls NIFTY (NSE) + CE/PE (NFO) directly via
+    # BrokerClient.fetch_candles since the OptionsDataService helper
+    # only knows NIFTY and doesn't take a date-range.
+    try:
+        from trading.services.data_service import BrokerClient
+        from trading.options.data_service import NIFTY_SPOT_TOKEN
+
+        today = date.today()
+        broker = BrokerClient.get_instance()
+        broker.ensure_login()
+        start = (today - timedelta(days=5)).strftime("%Y-%m-%d %H:%M")
+        end = today.strftime("%Y-%m-%d 15:30")
+
+        def _fetch(token: str, exchange: str) -> list:
+            try:
+                return broker.fetch_candles(token, start, end, "FIVE_MINUTE", exchange=exchange) or []
+            except TypeError:
+                return broker.fetch_candles(token, start, end, "FIVE_MINUTE") or []
+
+        snapshot["candles"]    = _fetch(NIFTY_SPOT_TOKEN, "NSE")
+        snapshot["ce_candles"] = _fetch(position.ce_token, "NFO")
+        snapshot["pe_candles"] = _fetch(position.pe_token, "NFO")
+    except Exception as e:  # noqa: BLE001
+        snapshot["option_candles_error"] = str(e)
 
     return position, snapshot
 
