@@ -260,7 +260,7 @@ function CapitalEditor({ current }: { current: number }) {
         autoFocus
         type="number"
         min={1}
-        step={1000}
+        step="any"
         value={value}
         onChange={(e) => setValue(e.target.value)}
         className="w-40 h-8 px-2 bg-surface border border-border rounded-sm text-body-sm tabular-nums"
