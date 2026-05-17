@@ -241,14 +241,15 @@ class SlippageEdgeSetupsView(_BaseCockpitView):
 
 
 class ResetTradingDataView(_BaseCockpitView):
-    """POST /api/v1/portfolios/reset/  body: {flags, capital?}
+    """POST /api/v1/portfolios/reset/  body: {flags, capital?, no_reseed?}
 
     Mirrors the `python manage.py reset_trading_data --confirm` CLI.
 
-      flags        list of: journal, straddles, snapshots, audit, signals,
-                   watchlist, orders, runs, positions, cache, all
-      keep_watchlist  bool  — only honored when "all" is in flags
-      capital      number   — seed today's snapshot with this capital
+      flags          list of: journal, straddles, snapshots, audit, signals,
+                     watchlist, orders, runs, positions, cache, all, nuke
+      keep_watchlist bool  — only honored when "all" is in flags
+      capital        number — seed today's snapshot with this capital
+      no_reseed      bool  — when "nuke" is in flags, skip the auto re-seed
     """
     def post(self, request):
         body = request.data or {}
@@ -264,7 +265,11 @@ class ResetTradingDataView(_BaseCockpitView):
             "journal", "straddles", "snapshots", "audit", "signals",
             "watchlist", "orders", "runs", "positions", "cache",
         )
-        if "all" in flags:
+        if "nuke" in flags:
+            cli_kwargs["nuke"] = True
+            if body.get("no_reseed"):
+                cli_kwargs["no_reseed"] = True
+        elif "all" in flags:
             cli_kwargs["all"] = True
             if body.get("keep_watchlist"):
                 cli_kwargs["keep_watchlist"] = True
@@ -296,6 +301,7 @@ class ResetTradingDataView(_BaseCockpitView):
             "summary": buf.getvalue().strip(),
             "flags": flags,
             "capital": cli_kwargs.get("capital"),
+            "reseeded": "nuke" in flags and not body.get("no_reseed"),
         })
 
 

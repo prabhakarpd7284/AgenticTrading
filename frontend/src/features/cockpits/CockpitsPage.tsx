@@ -2725,6 +2725,7 @@ function ResetPanel() {
   const qc = useQueryClient();
   const [picked, setPicked] = React.useState<Set<string>>(new Set());
   const [capital, setCapital] = React.useState<string>("");
+  const [noReseed, setNoReseed] = React.useState(false);
   const [pending, setPending] = React.useState(false);
   const [result, setResult] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
@@ -2739,26 +2740,46 @@ function ResetPanel() {
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
+    await runReset(Array.from(picked), capital ? Number(capital) : undefined);
+  };
+
+  const doNuke = async () => {
+    const cap = capital ? Number(capital) : 500_000;
+    if (!confirm(
+      "⚠️  NUKE: This wipes EVERY ROW from BOTH databases (v2 + legacy).\n\n" +
+      "Schema + migrations are preserved.\n" +
+      (noReseed
+        ? "Re-seed disabled — you'll need to create a user before logging back in.\n"
+        : `Re-seeds smoke@alphadesk.local / smoke-1234 with ₹${cap.toLocaleString("en-IN")} capital.\n`) +
+      "\nThere is no undo. Continue?"
+    )) return;
+    await runReset(["nuke"], cap);
+  };
+
+  const runReset = async (flags: string[], capNum: number | undefined) => {
     setError(null); setResult(null);
-    const flags = Array.from(picked);
-    const capNum = capital ? Number(capital) : undefined;
     if (flags.length === 0 && capNum === undefined) {
-      setError("Pick at least one thing to reset, or set a capital seed.");
+      setError("Pick at least one thing to reset, set a capital seed, or hit NUKE.");
       return;
     }
     if (capNum !== undefined && (!Number.isFinite(capNum) || capNum <= 0)) {
       setError("Capital must be a positive number.");
       return;
     }
-    const message =
-      flags.includes("journal") || flags.includes("straddles")
-        ? `This deletes ${flags.length} table${flags.length === 1 ? "" : "s"} of trading data. There is no undo. Continue?`
-        : `Apply reset to ${flags.length} target${flags.length === 1 ? "" : "s"}${capNum ? ` + capital ₹${capNum.toLocaleString("en-IN")}` : ""}?`;
-    if (!confirm(message)) return;
+    if (!flags.includes("nuke")) {
+      const message =
+        flags.includes("journal") || flags.includes("straddles")
+          ? `This deletes ${flags.length} table${flags.length === 1 ? "" : "s"} of trading data. There is no undo. Continue?`
+          : `Apply reset to ${flags.length} target${flags.length === 1 ? "" : "s"}${capNum ? ` + capital ₹${capNum.toLocaleString("en-IN")}` : ""}?`;
+      if (!confirm(message)) return;
+    }
 
     setPending(true);
     try {
-      const r = await resetTradingData({ flags, capital: capNum });
+      const r = await resetTradingData({
+        flags, capital: capNum,
+        no_reseed: flags.includes("nuke") ? noReseed : undefined,
+      });
       if (r.error) setError(r.error);
       else setResult(r.summary || "Done.");
       await qc.invalidateQueries({ queryKey: ["cockpits"] });
@@ -2853,6 +2874,39 @@ function ResetPanel() {
         </CardContent>
       </Card>
 
+      <Card className="border-pnl-down/40">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <AlertTriangle className="h-5 w-5 text-pnl-down" />
+            Nuclear option — full DB wipe
+          </CardTitle>
+          <CardDescription>
+            Calls Django's <code>flush</code> on every configured database
+            (v2 Postgres + legacy SQLite). Schema and migrations stay; every
+            row is deleted. Auto re-seeds smoke@alphadesk.local /
+            smoke-1234 so you can log back in immediately.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <label className="flex items-center gap-2 text-body-sm">
+            <input type="checkbox" checked={noReseed}
+                   onChange={(e) => setNoReseed(e.target.checked)} />
+            <span>Skip auto re-seed (you'll need to <code>createsuperuser</code> yourself)</span>
+          </label>
+          <button
+            type="button"
+            onClick={doNuke}
+            disabled={pending}
+            className="h-10 px-5 bg-pnl-down text-white rounded-sm text-body-sm font-semibold disabled:opacity-50 hover:bg-pnl-down/90"
+          >
+            {pending ? "Nuking…" : "🧨 Nuke backend DB"}
+          </button>
+          <p className="text-caption text-fg-subtle">
+            Capital seed (from the field above) defaults to ₹500,000 if blank.
+          </p>
+        </CardContent>
+      </Card>
+
       <Card>
         <CardHeader>
           <CardTitle>CLI equivalent</CardTitle>
@@ -2860,14 +2914,20 @@ function ResetPanel() {
         </CardHeader>
         <CardContent>
           <pre className="text-caption font-mono p-3 bg-surface-2 border border-border rounded-sm overflow-x-auto">
-{`# Wipe everything except watchlist, seed 500k capital
+{`# Soft reset: trading tables only, keep watchlist, seed 500k capital
 python manage.py reset_trading_data --all --keep-watchlist --capital 500000 --confirm
 
 # Just clear today's agent runs + Django cache
 python manage.py reset_trading_data --runs --cache --confirm
 
 # Wipe trade journal only (paranoid mode)
-python manage.py reset_trading_data --journal --confirm`}
+python manage.py reset_trading_data --journal --confirm
+
+# NUCLEAR: flush every row from both databases, re-seed smoke user
+python manage.py reset_trading_data --nuke --confirm
+
+# Nuke without re-seeding (you'll need to make a user)
+python manage.py reset_trading_data --nuke --no-reseed --confirm`}
           </pre>
         </CardContent>
       </Card>

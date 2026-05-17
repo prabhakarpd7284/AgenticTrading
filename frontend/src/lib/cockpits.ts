@@ -797,8 +797,9 @@ export const useEarningsOverlay = () =>
 // Reset trading data — wipes journal / straddles / runs / cache / etc.
 // ---------------------------------------------------------------------------
 export interface ResetRequest {
-  flags: string[];            // e.g. ["all"] or ["journal","cache"]
+  flags: string[];            // e.g. ["all"] or ["journal","cache"] or ["nuke"]
   keep_watchlist?: boolean;
+  no_reseed?: boolean;
   capital?: number;
 }
 export interface ResetResponse {
@@ -806,6 +807,7 @@ export interface ResetResponse {
   summary: string;
   flags: string[];
   capital?: number;
+  reseeded?: boolean;
   error?: string;
 }
 
