@@ -27,6 +27,26 @@ python manage.py run_ai_tester        # 4. deterministic test suite + findings
 python manage.py run_ai_team          # all four in sequence
 ```
 
+The **trader_user** agent has multiple **profiles** — each is a persona
+with its own system prompt and `requested_by` tag on every request:
+
+| Profile | Persona |
+|---|---|
+| `default` | Generalist quant (current behavior) |
+| `options` | NIFTY/BANKNIFTY index options trader — skew, IV, gamma, pin risk |
+| `futures` | Index / single-stock futures — basis, OI, rolls, SPAN margin |
+| `equity` | Swing / positional equities — RS, sector rotation, breakouts |
+| `intraday` | Equity intraday scalper — ORB, VWAP, tape speed |
+
+```bash
+python manage.py run_ai_trader_user --profile options    # one persona
+python manage.py run_ai_trader_user --all                # every persona
+python manage.py run_ai_team --profile futures           # team with one persona
+python manage.py run_ai_team --all-profiles              # team across every persona
+```
+
+Adding a profile is one entry in `apps/agents_core/tester/trader_profiles.py`.
+
 Important: the executor **never applies** code — it writes structured
 proposals into the mind palace for human review (or for Claude Code in
 another conversation to apply).

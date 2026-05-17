@@ -16,6 +16,7 @@ from __future__ import annotations
 from django.core.management.base import BaseCommand
 
 from apps.agents_core.tester import runner, trader_user, planner, executor, state
+from apps.agents_core.tester.trader_profiles import PROFILES
 
 
 class Command(BaseCommand):
@@ -28,6 +29,15 @@ class Command(BaseCommand):
         parser.add_argument("--skip-executor", action="store_true")
         parser.add_argument("--verbose", action="store_true",
                             help="Per-test detail during the tester step.")
+        parser.add_argument(
+            "--profile", default="default",
+            choices=list(PROFILES.keys()),
+            help="Trader-user persona to use for the trader step.",
+        )
+        parser.add_argument(
+            "--all-profiles", action="store_true",
+            help="Run trader_user against every profile in sequence (ignores --profile).",
+        )
 
     def handle(self, *args, **opts):
         self.stdout.write(self.style.MIGRATE_HEADING("AI Team — start"))
@@ -43,11 +53,27 @@ class Command(BaseCommand):
         else:
             self.stdout.write(self.style.WARNING("[1/4] tester — skipped"))
 
-        # 2) Trader user
+        # 2) Trader user — single profile or fan out across all
         if not opts["skip_trader"]:
-            self.stdout.write("\n[2/4] trader_user ...")
-            palace, added = trader_user.run()
-            self.stdout.write(self.style.SUCCESS(f"      {added} feature request(s) added/updated · {len(palace.feature_requests)} total"))
+            if opts["all_profiles"]:
+                self.stdout.write("\n[2/4] trader_user × all profiles ...")
+                results = trader_user.run_all_profiles()
+                total = sum(results.values())
+                for pid, n in results.items():
+                    self.stdout.write(f"      {pid}: {n}")
+                palace = state.load()
+                self.stdout.write(self.style.SUCCESS(
+                    f"      {total} feature request(s) added/updated across {len(results)} personas "
+                    f"· {len(palace.feature_requests)} total"
+                ))
+            else:
+                profile = opts["profile"]
+                self.stdout.write(f"\n[2/4] trader_user [{profile}] ...")
+                palace, added = trader_user.run(profile=profile)
+                self.stdout.write(self.style.SUCCESS(
+                    f"      {added} feature request(s) added/updated · "
+                    f"{len(palace.feature_requests)} total"
+                ))
         else:
             self.stdout.write(self.style.WARNING("[2/4] trader_user — skipped"))
 
