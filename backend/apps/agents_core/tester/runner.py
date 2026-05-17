@@ -356,6 +356,30 @@ def t_ui_chart_containers_clipped(ctx: Ctx) -> None:
            f"canvases (lightweight-charts especially). Violations: {violators}")
 
 
+def t_ui_chart_tab_only_for_directional(ctx: Ctx) -> None:
+    """Static render-invariant: the standalone Chart tab is only meaningful
+    for directional runs (whose Overview lacks an inline chart). Pyramid,
+    vertical_spread and short_straddle all render their charts inline in
+    the Overview, so opening the Chart tab on those runs would show a
+    stale "No candles" empty state. Lock it down."""
+    src = _read_repo_file("frontend/src/features/agents/AgentConsolePage.tsx")
+    if not src:
+        return
+    # The TabsTrigger and TabsContent for "chart" must be guarded by
+    # isDirectional (not just !isStraddle, which historically included
+    # pyramid + vertical_spread).
+    trigger_ok = bool(re.search(
+        r'\{\s*isDirectional\s*&&\s*<TabsTrigger\s+value="chart"', src,
+    ))
+    content_ok = bool(re.search(
+        r'\{\s*isDirectional\s*&&\s*\(\s*<TabsContent\s+value="chart"', src,
+    ))
+    expect(trigger_ok and content_ok,
+           "Chart tab must be gated on `isDirectional` for both TabsTrigger AND "
+           "TabsContent — pyramid / vertical_spread / short_straddle render their "
+           "charts inline in Overview and would show a misleading 'No candles' state.")
+
+
 def t_ui_lightweight_charts_measure_before_init(ctx: Ctx) -> None:
     """Static render-invariant: every lightweight-charts createChart call
     must pass explicit width + height and set up a ResizeObserver,
@@ -419,6 +443,7 @@ SUITES: list[TestCase] = [
     TestCase("ui.vs_payoff_present",       "ui_plumbing",     "Vertical-spread payoff diagram component exists",              t_ui_renders_vertical_spread_chart),
     TestCase("ui.chart_containers_clipped","ui_rendering",    "Chart CardContent wrappers clip absolute children (overflow-hidden)", t_ui_chart_containers_clipped),
     TestCase("ui.charts_measure_before_init","ui_rendering",  "lightweight-charts createChart calls pass explicit width/height + ResizeObserver", t_ui_lightweight_charts_measure_before_init),
+    TestCase("ui.chart_tab_gated_directional","ui_rendering", "Standalone Chart tab is gated on isDirectional (not visible for pyramid/vs/straddle)", t_ui_chart_tab_only_for_directional),
 ]
 
 
