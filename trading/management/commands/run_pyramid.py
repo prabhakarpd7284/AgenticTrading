@@ -23,6 +23,7 @@ Usage:
     # Dry run with sample data (no broker needed)
     python manage.py run_pyramid --strike 24200 --type CE --dry-run
 """
+import os
 from datetime import date, datetime
 
 from django.core.management.base import BaseCommand
@@ -32,8 +33,58 @@ from logzero import logger
 load_dotenv()
 
 
+EPILOG = """
+Examples:
+  # Nearest-expiry NIFTY 24200 CE today
+  run_pyramid --strike 24200 --type CE
+
+  # BANKNIFTY 52000 PE, last trading day's 5-min candles
+  run_pyramid --underlying BANKNIFTY --strike 52000 --type PE
+
+  # Specific historical expiry/date with custom capital
+  run_pyramid --strike 24200 --type CE --expiry 08MAY26 --date 2026-05-05 \\
+      --capital 200000 --risk-pct 3.0
+
+  # Dry run with synthetic candles (no broker login)
+  run_pyramid --strike 24200 --type CE --dry-run
+
+  # Plus Telegram report (requires TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID)
+  run_pyramid --strike 24200 --type CE --telegram
+
+Note: this command is BACKTEST/SIMULATION only — it does not place orders.
+"""
+
+
+def _print_mode_banner(stream, dry_run: bool):
+    """Make it impossible to confuse backtest output with live execution."""
+    mode = (os.getenv("TRADING_MODE") or "paper").lower()
+    if dry_run:
+        body = (
+            "[PYRAMID BACKTEST - SAMPLE DATA] Synthetic candles, no broker call. "
+            "Results illustrate the algorithm only."
+        )
+    elif mode == "live":
+        body = (
+            "[PYRAMID BACKTEST] TRADING_MODE=live is set for other commands, but "
+            "this command never places orders. Output is simulation only."
+        )
+    else:
+        body = (
+            "[PYRAMID BACKTEST - PAPER] Real Angel One candles, simulated fills."
+        )
+    sep = "-" * len(body)
+    stream.write(f"{sep}\n{body}\n{sep}")
+
+
 class Command(BaseCommand):
     help = "Run pyramiding strategy on option candles (live data from Angel One)"
+
+    def create_parser(self, prog_name, subcommand, **kwargs):
+        import argparse
+        parser = super().create_parser(prog_name, subcommand, **kwargs)
+        parser.epilog = EPILOG
+        parser.formatter_class = argparse.RawDescriptionHelpFormatter
+        return parser
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -90,6 +141,8 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
+        _print_mode_banner(self.stdout, dry_run=options.get("dry_run", False))
+
         from plugins.strategy_pyramid.strategy import (
             Candle, PyramidConfig, run_pyramid, format_result,
         )
@@ -172,6 +225,24 @@ class Command(BaseCommand):
             else:
                 self.stderr.write("Telegram not configured (check TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID).")
 
+        # ── Next-step suggestions ── push toward iteration on the result
+        next_strike = int(strike) + 100
+        suggested = [
+            f"python manage.py run_pyramid --strike {next_strike} --type {opt_type}  # try adjacent strike",
+        ]
+        if opt_type == "CE":
+            suggested.append(
+                f"python manage.py run_pyramid --strike {strike} --type PE  # opposite side"
+            )
+        if not options.get("telegram"):
+            suggested.append(
+                f"python manage.py run_pyramid --strike {strike} --type {opt_type} --telegram  # share to channel"
+            )
+        suggested.append("Open the /pyramid page in the React UI for live charts.")
+        self.stdout.write("\nSuggested next:")
+        for s in suggested:
+            self.stdout.write(f"  > {s}")
+
     def _fetch_option_candles(
         self, underlying, strike, expiry_str, opt_type, candle_date, interval,
     ):
@@ -197,12 +268,15 @@ class Command(BaseCommand):
         broker.ensure_login()
 
         end_str = cap_end_time(candle_date)
+        # SENSEX options trade on BFO, not NFO — without this the broker
+        # silently returns zero candles for any SENSEX-underlying pyramid run.
+        exchange = "BFO" if underlying == "SENSEX" else "NFO"
         raw = broker.fetch_candles(
             symbol_token=token,
             start=f"{candle_date} 09:15",
             end=end_str,
             interval=interval,
-            exchange="NFO",
+            exchange=exchange,
         )
 
         if not raw:

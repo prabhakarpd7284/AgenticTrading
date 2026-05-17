@@ -218,19 +218,43 @@ class BrokerClient:
     # ──────────────────────────────────────────────
     # Candle Data
     # ──────────────────────────────────────────────
+    # Known index tokens → exchange segment. BSE indices used to fall back
+    # to the default exchange="NSE" and silently return zero candles.
+    _INDEX_EXCHANGE = {
+        "99926000": "NSE",   # NIFTY 50
+        "99926009": "NSE",   # NIFTY Bank
+        "99926017": "NSE",   # India VIX
+        "99926037": "NSE",   # NIFTY Next 50 (assorted)
+        "99919000": "BSE",   # SENSEX
+        "99919012": "BSE",   # BANKEX
+    }
+
     def fetch_candles(
         self,
         symbol_token: str,
         start: str,
         end: str,
         interval: str = "FIVE_MINUTE",
-        exchange: str = "NSE",
+        exchange: str | None = None,
     ) -> List:
-        """
-        Fetch OHLCV candle data with retry on rate-limit errors.
-        Dates in '%Y-%m-%d %H:%M' format.
+        """Fetch OHLCV candle data with retry on rate-limit errors.
+
+        Dates in '%Y-%m-%d %H:%M' format. If `exchange` is omitted, it's
+        auto-derived from the token: known index tokens use their static
+        segment (NSE/BSE); other tokens fall back to ticker_service for
+        NSE/NFO/BSE/BFO/MCX classification; ultimate default is NSE.
+        Pass exchange explicitly to override.
         """
         self.ensure_login()
+
+        # Auto-derive exchange when caller hasn't specified one. Known
+        # index tokens have a static map (NIFTY/BANKNIFTY=NSE, SENSEX=BSE).
+        # For options + non-index tokens callers should pass exchange
+        # explicitly (NFO for NIFTY/BANKNIFTY options, BFO for SENSEX),
+        # otherwise we default to NSE — same legacy behaviour.
+        if exchange is None:
+            exchange = self._INDEX_EXCHANGE.get(str(symbol_token), "NSE")
+
         params = {
             "exchange": exchange,
             "symboltoken": symbol_token,

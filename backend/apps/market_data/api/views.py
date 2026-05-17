@@ -331,6 +331,10 @@ class PyramidView(APIView):
         broker = BrokerClient.get_instance()
         broker.ensure_login()
 
+        # SENSEX options trade on BFO (BSE F&O), not NFO. Without this the
+        # broker call silently returns zero candles for SENSEX pyramid runs.
+        exchange = "BFO" if underlying == "SENSEX" else "NFO"
+
         d = dt_date.fromisoformat(candle_date)
         for _ in range(6):
             if d.weekday() >= 5:
@@ -340,7 +344,7 @@ class PyramidView(APIView):
             end_str = cap_end_time(ds)
             raw = broker.fetch_candles(
                 symbol_token=token, start=f"{ds} 09:15",
-                end=end_str, interval=interval, exchange="NFO",
+                end=end_str, interval=interval, exchange=exchange,
             )
             if raw and len(raw) > 5:
                 return [Candle.from_raw(r) for r in raw]
