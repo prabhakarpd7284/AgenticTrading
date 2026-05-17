@@ -1,7 +1,15 @@
 version: "3.9"
 
-# Local dev stack. Same compose file drives the Stage-1 single-EC2 deploy
-# with an overlay file (docker-compose.prod.yml) that points to images in ECR.
+# ⚠️  DEPRECATED for local dev — kept as the base for `docker-compose.prod.yml`.
+#
+# For local development use:
+#   docker compose -f docker-compose.dev.yml up -d   # Postgres + Redis only
+#   bash scripts/dev_up.sh                            # native backend + celery + vite
+#
+# The backend/worker/frontend services here pre-date the Phase-3/4/8 redesign:
+# the Dockerfiles still pip-install from a now-defunct requirements/ directory
+# and reference settings modules from the two-port era. They will be rebuilt
+# during the deferred Phase 9 (deployment infra) work.
 
 services:
   postgres:

@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
-# Stops the three processes started by dev_up.sh.
+# Stops the processes started by dev_up.sh (web, celery, vite).
+# Postgres + Redis are managed by `docker compose -f docker-compose.dev.yml`
+# and are NOT touched — bring them down with `docker compose ... down` if needed.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-for name in v2 legacy vite; do
+for name in web celery vite; do
     pidfile="logs/$name.pid"
     if [[ -f "$pidfile" ]]; then
         pid="$(cat "$pidfile" || true)"
