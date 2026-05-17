@@ -1077,60 +1077,41 @@ def run_straddle_workflow(
     ce_sell_price: float,
     pe_sell_price: float,
 ) -> dict:
+    """Deprecated — the v2 straddle lifecycle lives in the short_straddle plugin.
+
+    The legacy 6-node LangGraph in this file was wired to the flat
+    `StraddlePosition` row (ce_*/pe_* + management_log JSON) that the
+    v1→v2 migration replaced with `apps.trading.OptionsPosition` plus
+    per-leg `OptionsLeg` rows and `events.Event` for the management log.
+
+    Reconciling every field access in this graph would amount to a full
+    rewrite; the v2-native path is `plugins.strategy_short_straddle`,
+    invokable via the strategies workflow runtime or the Ops Console.
+
+    Calling this function now returns a structured "deprecated" response
+    so the calling command (`manage_straddle --analyze/--execute/...`)
+    can surface the pointer to the operator without crashing.
     """
-    Run one full straddle management cycle.
-
-    Designed to be called:
-    - Once at session start
-    - Every 15-30 min via cron/loop
-    - On-demand via manage_straddle CLI
-
-    Returns:
-        Final StraddleState dict with all results.
-    """
-    graph = build_straddle_graph()
-
-    initial_state: StraddleState = {
-        "position_id":    position_id,
-        "underlying":     underlying,
-        "strike":         strike,
-        "expiry":         expiry,
-        "lot_size":       lot_size,
-        "lots":           lots,
-        "ce_symbol":      ce_symbol,
-        "ce_token":       ce_token,
-        "pe_symbol":      pe_symbol,
-        "pe_token":       pe_token,
-        "ce_sell_price":  ce_sell_price,
-        "pe_sell_price":  pe_sell_price,
-        "nifty_candles":  None,
-        "market_snapshot": None,
-        "analysis":       None,
-        "recommended_action": None,
-        "planner_raw":    None,
-        "action_approved": None,
-        "validation_result": None,
-        "execution_result": None,
-        "journal_id":     None,
-        "error":          None,
+    logger.warning(
+        "run_straddle_workflow is deprecated; use the short_straddle plugin "
+        "via the strategies workflow runtime (apps.strategies.runtime). "
+        "Position %s: %s %s [%s] left unchanged.",
+        position_id, underlying, strike, expiry,
+    )
+    return {
+        "position_id":   position_id,
+        "analysis":      {"summary_text":
+            "Straddle management has moved to the v2 short_straddle plugin.\n"
+            "  Plugin:   backend/plugins/strategy_short_straddle/\n"
+            "  Run via:  python manage.py shell -c "
+            "'from apps.strategies.services.run_workflow import run_workflow; "
+            "run_workflow(\"short_straddle\", ...)'\n"
+            "  Or fire it from the Ops Console with the short_straddle command."
+        },
+        "recommended_action":  None,
+        "validation_result":   {"approved": False,
+                                "reason": "Deprecated — see short_straddle plugin."},
+        "execution_result":    {"success": False, "actions_taken": []},
+        "journal_id":          None,
+        "deprecated":          True,
     }
-
-    logger.info(
-        f"=== Straddle workflow started | "
-        f"{underlying} {strike} {expiry} | "
-        f"CE={ce_symbol} | PE={pe_symbol} ==="
-    )
-
-    result = graph.invoke(initial_state)
-
-    action  = (result.get("recommended_action") or {}).get("action", "N/A")
-    pnl_inr = (result.get("analysis") or {}).get("net_pnl_inr", 0)
-
-    logger.info(
-        f"=== Straddle workflow complete | "
-        f"action={action} | "
-        f"P&L={pnl_inr:+,.0f} INR | "
-        f"journal_id={result.get('journal_id')} ==="
-    )
-
-    return result
