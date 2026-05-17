@@ -211,6 +211,7 @@ function RunDetail({
   const isStraddle = run.strategy_name === "short_straddle";
   const isPyramid = run.strategy_name === "pyramid";
   const isVerticalSpread = run.strategy_name === "vertical_spread";
+  const isDirectional = run.strategy_name === "directional";
 
   // Merge persisted steps from the detail endpoint with live WS events,
   // de-duplicated by seq. This makes the Stream tab populated for
@@ -279,7 +280,10 @@ function RunDetail({
       <Tabs defaultValue="overview" className="flex-1 min-h-0 flex flex-col">
         <TabsList className="px-5">
           <TabsTrigger value="overview">Overview</TabsTrigger>
-          {!isStraddle && <TabsTrigger value="chart">Chart</TabsTrigger>}
+          {/* Standalone Chart tab only makes sense for directional — pyramid /
+              vertical_spread / short_straddle render their charts inline in
+              the Overview so the separate tab would just show "No candles". */}
+          {isDirectional && <TabsTrigger value="chart">Chart</TabsTrigger>}
           <TabsTrigger value="stream">Stream</TabsTrigger>
           <TabsTrigger value="raw">Raw</TabsTrigger>
         </TabsList>
@@ -304,7 +308,7 @@ function RunDetail({
           )}
         </TabsContent>
 
-        {!isStraddle && (
+        {isDirectional && (
           <TabsContent value="chart" className="flex-1 min-h-0 px-5 pb-5">
             <DirectionalChart result={result} />
           </TabsContent>
