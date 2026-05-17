@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
@@ -103,7 +104,10 @@ def team_run_view(request):
     profiles = (body.get("profiles") or "all").lower()
     skip_tester = bool(body.get("skip_tester"))
 
-    cmd = ["python", "manage.py", "run_ai_team"]
+    # sys.executable is the interpreter running Django — guarantees the
+    # subprocess uses the same venv and works on macOS where "python" isn't
+    # a symlink (only "python3" is).
+    cmd = [sys.executable, "manage.py", "run_ai_team"]
     if profiles == "all":
         cmd.append("--all-profiles")
     elif profiles:
