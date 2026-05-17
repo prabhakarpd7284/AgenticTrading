@@ -10,6 +10,8 @@ import { DashboardPage } from "@/features/dashboard/DashboardPage";
 import { PositionsPage } from "@/features/positions/PositionsPage";
 import { MonthlyPage } from "@/features/monthly/MonthlyPage";
 import { AgentConsolePage } from "@/features/agents/AgentConsolePage";
+import { ReportsPage } from "@/features/reports/ReportsPage";
+import { StockPage } from "@/features/stock/StockPage";
 import { StrategyBuilderPage } from "@/features/strategies/StrategyBuilderPage";
 import { BacktesterPage } from "@/features/backtester/BacktesterPage";
 import { BrokerLinkPage } from "@/features/broker/BrokerLinkPage";
@@ -44,6 +46,10 @@ export const router = createBrowserRouter([
       { path: "monthly", element: <MonthlyPage /> },
       { path: "agents", element: <AgentConsolePage /> },
       { path: "agents/:runId", element: <AgentConsolePage /> },
+      { path: "reports", element: <ReportsPage /> },
+      // Per-stock cross-strategy aggregator — every plan, trade, straddle on one ticker.
+      { path: "stock", element: <StockPage /> },
+      { path: "stock/:symbol", element: <StockPage /> },
       { path: "strategies", element: <StrategyBuilderPage /> },
       { path: "swing-scanner", element: <SwingScannerPage /> },
       { path: "basket", element: <BasketPage /> },

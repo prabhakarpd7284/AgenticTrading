@@ -1,8 +1,8 @@
 import * as React from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import {
-  Activity, BarChart3, Bot, Briefcase, Calendar, Gauge, Layers, Link2, LineChart,
-  ListChecks, LogOut, Moon, Search, Settings, ShoppingBag, Sun, TrendingUp, Triangle,
+  Activity, BarChart3, Bot, Briefcase, Calendar, FileBarChart, Gauge, Layers, Link2, LineChart,
+  ListChecks, LogOut, Moon, Search, SearchCheck, Settings, ShoppingBag, Sun, TrendingUp, Triangle,
 } from "lucide-react";
 import { useAuthStore } from "@/stores/auth";
 import { cn } from "@/lib/utils";
@@ -20,8 +20,10 @@ const nav = [
   { to: "/basket",     label: "Basket",       icon: ShoppingBag, hint: "g x" },
   { to: "/dashboard",  label: "Desk",         icon: Activity,   hint: "g d" },
   { to: "/positions",  label: "Positions",    icon: Briefcase, hint: "g p" },
+  { to: "/stock",      label: "Stock View",   icon: SearchCheck, hint: "g v" },
   { to: "/monthly",    label: "Monthly",      icon: Calendar,  hint: "g m" },
   { to: "/agents",     label: "Agent Console",icon: Bot,       hint: "g a" },
+  { to: "/reports",    label: "Reports",      icon: FileBarChart, hint: "g e" },
   { to: "/strategies", label: "Strategies",   icon: LineChart, hint: "g s" },
   { to: "/backtester", label: "Backtester",   icon: BarChart3, hint: "g b" },
   { to: "/pyramid",   label: "Pyramid",      icon: Triangle,   hint: "g y" },
