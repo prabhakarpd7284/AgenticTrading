@@ -911,3 +911,401 @@ def _generate_pyramid_sample():
         ))
         price = close_p
     return candles
+
+
+# ---------------------------------------------------------------------------
+# Stock summary — one payload powering the React Stock View
+# ---------------------------------------------------------------------------
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def stock_summary(request):
+    """Per-stock cross-strategy roll-up.
+
+    Query params:
+        symbol  required, case-insensitive (HDFCBANK, NIFTY, ...)
+        period  one of weekly|monthly|half-yearly|yearly  (default monthly)
+        from    ISO date — lower bound, inclusive (optional)
+        to      ISO date — upper bound, inclusive   (optional)
+
+    Response shape:
+        {
+          symbol, kind, period,
+          kpis: { capital_deployed, money_in_play, open_count, period_pnl, live_leverage },
+          buckets: [{key, count, notional, margin, pnl, premium_received}],
+          open_positions: [...],
+          rollups: [{period_label, trades_planned, trades_taken, capital_deployed,
+                     pnl, positions_opened, positions_closed, win_rate}],
+          strategies: [{name, runs, approved, rejected, pnl}],
+          indicators: { source: "directional"|"straddle", values: {...} },
+        }
+    """
+    from datetime import datetime, timedelta
+
+    from trading.models import TradeJournal, StraddlePosition
+    from apps.agents_core.models import AgentRun
+    from apps.common.margin_calc import (
+        MarginEstimate, equity_margin, short_straddle_margin, summarize_buckets,
+    )
+
+    symbol = (request.query_params.get("symbol") or "").upper().strip()
+    if not symbol:
+        return Response({"error": "symbol query param required"}, status=400)
+
+    period = (request.query_params.get("period") or "monthly").lower()
+    if period not in ("weekly", "monthly", "half-yearly", "yearly"):
+        return Response({"error": f"unknown period {period!r}"}, status=400)
+
+    # ── 1. Pull the raw rows for this symbol ──
+    trades = list(TradeJournal.objects.filter(symbol=symbol).order_by("-created_at"))
+    straddles = list(StraddlePosition.objects.filter(underlying=symbol).order_by("-opened_at"))
+
+    runs = list(
+        AgentRun.objects
+        .filter(strategy_name__in=("directional", "short_straddle"))
+        .order_by("-created_at")[:500]
+    )
+    # Filter v2 runs by symbol — directional via result.plan.symbol, straddle via position underlying
+    straddle_ids = {p.id for p in straddles}
+    def _run_matches(r):
+        if r.strategy_name == "directional":
+            res = r.result or {}
+            plan_sym = (res.get("plan") or {}).get("symbol")
+            cfg_sym = (r.config or {}).get("symbol")
+            return (plan_sym or cfg_sym or "").upper() == symbol
+        if r.strategy_name == "short_straddle":
+            pid = (r.config or {}).get("position_id")
+            return pid in straddle_ids
+        return False
+    runs = [r for r in runs if _run_matches(r)]
+
+    # ── 2. Margin estimates for open positions ──
+    estimates: list[MarginEstimate] = []
+    open_positions: list[dict] = []
+
+    # Open equity trades = status in (PENDING, APPROVED, EXECUTED, PAPER) and not closed
+    OPEN_TRADE_STATUSES = ("PENDING", "APPROVED", "EXECUTED", "PAPER")
+    for t in trades:
+        if t.status not in OPEN_TRADE_STATUSES:
+            continue
+        m = equity_margin(t.side, int(t.quantity), float(t.entry_price), product="MIS")
+        estimates.append(m)
+        open_positions.append({
+            "kind": "equity",
+            "strategy": "directional",
+            "id": t.id,
+            "leg": f"{t.symbol} ({t.side})",
+            "side": t.side,
+            "quantity": t.quantity,
+            "entry_price": float(t.entry_price),
+            "current_price": float(t.fill_price or t.entry_price),
+            "stop_loss": float(t.stop_loss),
+            "expected_exit": float(t.target),
+            "pnl_inr": float(t.pnl or 0.0),
+            "status": t.status,
+            "opened_at": t.created_at.isoformat() if t.created_at else None,
+            "notional": m.notional,
+            "margin": m.total_margin,
+            "leverage": m.leverage,
+        })
+
+    for p in straddles:
+        if p.status != "ACTIVE":
+            continue
+        m = short_straddle_margin(
+            lots=int(p.lots), lot_size=int(p.lot_size),
+            strike=float(p.strike),
+            ce_premium=float(p.ce_sell_price), pe_premium=float(p.pe_sell_price),
+            underlying_spot=float(p.strike),  # best estimate available without live spot
+        )
+        estimates.append(m)
+        ce_now = float(p.ce_current_price or 0)
+        pe_now = float(p.pe_current_price or 0)
+        combined_now = ce_now + pe_now
+        combined_sold = float(p.ce_sell_price + p.pe_sell_price)
+        pnl_pts = combined_sold - combined_now
+        pnl_inr = pnl_pts * float(p.lot_size) * float(p.lots)
+        # Expected exit = target buy-back at ~50% premium decay (industry default)
+        expected_buyback = combined_sold * 0.5
+        open_positions.append({
+            "kind": "options",
+            "strategy": "short_straddle",
+            "id": p.id,
+            "leg": f"{p.underlying} {p.strike} STRADDLE ({p.expiry})",
+            "side": "SHORT",
+            "quantity": int(p.lots * p.lot_size * 2),  # both legs
+            "entry_price": combined_sold,
+            "current_price": combined_now,
+            "stop_loss": combined_sold * 1.3,  # 1.3× hard stop
+            "expected_exit": expected_buyback,
+            "pnl_inr": pnl_inr,
+            "status": p.status,
+            "opened_at": p.opened_at.isoformat() if p.opened_at else None,
+            "expiry": p.expiry.isoformat() if p.expiry else None,
+            "notional": m.notional,
+            "margin": m.total_margin,
+            "leverage": m.leverage,
+            "premium_received": m.premium_received,
+        })
+
+    bucket_summary = summarize_buckets(estimates)
+
+    # ── 3. KPIs ──
+    capital_deployed = sum(p.get("notional", 0) for p in open_positions)
+    money_in_play = sum(p.get("margin", 0) for p in open_positions)
+    period_window = _period_window(period, request)
+    period_trades = [t for t in trades if t.created_at and period_window[0] <= t.created_at.date() <= period_window[1]]
+    period_pnl = sum(float(t.pnl or 0) for t in period_trades)
+    period_pnl += sum(float(p.realized_pnl or 0) for p in straddles
+                       if p.opened_at and period_window[0] <= p.opened_at.date() <= period_window[1])
+    live_leverage = bucket_summary["totals"]["leverage"]
+
+    kpis = {
+        "capital_deployed": round(capital_deployed, 2),
+        "money_in_play": round(money_in_play, 2),
+        "open_count": len(open_positions),
+        "period_pnl": round(period_pnl, 2),
+        "live_leverage": round(live_leverage, 2),
+        "period_window": [period_window[0].isoformat(), period_window[1].isoformat()],
+    }
+
+    # ── 4. Period rollups ──
+    rollups = _period_rollups(symbol, period, trades, straddles, runs)
+
+    # ── 5. Per-strategy roll-up ──
+    strat_map: dict[str, dict] = {}
+    for r in runs:
+        s = strat_map.setdefault(r.strategy_name, {"runs": 0, "approved": 0, "rejected": 0})
+        s["runs"] += 1
+        risk = (r.result or {}).get("risk") or {}
+        if risk.get("approved") is True:
+            s["approved"] += 1
+        elif risk.get("approved") is False:
+            s["rejected"] += 1
+    strategies = [
+        {"name": name, **stats, "pnl": 0.0}
+        for name, stats in strat_map.items()
+    ]
+    # add equity p&l to directional, straddle p&l to short_straddle
+    for s in strategies:
+        if s["name"] == "directional":
+            s["pnl"] = round(sum(float(t.pnl or 0) for t in trades), 2)
+        if s["name"] == "short_straddle":
+            s["pnl"] = round(sum(float(p.realized_pnl or 0) + float(p.current_pnl_inr or 0) for p in straddles), 2)
+
+    # ── 6. Latest indicator snapshot (most recent run for this stock) ──
+    indicators = {"source": None, "values": {}}
+    if runs:
+        latest = runs[0]
+        res = latest.result or {}
+        if latest.strategy_name == "directional" and res.get("indicators"):
+            indicators = {"source": "directional", "run_id": str(latest.id), "values": res["indicators"]}
+        elif latest.strategy_name == "short_straddle":
+            an = res.get("analysis") or {}
+            indicators = {
+                "source": "short_straddle",
+                "run_id": str(latest.id),
+                "values": {
+                    "ce_delta": an.get("ce_delta"),
+                    "pe_delta": an.get("pe_delta"),
+                    "net_delta": an.get("net_delta"),
+                    "delta_bias": an.get("delta_bias"),
+                    "vix_phase": an.get("vix_phase"),
+                    "vix_current": an.get("vix_current"),
+                    "market_phase": an.get("market_phase"),
+                    "premium_decayed_pct": an.get("premium_decayed_pct"),
+                    "days_to_expiry": an.get("days_to_expiry"),
+                    "is_underwater": an.get("is_underwater"),
+                    "nearest_itm_leg": an.get("nearest_itm_leg"),
+                },
+            }
+
+    return Response({
+        "symbol": symbol,
+        "kind": _kind_of(symbol),
+        "period": period,
+        "kpis": kpis,
+        "buckets": [
+            {"key": k, **{kk: round(vv, 2) if isinstance(vv, (int, float)) else vv for kk, vv in v.items()}}
+            for k, v in bucket_summary["by_bucket"].items()
+        ],
+        "bucket_totals": {k: round(v, 2) if isinstance(v, (int, float)) else v for k, v in bucket_summary["totals"].items()},
+        "open_positions": open_positions,
+        "rollups": rollups,
+        "strategies": strategies,
+        "indicators": indicators,
+    })
+
+
+def _period_window(period: str, request) -> tuple:
+    """Return (start_date, end_date) inclusive for the chosen window."""
+    from datetime import date, timedelta
+    today = date.today()
+    end_param = request.query_params.get("to")
+    start_param = request.query_params.get("from")
+    end = date.fromisoformat(end_param) if end_param else today
+    if start_param:
+        start = date.fromisoformat(start_param)
+    elif period == "weekly":
+        start = end - timedelta(days=6)
+    elif period == "monthly":
+        start = end.replace(day=1)
+    elif period == "half-yearly":
+        start = (end - timedelta(days=183)).replace(day=1)
+    else:  # yearly
+        start = end.replace(month=1, day=1)
+    return (start, end)
+
+
+def _period_rollups(symbol: str, period: str, trades, straddles, runs) -> list[dict]:
+    """Bucket trades/runs into period slots and aggregate."""
+    from datetime import date, timedelta
+    today = date.today()
+
+    if period == "weekly":
+        slots = [(today - timedelta(days=7*i + 6), today - timedelta(days=7*i)) for i in range(8)][::-1]
+        labeller = lambda lo, hi: f"{lo.strftime('%d %b')}–{hi.strftime('%d %b')}"
+    elif period == "monthly":
+        slots = []
+        cursor = today.replace(day=1)
+        for _ in range(6):
+            month_start = cursor
+            if cursor.month == 12:
+                next_start = cursor.replace(year=cursor.year + 1, month=1)
+            else:
+                next_start = cursor.replace(month=cursor.month + 1)
+            month_end = next_start - timedelta(days=1)
+            slots.append((month_start, month_end))
+            cursor = (cursor.replace(day=1) - timedelta(days=1)).replace(day=1)
+        slots = slots[::-1]
+        labeller = lambda lo, hi: lo.strftime("%b %Y")
+    elif period == "half-yearly":
+        slots = []
+        # Use H1 (Jan-Jun) / H2 (Jul-Dec) blocks for the last 4 halves
+        for i in range(4):
+            y = today.year - (i // 2)
+            half = (today.month <= 6) if (i % 2 == 0) else (today.month > 6)
+            if i % 2 == 0:
+                lo = date(y, 1 if today.month <= 6 else 7, 1)
+                hi = date(y, 6 if today.month <= 6 else 12, 30 if today.month <= 6 else 31)
+            else:
+                lo = date(y, 7 if today.month <= 6 else 1, 1)
+                hi = date(y, 12 if today.month <= 6 else 6, 31 if today.month <= 6 else 30)
+            slots.append((lo, hi))
+        slots = slots[::-1]
+        labeller = lambda lo, hi: f"H{1 if lo.month <= 6 else 2} {lo.year}"
+    else:  # yearly
+        slots = [(date(today.year - i, 1, 1), date(today.year - i, 12, 31)) for i in range(4)][::-1]
+        labeller = lambda lo, hi: str(lo.year)
+
+    out = []
+    for lo, hi in slots:
+        slot_trades = [t for t in trades if t.created_at and lo <= t.created_at.date() <= hi]
+        slot_straddles = [p for p in straddles if p.opened_at and lo <= p.opened_at.date() <= hi]
+        slot_runs = [r for r in runs if r.created_at and lo <= r.created_at.date() <= hi]
+
+        trades_taken = sum(1 for t in slot_trades if t.status in ("EXECUTED", "PAPER", "FILLED"))
+        trades_planned = len(slot_runs)  # every agent run is a "plan attempt"
+        capital_deployed = sum(float(t.entry_price) * t.quantity for t in slot_trades if t.status in ("EXECUTED", "PAPER", "FILLED"))
+        capital_deployed += sum(float(p.ce_sell_price + p.pe_sell_price) * p.lot_size * p.lots for p in slot_straddles)
+        pnl = sum(float(t.pnl or 0) for t in slot_trades) + sum(float(p.realized_pnl or 0) for p in slot_straddles)
+        positions_opened = trades_taken + len(slot_straddles)
+        positions_closed = sum(1 for t in slot_trades if t.pnl is not None) + sum(1 for p in slot_straddles if p.status == "CLOSED")
+        wins = sum(1 for t in slot_trades if (t.pnl or 0) > 0)
+        decided = sum(1 for t in slot_trades if t.pnl is not None)
+        win_rate = (wins / decided * 100) if decided else 0
+        out.append({
+            "period_label": labeller(lo, hi),
+            "from": lo.isoformat(),
+            "to": hi.isoformat(),
+            "trades_planned": trades_planned,
+            "trades_taken": trades_taken,
+            "capital_deployed": round(capital_deployed, 2),
+            "pnl": round(pnl, 2),
+            "positions_opened": positions_opened,
+            "positions_closed": positions_closed,
+            "win_rate": round(win_rate, 1),
+        })
+    return out
+
+
+def _kind_of(symbol: str) -> str:
+    if symbol in {"NIFTY", "BANKNIFTY", "SENSEX", "FINNIFTY", "BANKEX"}:
+        return "index_underlying"
+    return "equity"
+
+
+# ---------------------------------------------------------------------------
+# Expiries — feeds the agent-dialog dropdown
+# ---------------------------------------------------------------------------
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def expiries(request):
+    """List option expiries available for an underlying.
+
+    Query params:
+        underlying  required (NIFTY, BANKNIFTY, HDFCBANK, …)
+        kind        all|weekly|monthly (default all)
+        limit       default 12
+
+    Response:
+        {
+          underlying: "HDFCBANK", count: 3,
+          results: [
+            {expiry: "26MAY26", iso: "2026-05-26", dte: 9,  kind: "monthly", strikes: 63},
+            ...
+          ]
+        }
+    """
+    from datetime import date, datetime
+    from trading.services.ticker_service import ticker_service
+
+    underlying = (request.query_params.get("underlying") or "").upper().strip()
+    if not underlying:
+        return Response({"error": "underlying required"}, status=400)
+    kind_filter = (request.query_params.get("kind") or "all").lower()
+    limit = min(int(request.query_params.get("limit", 12)), 50)
+
+    try:
+        ticker_service._ensure_loaded()
+    except Exception as e:  # noqa: BLE001
+        return Response({"error": f"scrip master not loaded: {e}"}, status=503)
+
+    today = date.today()
+    by_expiry: dict[date, int] = {}
+    for inst in ticker_service._nfo_by_key.values():
+        if inst.get("name") != underlying:
+            continue
+        if inst.get("instrumenttype") not in ("OPTIDX", "OPTSTK"):
+            continue
+        try:
+            d = datetime.strptime(inst.get("expiry", ""), "%d%b%Y").date()
+        except Exception:  # noqa: BLE001
+            continue
+        if d < today:
+            continue
+        by_expiry[d] = by_expiry.get(d, 0) + 1
+
+    # Classify monthly = last expiry per month (NSE convention).
+    months_seen: dict[tuple[int, int], date] = {}
+    for d in by_expiry:
+        k = (d.year, d.month)
+        if k not in months_seen or d > months_seen[k]:
+            months_seen[k] = d
+    monthly_set = set(months_seen.values())
+
+    rows = []
+    for d in sorted(by_expiry):
+        is_monthly = d in monthly_set
+        if kind_filter == "weekly" and is_monthly:
+            continue
+        if kind_filter == "monthly" and not is_monthly:
+            continue
+        rows.append({
+            "expiry": d.strftime("%d%b%y").upper(),
+            "iso": d.isoformat(),
+            "dte": (d - today).days,
+            "kind": "monthly" if is_monthly else "weekly",
+            "strikes": by_expiry[d],
+        })
+
+    return Response({"underlying": underlying, "count": len(rows), "results": rows[:limit]})

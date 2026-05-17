@@ -24,4 +24,6 @@ urlpatterns = [
     path("ai/pause/",  views.pause_ai,  name="ai-pause"),
     path("ai/resume/", views.resume_ai, name="ai-resume"),
     path("pyramid/",   views.pyramid,   name="pyramid"),
+    path("stock-summary/", views.stock_summary, name="stock-summary"),
+    path("expiries/",      views.expiries,      name="expiries"),
 ]
