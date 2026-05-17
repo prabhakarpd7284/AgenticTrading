@@ -506,3 +506,93 @@ export const useBaseQuality = (symbols?: string) =>
     },
     ...COMMON,
   });
+
+// ---------------------------------------------------------------------------
+// Cycle-5 cockpits — MTF stage scanner, OR failure, fresh-breakout, edge ledger
+// ---------------------------------------------------------------------------
+export interface StagePhase {
+  stage: "STAGE_1" | "STAGE_2" | "STAGE_3" | "STAGE_4" | "UNKNOWN";
+  ma: number; slope_pct: number; close: number; gap_pct: number;
+}
+export interface MTFStageRow {
+  symbol: string;
+  daily: StagePhase | null;
+  weekly: StagePhase | null;
+  monthly: StagePhase | null;
+  alignment: "long_aligned" | "short_aligned" | "conflict" | "mixed" | "no_data";
+}
+export interface MTFStage { count: number; rows: MTFStageRow[]; note?: string; }
+
+export const useMTFStage = (symbols?: string) =>
+  useQuery({
+    queryKey: ["cockpits", "mtf-stage", symbols ?? ""],
+    queryFn: () => {
+      const q = symbols ? `?symbols=${encodeURIComponent(symbols)}` : "";
+      return api.get<MTFStage>(`/strategies/mtf-stage/${q}`).then((r) => r.data);
+    },
+    ...COMMON,
+  });
+
+export interface BreakoutRow {
+  symbol: string; close?: number; pivot?: number; sma20?: number;
+  pct_from_pivot: number; pct_from_20dma: number; base_depth_pct: number;
+  state: "fresh" | "extended" | "consolidating" | "base_too_shallow" | "neutral" | "no_data";
+}
+export interface BreakoutClassifier { count: number; rows: BreakoutRow[]; note?: string; }
+
+export const useBreakoutClassifier = (symbols?: string) =>
+  useQuery({
+    queryKey: ["cockpits", "breakout-classifier", symbols ?? ""],
+    queryFn: () => {
+      const q = symbols ? `?symbols=${encodeURIComponent(symbols)}` : "";
+      return api.get<BreakoutClassifier>(`/strategies/breakout-classifier/${q}`).then((r) => r.data);
+    },
+    ...COMMON,
+  });
+
+export interface ORBFailureRow {
+  symbol: string;
+  or_high: number; or_low: number;
+  state: string;
+  breakout_time: string | null;
+  retest_count_after_break: number;
+  failure_flag: boolean;
+  reversal_target: number;
+  reversal_p: number;
+}
+export interface ORBFailure { count: number; rows: ORBFailureRow[]; note?: string; }
+
+export const useORBFailure = () =>
+  useQuery({
+    queryKey: ["cockpits", "orb-failure"],
+    queryFn: () => api.get<ORBFailure>("/market-data/orb-failure/").then((r) => r.data),
+    ...COMMON,
+  });
+
+export interface EdgeLedgerRow {
+  trade_id: number; symbol: string; side: string; qty: number;
+  entry: number; fill: number; strategy: string;
+  gross_pnl_inr: number; spread_cost_inr: number; brokerage_inr: number;
+  total_cost_inr: number; net_edge_inr: number;
+  edge_to_cost: number; edge_bps: number; created_at: string | null;
+}
+export interface EdgeBucket {
+  trades: number; gross_pnl_inr?: number; cost_inr?: number;
+  net_edge_inr?: number; cost_drag_pct?: number;
+  win_rate?: number; avg_net_edge_inr?: number;
+}
+export interface EdgeLedger {
+  count: number;
+  totals: EdgeBucket;
+  by_strategy: Record<string, EdgeBucket>;
+  by_symbol: Record<string, EdgeBucket>;
+  rows: EdgeLedgerRow[];
+  note?: string;
+}
+
+export const useEdgeLedger = () =>
+  useQuery({
+    queryKey: ["cockpits", "edge-ledger"],
+    queryFn: () => api.get<EdgeLedger>("/portfolios/edge-ledger/").then((r) => r.data),
+    ...COMMON,
+  });

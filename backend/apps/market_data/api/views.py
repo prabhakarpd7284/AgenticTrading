@@ -17,6 +17,7 @@ from apps.market_data.services.ok_backtest_service import build_ok_backtest
 from apps.market_data.services.basket_service import build_basket_status
 from apps.market_data.services.first_5min import build_first_5min
 from apps.market_data.services.liquidity_map import build_liquidity_map
+from apps.market_data.services.orb_failure import build_orb_failure
 from apps.market_data.services.orb_tracker import build_orb
 from apps.market_data.services.vwap_bands import build_vwap_bands
 
@@ -479,3 +480,16 @@ class First5MinView(APIView):
 
     def get(self, request):
         return Response(build_first_5min(getattr(request, "tenant", None)))
+
+
+class ORBFailureView(APIView):
+    """GET /api/v1/market-data/orb-failure/
+
+    Surfaces watchlist symbols whose OR breakout has been retested >=2
+    times within 30 min, with the empirical reversal probability so a
+    fade trade can be sized.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        return Response(build_orb_failure(getattr(request, "tenant", None)))

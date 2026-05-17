@@ -143,6 +143,11 @@
       "agent": "executor",
       "at": "2026-05-17T13:32:12.736729+00:00",
       "summary": "Closed 3 planner tasks: VWAP bands, first-5-min classifier, base-quality scorer. New tabs on /cockpits + endpoints under /market-data + /strategies."
+    },
+    {
+      "agent": "executor",
+      "at": "2026-05-17T13:37:37.203458+00:00",
+      "summary": "Closed 4 planner tasks: MTF stage scanner, OR failure tracker, round-trip edge ledger, fresh-breakout classifier. 4 new tabs on /cockpits + endpoints under /strategies + /market-data + /portfolios."
     }
   ],
   "feature_requests": [
@@ -1323,7 +1328,7 @@
       "acceptance": "GET /api/v1/strategies/breakout-freshness/ returns per-symbol {pivot_dist_pct, wma10_dist_pct, tag} and risk_engine rejects entries with tag='extended'.",
       "source": "feature_request",
       "source_id": "fresh-breakout-vs-extended-classifier-from-20dma-base-depth",
-      "status": "proposed",
+      "status": "done",
       "created_at": "2026-05-17T12:53:12Z"
     },
     {
@@ -1594,7 +1599,7 @@
       "acceptance": "GET /api/v1/strategies/mtf-stage/ returns per-symbol {stage_d, stage_w, stage_m, ok_phase, aligned:true|false}; shortlist row shows badge only when aligned=true.",
       "source": "feature_request",
       "source_id": "multi-timeframe-stage-scanner-d-w-m-alignment-oliver-kell-phase",
-      "status": "open",
+      "status": "done",
       "created_at": "2026-05-17T13:28:34Z"
     },
     {
@@ -1612,7 +1617,7 @@
       "acceptance": "GET /api/v1/market-data/or-failure/ returns symbols with {break_dir, reclaim_minutes, vwap_reclaim:bool, reversal_prob}; UI lists current failures with timestamps.",
       "source": "feature_request",
       "source_id": "opening-range-failure-reversal-probability-tracker",
-      "status": "open",
+      "status": "done",
       "created_at": "2026-05-17T13:28:34Z"
     },
     {
@@ -1666,7 +1671,7 @@
       "acceptance": "GET /api/v1/portfolios/cost-ledger/ returns per-trade {gross_r, costs_breakdown, net_r, cost_pct_of_edge} plus per-setup roll-ups; flagged=true when net_r<=0.",
       "source": "feature_request",
       "source_id": "per-trade-cost-round-trip-edge-ledger-live",
-      "status": "open",
+      "status": "done",
       "created_at": "2026-05-17T13:28:34Z"
     },
     {

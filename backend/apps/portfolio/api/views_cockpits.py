@@ -29,6 +29,7 @@ from apps.portfolio.services.cockpits import (
     build_theta_forecast,
 )
 from apps.portfolio.services.correlation_matrix import build_correlation_report
+from apps.portfolio.services.edge_ledger import build_edge_ledger
 from apps.portfolio.services.forced_flat import build_forced_flat, flatten_all
 from apps.portfolio.services.gap_risk import build_gap_risk_report
 from apps.portfolio.services.post_mortem import build_post_mortem_report
@@ -224,3 +225,13 @@ class SlippageEdgeView(_BaseCockpitView):
     """POST /api/v1/portfolios/slippage-edge/  body: {symbol, qty, setup_avg_r_inr}"""
     def post(self, request):
         return Response(compute_slippage_edge(request.data or {}))
+
+
+class EdgeLedgerView(_BaseCockpitView):
+    """GET /api/v1/portfolios/edge-ledger/?limit=200"""
+    def get(self, request):
+        try:
+            limit = int(request.query_params.get("limit", 200) or 200)
+        except ValueError:
+            limit = 200
+        return Response(build_edge_ledger(getattr(request, "tenant", None), limit=limit))

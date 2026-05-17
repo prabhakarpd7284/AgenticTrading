@@ -7,9 +7,9 @@
 import * as React from "react";
 import {
   Activity, AlertTriangle, Award, BarChart3, Briefcase, Calculator, Check,
-  Clock, Compass, Droplets, Flag, Gauge, GitCompareArrows, Grid3X3, LineChart,
-  Microscope, Pencil, Scale, Shield, Sigma, Sunrise, Sunrise as DaybreakIcon,
-  Target, TrendingDown, X, Zap,
+  Clock, Compass, Droplets, Flag, Gauge, GitCompareArrows, Grid3X3,
+  Layers, LineChart, Microscope, Pencil, Receipt, Scale, Shield, Sigma,
+  Sunrise, Sunrise as DaybreakIcon, Target, TrendingDown, X, Zap, ZapOff,
 } from "lucide-react";
 import {
   Bar, BarChart, CartesianGrid, Line, LineChart as RLineChart,
@@ -69,9 +69,10 @@ function Help({ label, text }: { label: string; text: string }) {
 import { useQueryClient } from "@tanstack/react-query";
 import {
   checkSlippageEdge, flattenAll, setCapital, simulateSizer,
-  useBaseQuality, useBrokerRecon, useCapitalCockpit, useCorrelationMatrix,
-  useEdgeDecay, useExpiryCockpit, useFirst5Min, useForcedFlat, useGapRisk,
-  useGreeksHeatmap, useLiquidityMap, useORB, usePlanVsActual, usePostMortem,
+  useBaseQuality, useBreakoutClassifier, useBrokerRecon, useCapitalCockpit,
+  useCorrelationMatrix, useEdgeDecay, useEdgeLedger, useExpiryCockpit,
+  useFirst5Min, useForcedFlat, useGapRisk, useGreeksHeatmap, useLiquidityMap,
+  useMTFStage, useORB, useORBFailure, usePlanVsActual, usePostMortem,
   useRegimeHeatmap, useRiskBudget, useSignalFunnel, useStructuralStops,
   useThetaForecast, useVWAPBands,
   type SizerResponse, type SlippageEdgeResponse,
@@ -100,6 +101,10 @@ const TABS = [
   { id: "vwap",          label: "VWAP Bands",   icon: Compass },
   { id: "first5",        label: "First 5-min",  icon: DaybreakIcon },
   { id: "base",          label: "Base Quality", icon: Award },
+  { id: "mtf",           label: "MTF Stages",   icon: Layers },
+  { id: "breakout",      label: "Fresh vs Extended", icon: Activity },
+  { id: "orb-fail",      label: "OR Failure",   icon: ZapOff },
+  { id: "ledger",        label: "Edge Ledger",  icon: Receipt },
 ] as const;
 
 export function CockpitsPage() {
@@ -148,6 +153,10 @@ export function CockpitsPage() {
         <TabsContent value="vwap"><VWAPPanel /></TabsContent>
         <TabsContent value="first5"><First5MinPanel /></TabsContent>
         <TabsContent value="base"><BaseQualityPanel /></TabsContent>
+        <TabsContent value="mtf"><MTFStagePanel /></TabsContent>
+        <TabsContent value="breakout"><BreakoutClassifierPanel /></TabsContent>
+        <TabsContent value="orb-fail"><ORBFailurePanel /></TabsContent>
+        <TabsContent value="ledger"><EdgeLedgerPanel /></TabsContent>
       </Tabs>
     </div>
   );
@@ -1778,6 +1787,351 @@ function BaseQualityPanel() {
           </CardContent>
         </Card>
       )}
+    </PanelWrap>
+  );
+}
+
+/* ------------------------------ 23. MTF Stages ---------------------------- */
+function MTFStagePanel() {
+  const [draft, setDraft] = React.useState("");
+  const [symbols, setSymbols] = React.useState<string | undefined>(undefined);
+  const { data, isLoading } = useMTFStage(symbols);
+
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setSymbols(draft.trim() || undefined);
+  };
+
+  const alignmentTone = (a: string): "success" | "warning" | "danger" | "neutral" =>
+    a === "long_aligned" ? "success"
+    : a === "short_aligned" ? "danger"
+    : a === "conflict" ? "warning"
+    : "neutral";
+
+  const stageBadge = (stage?: string) => {
+    if (!stage) return <span className="text-fg-subtle">—</span>;
+    const tone =
+      stage === "STAGE_2" ? "success"
+      : stage === "STAGE_4" ? "danger"
+      : stage === "STAGE_3" ? "warning"
+      : stage === "STAGE_1" ? "neutral"
+      : "neutral";
+    return <Badge tone={tone}>{stage.replace("STAGE_", "S")}</Badge>;
+  };
+
+  return (
+    <PanelWrap>
+      <HelpBlock
+        what="Daily / Weekly / Monthly each classified into a Stan-Weinstein / Oliver-Kell phase (Stage 1 base · 2 uptrend · 3 top · 4 downtrend) using a 30-period MA + slope."
+        why="Trading a daily-S2 long when the weekly is S4 is fighting the bigger trend — you'll be right tactically and wrong strategically. Long-aligned means all three timeframes agree, the strongest setup in the book."
+        act="Take longs only on long_aligned (or daily-S2 + weekly-S1/S2). Take shorts only on short_aligned. Conflict / mixed = sit out or trade much smaller."
+      />
+      <form onSubmit={submit} className="flex items-center gap-2">
+        <input value={draft} onChange={(e) => setDraft(e.target.value)}
+               placeholder="Comma-separated symbols (blank = watchlist)"
+               className="h-9 px-2 flex-1 max-w-md bg-surface border border-border rounded-sm text-body-sm" />
+        <button type="submit" className="h-9 px-3 bg-accent text-accent-fg rounded-sm text-body-sm">Scan</button>
+      </form>
+      {isLoading || !data ? <LoadingPanel /> : (
+        <Card>
+          <CardHeader>
+            <CardTitle>MTF stage scanner · {data.count} symbol{data.count === 1 ? "" : "s"}</CardTitle>
+            <CardDescription>{data.note}</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {data.rows.length === 0 ? <EmptyState title="No data" /> : (
+              <div className="overflow-auto">
+                <table className="w-full text-body-sm">
+                  <thead className="text-fg-subtle border-b border-border">
+                    <tr>
+                      <th className="text-left py-1.5">Symbol</th>
+                      <th className="text-left">Daily</th>
+                      <th className="text-left">Weekly</th>
+                      <th className="text-left">Monthly</th>
+                      <th className="text-left">Alignment</th>
+                      <th className="text-right">D close</th>
+                      <th className="text-right">D-MA slope</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.rows.map((r) => (
+                      <tr key={r.symbol} className="border-b border-border/40">
+                        <td className="py-1.5">{r.symbol}</td>
+                        <td>{stageBadge(r.daily?.stage)}</td>
+                        <td>{stageBadge(r.weekly?.stage)}</td>
+                        <td>{stageBadge(r.monthly?.stage)}</td>
+                        <td><Badge tone={alignmentTone(r.alignment)}>{r.alignment.replace("_"," ")}</Badge></td>
+                        <td className="text-right tabular-nums">{r.daily?.close ? fmtNum(r.daily.close, 2) : "—"}</td>
+                        <td className={`text-right tabular-nums ${
+                          r.daily && r.daily.slope_pct > 0.5 ? "text-pnl-up"
+                          : r.daily && r.daily.slope_pct < -0.5 ? "text-pnl-down" : ""
+                        }`}>{r.daily ? `${fmtNum(r.daily.slope_pct, 2)}%` : "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+    </PanelWrap>
+  );
+}
+
+/* ------------------------------ 24. Fresh vs Extended --------------------- */
+function BreakoutClassifierPanel() {
+  const [draft, setDraft] = React.useState("");
+  const [symbols, setSymbols] = React.useState<string | undefined>(undefined);
+  const { data, isLoading } = useBreakoutClassifier(symbols);
+
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setSymbols(draft.trim() || undefined);
+  };
+
+  const stateTone = (s: string): "success" | "warning" | "danger" | "neutral" =>
+    s === "fresh" ? "success"
+    : s === "extended" ? "danger"
+    : s === "base_too_shallow" ? "warning"
+    : "neutral";
+
+  return (
+    <PanelWrap>
+      <HelpBlock
+        what="For every watchlist symbol, the distance from the recent 60-day pivot + distance from the 20-day MA + recent base depth, classified as fresh / extended / consolidating / base_too_shallow / neutral."
+        why="Buying 'fresh' breakouts within 3% of the pivot pays. Buying 'extended' moves 10%+ above the 20DMA pays for someone else's exit. This panel separates the two at a glance."
+        act="Trade only `fresh` longs. Skip `extended` — wait for a pullback to the 20DMA. `base_too_shallow` means the setup isn't ready; revisit in a week."
+      />
+      <form onSubmit={submit} className="flex items-center gap-2">
+        <input value={draft} onChange={(e) => setDraft(e.target.value)}
+               placeholder="Comma-separated symbols (blank = watchlist)"
+               className="h-9 px-2 flex-1 max-w-md bg-surface border border-border rounded-sm text-body-sm" />
+        <button type="submit" className="h-9 px-3 bg-accent text-accent-fg rounded-sm text-body-sm">Classify</button>
+      </form>
+      {isLoading || !data ? <LoadingPanel /> : (
+        <Card>
+          <CardHeader>
+            <CardTitle>Breakout classifier · {data.count} symbol{data.count === 1 ? "" : "s"}</CardTitle>
+            <CardDescription>{data.note}</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {data.rows.length === 0 ? <EmptyState title="No data" /> : (
+              <div className="overflow-auto">
+                <table className="w-full text-body-sm">
+                  <thead className="text-fg-subtle border-b border-border">
+                    <tr>
+                      <th className="text-left py-1.5">Symbol</th>
+                      <th className="text-left">State</th>
+                      <th className="text-right">Close</th>
+                      <th className="text-right">Pivot</th>
+                      <th className="text-right">From pivot</th>
+                      <th className="text-right">From 20DMA</th>
+                      <th className="text-right">Base depth</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.rows.map((r) => (
+                      <tr key={r.symbol} className="border-b border-border/40">
+                        <td className="py-1.5">{r.symbol}</td>
+                        <td><Badge tone={stateTone(r.state)}>{r.state.replace("_"," ")}</Badge></td>
+                        <td className="text-right tabular-nums">{r.close ? fmtNum(r.close, 2) : "—"}</td>
+                        <td className="text-right tabular-nums">{r.pivot ? fmtNum(r.pivot, 2) : "—"}</td>
+                        <td className={`text-right tabular-nums ${
+                          r.pct_from_pivot > 8 ? "text-warning"
+                          : Math.abs(r.pct_from_pivot) < 3 ? "text-pnl-up" : ""
+                        }`}>{fmtNum(r.pct_from_pivot, 2)}%</td>
+                        <td className={`text-right tabular-nums ${r.pct_from_20dma > 10 ? "text-warning" : ""}`}>{fmtNum(r.pct_from_20dma, 2)}%</td>
+                        <td className="text-right tabular-nums">{fmtNum(r.base_depth_pct, 2)}%</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+    </PanelWrap>
+  );
+}
+
+/* ------------------------------ 25. OR Failure ---------------------------- */
+function ORBFailurePanel() {
+  const { data, isLoading } = useORBFailure();
+  if (isLoading || !data) return <LoadingPanel />;
+  const failed = data.rows.filter((r) => r.failure_flag).length;
+  return (
+    <PanelWrap>
+      <HelpBlock
+        what="Watches every watchlist symbol's opening-range breakout. A 'failure' is ≥2 re-entries into the OR within 30 minutes — the trapped-trader fade setup. Reversal-P is that symbol's historical hit rate for the open-close flip."
+        why="Failed breakouts are where the smartest fades live. The directional trade got everyone's attention; the failure traps them and runs the stops. Knowing reversal-P lets you size the fade rather than guess."
+        act="High reversal-P (>0.5) + failure_flag = take the fade with the OR midpoint as the first target. retest_count >= 4 = the original breakout is dead — flip and fade the other side."
+      />
+      <section className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+        <KPI label="Symbols scanned" value={String(data.count)} />
+        <KPI label="Active failures" value={String(failed)} tone={failed > 0 ? "warning" : "neutral"} />
+        <KPI label="Tradeable fades"
+             value={String(data.rows.filter((r) => r.failure_flag && r.reversal_p >= 0.5).length)}
+             tone="success" />
+      </section>
+      <Card>
+        <CardHeader><CardTitle>Failure scanner</CardTitle><CardDescription>{data.note}</CardDescription></CardHeader>
+        <CardContent>
+          {data.rows.length === 0 ? <EmptyState title="No symbols" /> : (
+            <div className="overflow-auto">
+              <table className="w-full text-body-sm">
+                <thead className="text-fg-subtle border-b border-border">
+                  <tr>
+                    <th className="text-left py-1.5">Symbol</th>
+                    <th className="text-left">State</th>
+                    <th className="text-right">OR high</th>
+                    <th className="text-right">OR low</th>
+                    <th className="text-right">Retests</th>
+                    <th className="text-left">Failure?</th>
+                    <th className="text-right">Reversal target</th>
+                    <th className="text-right">Reversal P</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.rows.map((r) => (
+                    <tr key={r.symbol} className="border-b border-border/40">
+                      <td className="py-1.5">{r.symbol}</td>
+                      <td className="text-fg-muted">{r.state.replace("_"," ")}</td>
+                      <td className="text-right tabular-nums">{r.or_high ? fmtNum(r.or_high, 2) : "—"}</td>
+                      <td className="text-right tabular-nums">{r.or_low ? fmtNum(r.or_low, 2) : "—"}</td>
+                      <td className={`text-right tabular-nums ${r.retest_count_after_break >= 2 ? "text-warning" : ""}`}>{r.retest_count_after_break}</td>
+                      <td>{r.failure_flag ? <Badge tone="warning">FAIL</Badge> : <span className="text-fg-subtle">—</span>}</td>
+                      <td className="text-right tabular-nums">{r.reversal_target ? fmtNum(r.reversal_target, 2) : "—"}</td>
+                      <td className={`text-right tabular-nums ${r.reversal_p >= 0.5 ? "text-pnl-up" : ""}`}>{r.reversal_p ? fmtNum(r.reversal_p * 100, 0) + "%" : "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </PanelWrap>
+  );
+}
+
+/* ------------------------------ 26. Edge Ledger --------------------------- */
+function EdgeLedgerPanel() {
+  const { data, isLoading } = useEdgeLedger();
+  if (isLoading || !data) return <LoadingPanel />;
+  const t = data.totals;
+  return (
+    <PanelWrap>
+      <HelpBlock
+        what="For every closed trade, the round-trip cost (5-bps × qty × 2 spread + ₹40 brokerage) vs realised P&L. Aggregated by strategy and by symbol so cost-heavy churn is visible."
+        why="Gross P&L is what you wish you made; net edge is what you actually keep. cost_drag = how much of gross goes back to the broker + bid-ask. A strategy with 80% drag is paying tuition, not making money."
+        act="If a strategy's drag > 50%, switch to limit orders or fewer / bigger trades. If a symbol's net_edge is negative across 20+ trades, drop it from the playbook."
+      />
+      <section className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <KPI label="Trades" value={String(t.trades)} />
+        <KPI label="Gross P&amp;L" value={fmtInr(t.gross_pnl_inr ?? 0)}
+             tone={(t.gross_pnl_inr ?? 0) >= 0 ? "success" : "danger"} />
+        <KPI label="Cost paid" value={fmtInr(t.cost_inr ?? 0)} tone="warning" />
+        <KPI label="Net edge" value={fmtInr(t.net_edge_inr ?? 0)}
+             tone={(t.net_edge_inr ?? 0) >= 0 ? "success" : "danger"}
+             hint={`drag ${fmtNum(t.cost_drag_pct ?? 0, 1)}% · win ${fmtNum(t.win_rate ?? 0, 0)}%`} />
+      </section>
+      <div className="grid md:grid-cols-2 gap-4">
+        <Card>
+          <CardHeader><CardTitle>By strategy</CardTitle></CardHeader>
+          <CardContent>
+            {Object.keys(data.by_strategy).length === 0 ? <EmptyState title="No closed trades yet" /> : (
+              <table className="w-full text-body-sm">
+                <thead className="text-fg-subtle border-b border-border">
+                  <tr>
+                    <th className="text-left py-1.5">Strategy</th>
+                    <th className="text-right">N</th>
+                    <th className="text-right">Net edge</th>
+                    <th className="text-right">Drag %</th>
+                    <th className="text-right">Win %</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {Object.entries(data.by_strategy).map(([k, v]) => (
+                    <tr key={k} className="border-b border-border/40">
+                      <td className="py-1.5">{k}</td>
+                      <td className="text-right tabular-nums">{v.trades}</td>
+                      <td className={`text-right tabular-nums ${(v.net_edge_inr ?? 0) >= 0 ? "text-pnl-up" : "text-pnl-down"}`}>{fmtInr(v.net_edge_inr ?? 0)}</td>
+                      <td className={`text-right tabular-nums ${(v.cost_drag_pct ?? 0) > 50 ? "text-warning" : ""}`}>{fmtNum(v.cost_drag_pct ?? 0, 0)}%</td>
+                      <td className="text-right tabular-nums">{fmtNum(v.win_rate ?? 0, 0)}%</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader><CardTitle>By symbol · top 15</CardTitle></CardHeader>
+          <CardContent>
+            {Object.keys(data.by_symbol).length === 0 ? <EmptyState title="No data" /> : (
+              <table className="w-full text-body-sm">
+                <thead className="text-fg-subtle border-b border-border">
+                  <tr>
+                    <th className="text-left py-1.5">Symbol</th>
+                    <th className="text-right">N</th>
+                    <th className="text-right">Net edge</th>
+                    <th className="text-right">Win %</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {Object.entries(data.by_symbol).map(([k, v]) => (
+                    <tr key={k} className="border-b border-border/40">
+                      <td className="py-1.5">{k}</td>
+                      <td className="text-right tabular-nums">{v.trades}</td>
+                      <td className={`text-right tabular-nums ${(v.net_edge_inr ?? 0) >= 0 ? "text-pnl-up" : "text-pnl-down"}`}>{fmtInr(v.net_edge_inr ?? 0)}</td>
+                      <td className="text-right tabular-nums">{fmtNum(v.win_rate ?? 0, 0)}%</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+      <Card>
+        <CardHeader><CardTitle>Recent trade ledger</CardTitle></CardHeader>
+        <CardContent>
+          {data.rows.length === 0 ? <EmptyState title="No closed trades" /> : (
+            <div className="overflow-auto max-h-[480px]">
+              <table className="w-full text-body-sm">
+                <thead className="text-fg-subtle border-b border-border sticky top-0 bg-surface">
+                  <tr>
+                    <th className="text-left py-1.5">Symbol</th>
+                    <th className="text-left">Strategy</th>
+                    <th className="text-right">Qty</th>
+                    <th className="text-right">Entry → Fill</th>
+                    <th className="text-right">Gross</th>
+                    <th className="text-right">Cost</th>
+                    <th className="text-right">Net edge</th>
+                    <th className="text-right">Edge (bps)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.rows.map((r) => (
+                    <tr key={r.trade_id} className="border-b border-border/40">
+                      <td className="py-1.5">{r.symbol}</td>
+                      <td className="text-fg-muted">{r.strategy}</td>
+                      <td className="text-right tabular-nums">{r.qty}</td>
+                      <td className="text-right tabular-nums">{fmtNum(r.entry, 2)} → {fmtNum(r.fill, 2)}</td>
+                      <td className={`text-right tabular-nums ${r.gross_pnl_inr >= 0 ? "text-pnl-up" : "text-pnl-down"}`}>{fmtInr(r.gross_pnl_inr)}</td>
+                      <td className="text-right tabular-nums">{fmtInr(r.total_cost_inr)}</td>
+                      <td className={`text-right tabular-nums ${r.net_edge_inr >= 0 ? "text-pnl-up" : "text-pnl-down"}`}>{fmtInr(r.net_edge_inr)}</td>
+                      <td className="text-right tabular-nums">{fmtNum(r.edge_bps, 1)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </PanelWrap>
   );
 }

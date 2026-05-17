@@ -5,6 +5,8 @@ from rest_framework.views import APIView
 
 from apps.strategies.models import Backtest, StrategyInstance
 from apps.strategies.services.base_quality import build_base_quality
+from apps.strategies.services.breakout_classifier import build_breakout_classifier
+from apps.strategies.services.mtf_stage_scanner import build_mtf_stage_scanner
 
 
 class StrategyInstanceSerializer(serializers.ModelSerializer):
@@ -51,3 +53,23 @@ class BaseQualityView(APIView):
         raw = request.query_params.get("symbols") or request.query_params.get("symbol") or ""
         syms = [s.strip().upper() for s in raw.split(",") if s.strip()] if raw else None
         return Response(build_base_quality(symbols=syms))
+
+
+class MTFStageScannerView(APIView):
+    """GET /api/v1/strategies/mtf-stage/?symbols=A,B,C"""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        raw = request.query_params.get("symbols") or ""
+        syms = [s.strip().upper() for s in raw.split(",") if s.strip()] if raw else None
+        return Response(build_mtf_stage_scanner(symbols=syms))
+
+
+class BreakoutClassifierView(APIView):
+    """GET /api/v1/strategies/breakout-classifier/?symbols=A,B,C"""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        raw = request.query_params.get("symbols") or ""
+        syms = [s.strip().upper() for s in raw.split(",") if s.strip()] if raw else None
+        return Response(build_breakout_classifier(symbols=syms))
