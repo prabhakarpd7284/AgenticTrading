@@ -34,6 +34,11 @@ NSE_CM_sym_master.json
 # ── Frontend ──
 frontend/node_modules/
 frontend/dist/
+frontend/tsconfig.tsbuildinfo
+# Stray .js emit inside src/ (running tsc without noEmit:true would shadow
+# .tsx sources at Vite resolution time — see CLAUDE.md frontend note).
+# Sources are .ts/.tsx only.
+frontend/src/**/*.js
 
 # ── Infra (local terraform state, etc.) ──
 infra/*
