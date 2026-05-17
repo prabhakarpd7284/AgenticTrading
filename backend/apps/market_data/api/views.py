@@ -339,7 +339,13 @@ class PyramidView(APIView):
 
     @staticmethod
     def _fetch_candles(underlying, strike, expiry_str, opt_type, candle_date, interval):
-        """Fetch option candles, walking back up to 5 days for holidays."""
+        """Fetch option candles, walking back up to 15 trading days.
+
+        Old loop was 6 calendar days which often landed on a weekend twice
+        and only effectively probed ~3 trading days — too narrow when the
+        user picks a historical date via cockpit time-travel that predates
+        the strike's listing.
+        """
         from datetime import date as dt_date, timedelta
         from trading.options.data_service import find_option_token
         from trading.services.data_service import BrokerClient
@@ -354,18 +360,23 @@ class PyramidView(APIView):
         broker.ensure_login()
 
         d = dt_date.fromisoformat(candle_date)
-        for _ in range(6):
+        trading_days_tried = 0
+        while trading_days_tried < 15:
             if d.weekday() >= 5:
                 d -= timedelta(days=1)
                 continue
             ds = d.isoformat()
             end_str = cap_end_time(ds)
-            raw = broker.fetch_candles(
-                symbol_token=token, start=f"{ds} 09:15",
-                end=end_str, interval=interval, exchange="NFO",
-            )
+            try:
+                raw = broker.fetch_candles(
+                    symbol_token=token, start=f"{ds} 09:15",
+                    end=end_str, interval=interval, exchange="NFO",
+                )
+            except Exception:  # noqa: BLE001 — transient broker hiccup; try next day
+                raw = None
             if raw and len(raw) > 5:
                 return [Candle.from_raw(r) for r in raw]
+            trading_days_tried += 1
             d -= timedelta(days=1)
         return []
 

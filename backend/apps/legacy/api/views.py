@@ -986,7 +986,12 @@ def _pyramid_range(request, *, date_from: str, date_to: str):
 
 
 def _fetch_pyramid_candles(underlying, strike, expiry_str, opt_type, candle_date, interval):
-    """Fetch option candles, walking back up to 5 days to handle holidays."""
+    """Fetch option candles, walking back up to 15 trading days.
+
+    Old loop was 6 calendar days which only effectively probed ~3 trading
+    days — too narrow once cockpit time-travel lets users pick a date
+    that predates the strike's listing.
+    """
     from datetime import date as dt_date, timedelta
     from trading.options.data_service import find_option_token
     from trading.services.data_service import BrokerClient
@@ -1003,24 +1008,27 @@ def _fetch_pyramid_candles(underlying, strike, expiry_str, opt_type, candle_date
     # SENSEX options trade on BSE (BFO segment), everything else on NSE (NFO)
     exchange = "BFO" if underlying == "SENSEX" else "NFO"
 
-    # Try the requested date first, then walk back up to 5 days
-    # to handle holidays (e.g. May Day) that get_candle_date_range misses
     d = dt_date.fromisoformat(candle_date)
-    for attempt in range(6):
-        if d.weekday() >= 5:  # skip weekends
+    trading_days_tried = 0
+    while trading_days_tried < 15:
+        if d.weekday() >= 5:  # skip weekends without consuming a trading-day count
             d -= timedelta(days=1)
             continue
         ds = d.isoformat()
         end_str = cap_end_time(ds)
-        raw = broker.fetch_candles(
-            symbol_token=token,
-            start=f"{ds} 09:15",
-            end=end_str,
-            interval=interval,
-            exchange=exchange,
-        )
+        try:
+            raw = broker.fetch_candles(
+                symbol_token=token,
+                start=f"{ds} 09:15",
+                end=end_str,
+                interval=interval,
+                exchange=exchange,
+            )
+        except Exception:  # noqa: BLE001 — transient broker hiccup; try next day
+            raw = None
         if raw and len(raw) > 5:
             return [Candle.from_raw(r) for r in raw]
+        trading_days_tried += 1
         d -= timedelta(days=1)
 
     return []
