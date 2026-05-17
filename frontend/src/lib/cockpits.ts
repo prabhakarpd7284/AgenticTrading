@@ -822,6 +822,93 @@ export async function resetTradingData(payload: ResetRequest): Promise<ResetResp
 }
 
 // ---------------------------------------------------------------------------
+// Backtester Lab — wraps the 10 endpoints under /strategies/backtester/...
+// ---------------------------------------------------------------------------
+export interface BTSimRequest {
+  symbol: string;
+  strategy: string;
+  days: number;
+  splits?: number;
+  mc_runs?: number;
+  ruin_pct?: number;
+}
+export interface BTSimResponse {
+  symbol: string;
+  strategy: string;
+  walk_forward?: any;
+  monte_carlo?: any;
+  regime_stats?: any;
+  cost_sensitivity?: any;
+  capacity?: any;
+  edge_drift?: any;
+  error?: string;
+}
+
+export async function runSimulation(payload: BTSimRequest): Promise<BTSimResponse> {
+  const qs = new URLSearchParams({
+    symbol: payload.symbol,
+    strategy: payload.strategy,
+    days: String(payload.days),
+  });
+  // Fire the 6 most useful backtester endpoints in parallel + roll into one
+  // response so the FE renders the whole report from a single call site.
+  const [wf, mc, regime, cost, capacity, drift] = await Promise.all([
+    api.get(`/strategies/backtester/walk-forward/?${qs.toString()}&splits=${payload.splits ?? 4}`).then((r) => r.data).catch((e) => ({ error: String(e?.message ?? e) })),
+    api.get(`/strategies/backtester/monte-carlo/?${qs.toString()}&runs=${payload.mc_runs ?? 200}&ruin_pct=${payload.ruin_pct ?? 30}`).then((r) => r.data).catch((e) => ({ error: String(e?.message ?? e) })),
+    api.get(`/strategies/backtester/regime-stats/?${qs.toString()}`).then((r) => r.data).catch((e) => ({ error: String(e?.message ?? e) })),
+    api.get(`/strategies/backtester/cost-sensitivity/?${qs.toString()}`).then((r) => r.data).catch((e) => ({ error: String(e?.message ?? e) })),
+    api.get(`/strategies/backtester/capacity/?${qs.toString()}`).then((r) => r.data).catch((e) => ({ error: String(e?.message ?? e) })),
+    api.get(`/strategies/backtester/edge-drift/?${qs.toString()}`).then((r) => r.data).catch((e) => ({ error: String(e?.message ?? e) })),
+  ]);
+  return {
+    symbol: payload.symbol, strategy: payload.strategy,
+    walk_forward: wf, monte_carlo: mc, regime_stats: regime,
+    cost_sensitivity: cost, capacity, edge_drift: drift,
+  };
+}
+
+export async function saveBacktestRun(payload: { symbol: string; strategy: string; days: number; label?: string }) {
+  const { data } = await api.post("/strategies/backtester/registry/", { action: "save", ...payload });
+  return data as { id: string; label: string; symbol: string; strategy: string; summary: any; code_sha: string };
+}
+
+// ─── Past backtest runs — both the in-memory lab registry AND the
+// persisted Backtest model from /strategies/backtests/ ─────────────────
+export interface LabRunRow {
+  id: string; label: string; symbol: string; strategy: string;
+  days: number; params: Record<string, unknown>;
+  summary: { n: number; win_rate: number; expectancy: number; sharpe: number; max_dd: number; total_pnl: number };
+  code_sha: string; created_at: string; synthetic?: boolean;
+}
+export interface LegacyBacktestRow {
+  id: string; instance: string;
+  from_date: string; to_date: string;
+  status: "queued" | "running" | "done" | "failed";
+  metrics: Record<string, number | string>;
+  error?: string;
+  created_at?: string;
+}
+
+export const usePastBacktestRuns = () =>
+  useQuery({
+    queryKey: ["cockpits", "backtest-runs"],
+    queryFn: async () => {
+      const [lab, legacy] = await Promise.all([
+        api.get<{ count: number; rows: LabRunRow[] }>("/strategies/backtester/registry/?action=list")
+          .then((r) => r.data)
+          .catch(() => ({ count: 0, rows: [] as LabRunRow[] })),
+        api.get<LegacyBacktestRow[] | { results: LegacyBacktestRow[] }>("/strategies/backtests/?limit=50")
+          .then((r) => r.data)
+          .catch(() => [] as LegacyBacktestRow[]),
+      ]);
+      const legacyRows = Array.isArray(legacy) ? legacy : (legacy?.results ?? []);
+      return { lab: lab.rows ?? [], legacy: legacyRows };
+    },
+    staleTime: 15_000,
+    refetchOnWindowFocus: false,
+  });
+
+// ---------------------------------------------------------------------------
 // Cycle-8 new endpoints
 // ---------------------------------------------------------------------------
 export interface StockRRGRow {

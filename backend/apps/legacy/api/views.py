@@ -754,10 +754,21 @@ def pyramid(request):
       expiry (DDMMMYY), date (YYYY-MM-DD), interval (FIVE_MINUTE),
       capital (float), risk_pct (float), profit_risk (float),
       max_pyramids (int), lot_size (int), dry_run (bool)
+
+    DATE-RANGE BACKTEST:
+      date_from (YYYY-MM-DD) + date_to (YYYY-MM-DD) — when BOTH are
+      present we iterate over every trading day in the range and
+      return per-day runs + aggregated stats.
     """
     from trading.pyramid.strategy import (
         Candle, PyramidConfig, run_pyramid_with_chart_data,
     )
+
+    # If a date range is supplied, dispatch to the range backtest helper.
+    df = request.query_params.get("date_from")
+    dt = request.query_params.get("date_to")
+    if df and dt:
+        return _pyramid_range(request, date_from=df, date_to=dt)
 
     strike = request.query_params.get("strike")
     if not strike:
@@ -833,6 +844,145 @@ def pyramid(request):
         "dry_run": dry_run,
     }
     return Response(data)
+
+
+def _pyramid_range(request, *, date_from: str, date_to: str):
+    """Date-range backtest — runs the pyramid strategy on each trading day
+    between `date_from` and `date_to` (inclusive). Returns:
+
+      runs: [{date, total_pnl_inr, total_pnl_pts, total_lots, trades, ...}]
+      aggregate: { days_traded, profitable_days, total_pnl_inr,
+                   win_rate_pct, avg_daily_pnl_inr, best_day, worst_day,
+                   sharpe }
+
+    Skips broker-failed days transparently — `runs` only contains days
+    where the engine actually returned a value.
+    """
+    from datetime import date as dt_date
+    from trading.pyramid.strategy import (
+        Candle, PyramidConfig, run_pyramid_with_chart_data,
+    )
+
+    # Cap range to 60 days to keep the round-trip bearable
+    try:
+        d_from = dt_date.fromisoformat(date_from)
+        d_to = dt_date.fromisoformat(date_to)
+    except ValueError:
+        return Response({"error": "date_from/date_to must be YYYY-MM-DD"}, status=400)
+    if d_to < d_from:
+        return Response({"error": "date_to is before date_from"}, status=400)
+    if (d_to - d_from).days > 60:
+        return Response({"error": "range > 60 days; cap to 60"}, status=400)
+
+    strike = request.query_params.get("strike")
+    if not strike:
+        return Response({"error": "strike is required"}, status=400)
+    strike = int(strike)
+    opt_type = request.query_params.get("type", "CE").upper()
+    underlying = request.query_params.get("underlying", "NIFTY").upper()
+    interval = request.query_params.get("interval", "FIVE_MINUTE")
+    dry_run = request.query_params.get("dry_run", "false").lower() == "true"
+
+    config = PyramidConfig(
+        lot_size=int(request.query_params.get("lot_size", 65)),
+        initial_capital=float(request.query_params.get("capital", 100000)),
+        initial_risk_pct=float(request.query_params.get("risk_pct", 2.0)),
+        profit_risk_pct=float(request.query_params.get("profit_risk", 0.80)),
+        max_pyramids=int(request.query_params.get("max_pyramids", 5)),
+    )
+
+    # Resolve expiry once — we want the SAME contract across the range
+    expiry_str = request.query_params.get("expiry")
+    if not expiry_str:
+        from trading.utils.expiry_utils import next_expiry_date, iso_to_angel
+        exp_date = next_expiry_date(underlying)
+        expiry_str = iso_to_angel(exp_date.isoformat()) if exp_date else None
+        if not expiry_str:
+            return Response({"error": "Cannot determine expiry"}, status=400)
+
+    runs: list[dict] = []
+    cursor = d_from
+    while cursor <= d_to:
+        # Skip weekends; NSE handles holidays via the candle walk-back inside
+        # _fetch_pyramid_candles, so we just iterate Mon-Fri.
+        if cursor.weekday() < 5:
+            candle_date = cursor.isoformat()
+            try:
+                if dry_run:
+                    candles = _generate_pyramid_sample()
+                else:
+                    candles = _fetch_pyramid_candles(
+                        underlying, strike, expiry_str, opt_type, candle_date, interval,
+                    )
+                if candles:
+                    actual_date = (candles[0].timestamp[:10]
+                                    if hasattr(candles[0], "timestamp") and candles[0].timestamp
+                                    else candle_date)
+                    data = run_pyramid_with_chart_data(
+                        candles,
+                        symbol=f"{underlying} {strike} {opt_type} ({actual_date})",
+                        config=config,
+                    )
+                    # The engine puts totals inside `kpis`; flatten the
+                    # 4 fields we need at the row level so the range UI
+                    # doesn't have to dig.
+                    kpis = data.get("kpis") or {}
+                    runs.append({
+                        "date": actual_date,
+                        "total_pnl_inr": kpis.get("total_pnl_inr", data.get("total_pnl_inr", 0)),
+                        "total_pnl_pts": kpis.get("total_pnl_pts", data.get("total_pnl_pts", 0)),
+                        "total_lots":    kpis.get("total_lots",    data.get("total_lots", 0)),
+                        "trades":        len(data.get("trades", []) or data.get("entries", []) or []),
+                        "kpis":          kpis,
+                    })
+            except Exception:  # noqa: BLE001
+                pass
+        cursor = cursor.fromordinal(cursor.toordinal() + 1)
+
+    # Aggregate
+    if not runs:
+        return Response({
+            "config": {
+                "strike": strike, "type": opt_type, "underlying": underlying,
+                "expiry": expiry_str, "date_from": date_from, "date_to": date_to,
+                "dry_run": dry_run, "lot_size": config.lot_size,
+                "capital": config.initial_capital,
+            },
+            "runs": [],
+            "aggregate": None,
+            "error": "No trading days produced candle data in the range.",
+        })
+
+    pnls = [r["total_pnl_inr"] for r in runs]
+    profitable = sum(1 for p in pnls if p > 0)
+    losing = sum(1 for p in pnls if p < 0)
+    best = max(runs, key=lambda r: r["total_pnl_inr"])
+    worst = min(runs, key=lambda r: r["total_pnl_inr"])
+    avg = sum(pnls) / len(pnls)
+    import statistics, math
+    sd = statistics.pstdev(pnls) if len(pnls) > 1 else 0.0
+    sharpe = round((avg / sd) * math.sqrt(252), 3) if sd > 0 else 0.0
+    aggregate = {
+        "days_traded": len(runs),
+        "profitable_days": profitable,
+        "losing_days": losing,
+        "total_pnl_inr": round(sum(pnls), 2),
+        "avg_daily_pnl_inr": round(avg, 2),
+        "win_rate_pct": round(profitable / len(runs) * 100, 2),
+        "best_day": {"date": best["date"], "pnl_inr": best["total_pnl_inr"]},
+        "worst_day": {"date": worst["date"], "pnl_inr": worst["total_pnl_inr"]},
+        "sharpe": sharpe,
+    }
+    return Response({
+        "config": {
+            "strike": strike, "type": opt_type, "underlying": underlying,
+            "expiry": expiry_str, "date_from": date_from, "date_to": date_to,
+            "interval": interval, "dry_run": dry_run,
+            "lot_size": config.lot_size, "capital": config.initial_capital,
+        },
+        "runs": runs,
+        "aggregate": aggregate,
+    })
 
 
 def _fetch_pyramid_candles(underlying, strike, expiry_str, opt_type, candle_date, interval):

@@ -23,7 +23,7 @@ import { Badge } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/Tabs";
-import { cn, fmtInr, fmtNum, fmtPct } from "@/lib/utils";
+import { cn, fmtInr, fmtNum, fmtPct, fmtRel } from "@/lib/utils";
 
 type KPITone = "neutral" | "success" | "warning" | "danger";
 
@@ -70,8 +70,10 @@ function Help({ label, text }: { label: string; text: string }) {
 }
 import { useQueryClient } from "@tanstack/react-query";
 import {
-  checkSlippageEdge, flattenAll, pauseSymbol, resetTradingData, setCapital,
-  simulateSizer, unpauseSymbol,
+  checkSlippageEdge, flattenAll, pauseSymbol, resetTradingData,
+  runSimulation, saveBacktestRun, setCapital,
+  simulateSizer, unpauseSymbol, usePastBacktestRuns,
+  type BTSimResponse,
   useBaseQuality, useBreakoutClassifier, useBrokerRecon, useCapitalCockpit,
   useCorrelationMatrix, useDepthImbalance, useEarningsOverlay, useEdgeDecay,
   useEdgeLedger, useExpiryCockpit, useFIIDIIFlow, useFirst5Min, useForcedFlat,
@@ -150,6 +152,7 @@ const TABS = [
   // Tools
   { cat: "tools", id: "sizer",         label: "What-If Sizer", icon: Calculator },
   { cat: "tools", id: "slippage-edge", label: "Slippage vs Edge", icon: Scale },
+  { cat: "tools", id: "simulator",     label: "Backtester Sim", icon: FlaskConical },
   { cat: "tools", id: "reset",         label: "Reset / Seed", icon: Eraser },
 ] as const;
 
@@ -300,6 +303,7 @@ export function CockpitsPage() {
         <TabsContent value="stock-rrg"><StockRRGPanel /></TabsContent>
         <TabsContent value="partial-fill"><PartialFillPanel /></TabsContent>
         <TabsContent value="isector"><IntradaySectorHeatmapPanel /></TabsContent>
+        <TabsContent value="simulator"><BacktesterSimPanel /></TabsContent>
         <TabsContent value="reset"><ResetPanel /></TabsContent>
           </Tabs>
         </div>
@@ -3446,6 +3450,398 @@ function IntradaySectorHeatmapPanel() {
           )}
         </CardContent>
       </Card>
+    </PanelWrap>
+  );
+}
+
+/* ------------------------------ 42. Backtester Simulator ------------------ */
+function BacktesterSimPanel() {
+  const qc = useQueryClient();
+  const [form, setForm] = React.useState({
+    symbol: "NIFTY",
+    strategy: "directional",
+    days: 180,
+    splits: 4,
+    mc_runs: 200,
+    ruin_pct: 30,
+  });
+  const [pending, setPending] = React.useState(false);
+  const [result, setResult] = React.useState<BTSimResponse | null>(null);
+  const [error, setError] = React.useState<string | null>(null);
+  const [saved, setSaved] = React.useState<string | null>(null);
+  const { data: pastRuns } = usePastBacktestRuns();
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPending(true); setError(null); setResult(null); setSaved(null);
+    try {
+      const r = await runSimulation({
+        symbol: form.symbol.toUpperCase(),
+        strategy: form.strategy,
+        days: Number(form.days),
+        splits: Number(form.splits),
+        mc_runs: Number(form.mc_runs),
+        ruin_pct: Number(form.ruin_pct),
+      });
+      setResult(r);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "simulation failed");
+    } finally {
+      setPending(false);
+    }
+  };
+
+  const doSave = async () => {
+    if (!result) return;
+    setPending(true); setError(null);
+    try {
+      const r = await saveBacktestRun({
+        symbol: result.symbol,
+        strategy: result.strategy,
+        days: Number(form.days),
+        label: `${result.symbol}-${result.strategy}-${form.days}d`,
+      });
+      setSaved(`Saved as ${r.id} (code ${r.code_sha})`);
+      await qc.invalidateQueries({ queryKey: ["cockpits", "backtest-runs"] });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "save failed");
+    } finally {
+      setPending(false);
+    }
+  };
+
+  const verdictTone = (v?: string): "success" | "warning" | "danger" | "neutral" =>
+    v === "ROBUST" || v === "ALIVE" ? "success"
+    : v === "FRAGILE" || v === "FADING" ? "warning"
+    : v === "OVERFIT" || v === "DEAD" ? "danger"
+    : "neutral";
+
+  return (
+    <PanelWrap>
+      <HelpBlock
+        what="Single button runs the backtester lab — walk-forward + Monte-Carlo + regime stats + cost sensitivity + capacity curve + live edge drift — and lays the whole report out for the trader."
+        why="Backtest equity curves lie. The lab fans the same trade list through 6 lenses (overfit decay · ruin probability · per-regime stats · cost stress · capacity wall · live drift) so you see all the failure modes at once."
+        act="Run with defaults first; if walk_forward = ROBUST + ruin_probability < 5%, save the run. If any panel is red, fix the strategy before sizing live."
+      />
+
+      {/* ── Past runs — both the new lab registry AND legacy Backtest model ── */}
+      {(pastRuns?.lab?.length || pastRuns?.legacy?.length) ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Past runs</CardTitle>
+            <CardDescription>
+              {(pastRuns.lab?.length ?? 0)} from the lab (in-memory) · {(pastRuns.legacy?.length ?? 0)} persisted in the v2 Backtest table.
+              Click any row to reload its config into the form.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="overflow-auto max-h-[320px]">
+              {pastRuns.lab?.length ? (
+                <>
+                  <div className="text-caption uppercase tracking-wider text-fg-subtle pb-1.5">Lab registry</div>
+                  <table className="w-full text-body-sm mb-4">
+                    <thead className="text-fg-subtle border-b border-border">
+                      <tr>
+                        <th className="text-left py-1.5">Label</th>
+                        <th className="text-left">Symbol</th>
+                        <th className="text-left">Strategy</th>
+                        <th className="text-right">Days</th>
+                        <th className="text-right">N</th>
+                        <th className="text-right">Win %</th>
+                        <th className="text-right">Sharpe</th>
+                        <th className="text-right">P&amp;L</th>
+                        <th className="text-left">SHA</th>
+                        <th className="text-right">When</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {pastRuns.lab.map((r) => (
+                        <tr key={r.id}
+                            className="border-b border-border/40 hover:bg-surface-2/50 cursor-pointer"
+                            onClick={() => setForm({
+                              ...form,
+                              symbol: r.symbol, strategy: r.strategy, days: r.days,
+                            })}>
+                          <td className="py-1.5 font-mono">{r.label}</td>
+                          <td>{r.symbol}</td>
+                          <td className="text-fg-muted">{r.strategy}</td>
+                          <td className="text-right tabular-nums">{r.days}</td>
+                          <td className="text-right tabular-nums">{r.summary.n}</td>
+                          <td className="text-right tabular-nums">{fmtNum(r.summary.win_rate, 1)}%</td>
+                          <td className="text-right tabular-nums">{fmtNum(r.summary.sharpe, 2)}</td>
+                          <td className={`text-right tabular-nums ${r.summary.total_pnl >= 0 ? "text-pnl-up" : "text-pnl-down"}`}>{fmtInr(r.summary.total_pnl)}</td>
+                          <td className="text-fg-subtle font-mono text-caption">{r.code_sha}</td>
+                          <td className="text-right text-fg-subtle text-caption">{fmtRel(r.created_at)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </>
+              ) : null}
+              {pastRuns.legacy?.length ? (
+                <>
+                  <div className="text-caption uppercase tracking-wider text-fg-subtle pb-1.5">Persisted (v2 Backtest table)</div>
+                  <table className="w-full text-body-sm">
+                    <thead className="text-fg-subtle border-b border-border">
+                      <tr>
+                        <th className="text-left py-1.5">Run ID</th>
+                        <th className="text-left">From</th>
+                        <th className="text-left">To</th>
+                        <th className="text-left">Status</th>
+                        <th className="text-right">Metrics</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {pastRuns.legacy.map((r) => (
+                        <tr key={r.id} className="border-b border-border/40">
+                          <td className="py-1.5 font-mono text-caption">{r.id.slice(0, 8)}…</td>
+                          <td>{r.from_date}</td>
+                          <td>{r.to_date}</td>
+                          <td><Badge tone={
+                            r.status === "done" ? "success"
+                            : r.status === "failed" ? "danger"
+                            : r.status === "running" ? "warning"
+                            : "neutral"
+                          }>{r.status}</Badge></td>
+                          <td className="text-right text-fg-muted text-caption">
+                            {Object.entries(r.metrics || {}).slice(0, 3)
+                              .map(([k, v]) => `${k}=${typeof v === "number" ? fmtNum(v, 2) : v}`)
+                              .join(" · ") || "—"}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </>
+              ) : null}
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Run a simulation</CardTitle>
+          <CardDescription>Backend: 6 backtester endpoints fan out in parallel; report renders below.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={submit} className="grid grid-cols-2 sm:grid-cols-6 gap-3 items-end">
+            <Field label="Symbol">
+              <input value={form.symbol}
+                     onChange={(e) => setForm({ ...form, symbol: e.target.value })}
+                     className="w-full h-9 px-2 bg-surface border border-border rounded-sm text-body-sm" />
+            </Field>
+            <Field label="Strategy">
+              <select value={form.strategy}
+                      onChange={(e) => setForm({ ...form, strategy: e.target.value })}
+                      className="w-full h-9 px-2 bg-surface border border-border rounded-sm text-body-sm">
+                <option value="directional">directional</option>
+                <option value="pyramid">pyramid</option>
+                <option value="short_straddle">short_straddle</option>
+                <option value="vertical_spread">vertical_spread</option>
+              </select>
+            </Field>
+            <Field label="Days lookback">
+              <input type="number" min={30} max={400} value={form.days}
+                     onChange={(e) => setForm({ ...form, days: Number(e.target.value) })}
+                     className="w-full h-9 px-2 bg-surface border border-border rounded-sm text-body-sm tabular-nums" />
+            </Field>
+            <Field label="WF splits">
+              <input type="number" min={2} max={10} value={form.splits}
+                     onChange={(e) => setForm({ ...form, splits: Number(e.target.value) })}
+                     className="w-full h-9 px-2 bg-surface border border-border rounded-sm text-body-sm tabular-nums" />
+            </Field>
+            <Field label="MC runs">
+              <input type="number" min={50} max={2000} value={form.mc_runs}
+                     onChange={(e) => setForm({ ...form, mc_runs: Number(e.target.value) })}
+                     className="w-full h-9 px-2 bg-surface border border-border rounded-sm text-body-sm tabular-nums" />
+            </Field>
+            <button type="submit" disabled={pending}
+                    className="h-9 px-4 bg-accent text-accent-fg rounded-sm text-body-sm font-medium disabled:opacity-50">
+              {pending ? "Running…" : "▶ Run simulation"}
+            </button>
+          </form>
+          {error ? (
+            <div className="mt-3 text-body-sm text-pnl-down flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4" /> {error}
+            </div>
+          ) : null}
+          {saved ? (
+            <div className="mt-3 text-body-sm text-pnl-up flex items-center gap-2">
+              <Check className="h-4 w-4" /> {saved}
+            </div>
+          ) : null}
+        </CardContent>
+      </Card>
+
+      {result ? (
+        <>
+          <section className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <KPI label="Walk-forward verdict"
+                 value={result.walk_forward?.verdict ?? "—"}
+                 tone={verdictTone(result.walk_forward?.verdict)}
+                 hint={`decay ${fmtNum(result.walk_forward?.decay_score ?? 0, 2)}`} />
+            <KPI label="Ruin probability"
+                 value={`${fmtNum((result.monte_carlo?.ruin_probability ?? 0) * 100, 1)}%`}
+                 tone={(result.monte_carlo?.ruin_probability ?? 0) > 0.05 ? "danger" : "success"}
+                 hint={`${result.monte_carlo?.runs ?? 0} MC paths`} />
+            <KPI label="Capacity wall"
+                 value={result.capacity?.capacity_wall_inr ? fmtInr(result.capacity.capacity_wall_inr) : "∞"}
+                 tone={result.capacity?.capacity_wall_inr ? "warning" : "neutral"}
+                 hint="size beyond which edge dies" />
+            <KPI label="Live drift verdict"
+                 value={result.edge_drift?.verdict ?? "—"}
+                 tone={verdictTone(result.edge_drift?.verdict)}
+                 hint={`ratio ${fmtNum(result.edge_drift?.drift_ratio ?? 0, 2)}`} />
+          </section>
+
+          {/* Walk-forward folds */}
+          {result.walk_forward?.folds ? (
+            <Card>
+              <CardHeader>
+                <CardTitle>Walk-forward folds</CardTitle>
+                <CardDescription>
+                  IS vs OOS expectancy per fold. {result.walk_forward.note}
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <ResponsiveContainer width="100%" height={220}>
+                  <BarChart data={result.walk_forward.folds.map((f: any) => ({
+                    fold: `F${f.fold}`,
+                    is: f.is.expectancy, oos: f.oos.expectancy,
+                  }))}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+                    <XAxis dataKey="fold" tick={{ fill: "var(--color-fg-muted)", fontSize: 11 }} />
+                    <YAxis tick={{ fill: "var(--color-fg-muted)", fontSize: 11 }} />
+                    <ReTooltip />
+                    <Bar dataKey="is" fill="#3b82f6" name="In-sample" />
+                    <Bar dataKey="oos" fill="#22c55e" name="Out-of-sample" />
+                  </BarChart>
+                </ResponsiveContainer>
+              </CardContent>
+            </Card>
+          ) : null}
+
+          {/* Monte-Carlo bands */}
+          {result.monte_carlo?.bands ? (
+            <Card>
+              <CardHeader>
+                <CardTitle>Monte-Carlo equity bands</CardTitle>
+                <CardDescription>
+                  p5 / p50 / p95 across {result.monte_carlo.runs} bootstrap paths.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <ResponsiveContainer width="100%" height={240}>
+                  <RLineChart data={result.monte_carlo.bands}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+                    <XAxis dataKey="trade_idx" tick={{ fill: "var(--color-fg-muted)", fontSize: 11 }} />
+                    <YAxis tick={{ fill: "var(--color-fg-muted)", fontSize: 11 }} />
+                    <ReTooltip />
+                    <Line type="monotone" dataKey="p05" stroke="#ef4444" dot={false} strokeWidth={1} strokeDasharray="3 3" />
+                    <Line type="monotone" dataKey="p50" stroke="#3b82f6" dot={false} strokeWidth={2} />
+                    <Line type="monotone" dataKey="p95" stroke="#22c55e" dot={false} strokeWidth={1} strokeDasharray="3 3" />
+                  </RLineChart>
+                </ResponsiveContainer>
+              </CardContent>
+            </Card>
+          ) : null}
+
+          {/* Regime + cost-sensitivity side by side */}
+          <div className="grid md:grid-cols-2 gap-4">
+            {result.regime_stats?.by_regime ? (
+              <Card>
+                <CardHeader><CardTitle>Per-regime stats</CardTitle></CardHeader>
+                <CardContent>
+                  <table className="w-full text-body-sm">
+                    <thead className="text-fg-subtle border-b border-border">
+                      <tr>
+                        <th className="text-left py-1.5">Regime</th>
+                        <th className="text-right">N</th>
+                        <th className="text-right">Win %</th>
+                        <th className="text-right">Expectancy</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {Object.entries(result.regime_stats.by_regime).map(([k, v]: [string, any]) => (
+                        <tr key={k} className="border-b border-border/40">
+                          <td className="py-1.5">{k}</td>
+                          <td className="text-right tabular-nums">{v.n}</td>
+                          <td className="text-right tabular-nums">{fmtNum(v.win_rate, 1)}%</td>
+                          <td className={`text-right tabular-nums ${v.expectancy >= 0 ? "text-pnl-up" : "text-pnl-down"}`}>
+                            {fmtNum(v.expectancy, 2)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </CardContent>
+              </Card>
+            ) : null}
+            {result.cost_sensitivity?.scenarios ? (
+              <Card>
+                <CardHeader>
+                  <CardTitle>Cost sensitivity</CardTitle>
+                  <CardDescription>Net edge as broker fee scales ×0.5/×1/×2/×3.</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <table className="w-full text-body-sm">
+                    <thead className="text-fg-subtle border-b border-border">
+                      <tr>
+                        <th className="text-left py-1.5">Scenario</th>
+                        <th className="text-right">Cost / trade</th>
+                        <th className="text-right">Total P&L</th>
+                        <th className="text-right">Sharpe</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {Object.entries(result.cost_sensitivity.scenarios).map(([k, v]: [string, any]) => (
+                        <tr key={k} className="border-b border-border/40">
+                          <td className="py-1.5">{k}</td>
+                          <td className="text-right tabular-nums">{fmtInr(v.cost_per_trade_inr)}</td>
+                          <td className={`text-right tabular-nums ${v.total_pnl >= 0 ? "text-pnl-up" : "text-pnl-down"}`}>{fmtInr(v.total_pnl)}</td>
+                          <td className="text-right tabular-nums">{fmtNum(v.sharpe, 2)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </CardContent>
+              </Card>
+            ) : null}
+          </div>
+
+          {/* Capacity points */}
+          {result.capacity?.points ? (
+            <Card>
+              <CardHeader>
+                <CardTitle>Capacity curve</CardTitle>
+                <CardDescription>Expectancy per trade vs deployed size (sqrt-impact model).</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <ResponsiveContainer width="100%" height={200}>
+                  <RLineChart data={result.capacity.points}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+                    <XAxis dataKey="size_inr" tick={{ fill: "var(--color-fg-muted)", fontSize: 11 }} />
+                    <YAxis tick={{ fill: "var(--color-fg-muted)", fontSize: 11 }} />
+                    <ReTooltip />
+                    <Line type="monotone" dataKey="expectancy_per_trade_r" stroke="#22c55e" dot={true} strokeWidth={2} />
+                  </RLineChart>
+                </ResponsiveContainer>
+              </CardContent>
+            </Card>
+          ) : null}
+
+          <div className="flex items-center gap-3">
+            <button onClick={doSave} disabled={pending}
+                    className="h-9 px-4 bg-pnl-up text-bg rounded-sm text-body-sm font-medium disabled:opacity-50">
+              💾 Save to registry
+            </button>
+            <span className="text-caption text-fg-subtle">
+              Saving stamps the run with the current git SHA so future comparisons are diffable.
+            </span>
+          </div>
+        </>
+      ) : null}
     </PanelWrap>
   );
 }

@@ -243,6 +243,8 @@ export default function PyramidPage() {
   const [underlying, setUnderlying] = React.useState("NIFTY");
   const [expiry, setExpiry] = React.useState(() => computeNextExpiry("NIFTY"));
   const [date, setDate] = React.useState("");
+  const [dateFrom, setDateFrom] = React.useState("");
+  const [dateTo, setDateTo] = React.useState("");
   const [capital, setCapital] = React.useState("100000");
   const [riskPct, setRiskPct] = React.useState("2.0");
   const [profitRisk, setProfitRisk] = React.useState("0.80");
@@ -275,9 +277,17 @@ export default function PyramidPage() {
       telegram: telegram ? "true" : "false",
     };
     if (expiry) p.expiry = expiry;
-    if (date) p.date = date;
+    if (dateFrom && dateTo) {
+      // Range backtest mode — backend dispatches to the range helper
+      p.date_from = dateFrom;
+      p.date_to = dateTo;
+    } else if (date) {
+      p.date = date;
+    }
     return p;
-  }, [strike, optType, underlying, expiry, date, capital, riskPct, profitRisk, maxPyramids, lotSize, dryRun, telegram]);
+  }, [strike, optType, underlying, expiry, date, dateFrom, dateTo, capital, riskPct, profitRisk, maxPyramids, lotSize, dryRun, telegram]);
+
+  const isRange = Boolean(dateFrom && dateTo);
 
   const { data, isLoading, isError, error } = usePyramid(params, run);
 
@@ -382,8 +392,59 @@ export default function PyramidPage() {
               </div>
             </div>
             <Input label="Expiry" value={expiry} onChange={(e) => setExpiry(e.target.value)} hint={`Next: ${computeNextExpiry(underlying)}`} />
-            <Input label="Date" type="date" value={date} onChange={(e) => setDate(e.target.value)} hint="Default: last trading day" />
+            <Input label="Date" type="date" value={date} onChange={(e) => setDate(e.target.value)} hint="Single day (blank = last trading day)" disabled={isRange} />
             <Input label="Capital" type="number" value={capital} onChange={(e) => setCapital(e.target.value)} leading="₹" />
+          </div>
+
+          {/* Date-range backtest — populate BOTH to enable range mode */}
+          <div className="mt-3 pt-3 border-t border-border/60">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-caption text-fg-muted">Backtest range (overrides Date when both are set)</span>
+              {isRange ? (
+                <Badge tone="info">RANGE MODE</Badge>
+              ) : null}
+              {(dateFrom || dateTo) ? (
+                <button
+                  onClick={() => { setDateFrom(""); setDateTo(""); }}
+                  className="text-caption text-accent hover:underline ml-auto"
+                  type="button"
+                >
+                  Clear range
+                </button>
+              ) : null}
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <Input
+                label="From"
+                type="date"
+                value={dateFrom}
+                onChange={(e) => setDateFrom(e.target.value)}
+                hint="YYYY-MM-DD"
+              />
+              <Input
+                label="To"
+                type="date"
+                value={dateTo}
+                onChange={(e) => setDateTo(e.target.value)}
+                hint="max 60 days"
+              />
+              {[7, 14, 30].map((n) => (
+                <button
+                  key={n}
+                  type="button"
+                  onClick={() => {
+                    const end = new Date();
+                    const start = new Date(end);
+                    start.setDate(end.getDate() - n);
+                    setDateFrom(start.toISOString().slice(0, 10));
+                    setDateTo(end.toISOString().slice(0, 10));
+                  }}
+                  className="h-9 px-3 text-caption bg-surface-2 border border-border rounded-sm hover:bg-surface-3 self-end"
+                >
+                  Last {n}d
+                </button>
+              ))}
+            </div>
           </div>
 
           {/* Advanced toggle */}
@@ -422,7 +483,9 @@ export default function PyramidPage() {
       )}
 
       {/* ── Results ── */}
-      {data && <PyramidResults data={data} showLog={showLog} setShowLog={setShowLog} />}
+      {data && (data as { aggregate?: unknown }).aggregate !== undefined
+        ? <PyramidRangeResults data={data as unknown as PyramidRangeData} />
+        : data && <PyramidResults data={data} showLog={showLog} setShowLog={setShowLog} />}
 
       {/* ── Empty state ── */}
       {!data && !isLoading && !isError && (
@@ -439,6 +502,130 @@ export default function PyramidPage() {
           </CardContent>
         </Card>
       )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Range backtest results                                              */
+/* ------------------------------------------------------------------ */
+
+interface PyramidRangeRun {
+  date: string;
+  total_pnl_inr: number;
+  total_pnl_pts: number;
+  total_lots: number;
+  trades: number;
+}
+interface PyramidRangeData {
+  config: Record<string, unknown>;
+  runs: PyramidRangeRun[];
+  aggregate: {
+    days_traded: number;
+    profitable_days: number;
+    losing_days: number;
+    total_pnl_inr: number;
+    avg_daily_pnl_inr: number;
+    win_rate_pct: number;
+    best_day: { date: string; pnl_inr: number };
+    worst_day: { date: string; pnl_inr: number };
+    sharpe: number;
+  } | null;
+  error?: string;
+}
+
+function PyramidRangeResults({ data }: { data: PyramidRangeData }) {
+  const agg = data.aggregate;
+  if (!agg) {
+    return (
+      <Card>
+        <CardContent className="py-8 text-center">
+          <AlertTriangle className="h-8 w-8 mx-auto text-warning mb-3" />
+          <h3 className="text-body font-semibold">No trading days produced data</h3>
+          <p className="text-body-sm text-fg-muted mt-2">
+            {data.error ?? "Try a wider range or enable Sample Data."}
+          </p>
+        </CardContent>
+      </Card>
+    );
+  }
+  // Build a cumulative equity series for the chart
+  let cum = 0;
+  const series = data.runs.map((r) => {
+    cum += r.total_pnl_inr;
+    return { date: r.date.slice(5), pnl: r.total_pnl_inr, cum };
+  });
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Layers className="h-4 w-4 text-accent" />
+            Range backtest — {agg.days_traded} trading day{agg.days_traded === 1 ? "" : "s"}
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <KPI label="Total P&L" value={agg.total_pnl_inr} valueFormat="inr" />
+            <KPI label="Avg daily P&L" value={agg.avg_daily_pnl_inr} valueFormat="inr" />
+            <KPI label="Win rate" value={agg.win_rate_pct} valueFormat="pct" />
+            <KPI label="Sharpe (×√252)" value={agg.sharpe} valueFormat="num" />
+            <KPI label="Best day" value={agg.best_day.pnl_inr} valueFormat="inr"
+                 hint={agg.best_day.date} />
+            <KPI label="Worst day" value={agg.worst_day.pnl_inr} valueFormat="inr"
+                 hint={agg.worst_day.date} />
+            <KPI label="Profitable" value={agg.profitable_days} valueFormat="num" />
+            <KPI label="Losing" value={agg.losing_days} valueFormat="num" />
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader><CardTitle>Cumulative equity</CardTitle></CardHeader>
+        <CardContent>
+          <ResponsiveContainer width="100%" height={260}>
+            <ComposedChart data={series}>
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+              <XAxis dataKey="date" tick={{ fill: "var(--color-fg-muted)", fontSize: 11 }} />
+              <YAxis tick={{ fill: "var(--color-fg-muted)", fontSize: 11 }} />
+              <Tooltip />
+              <Bar dataKey="pnl" fill="#3b82f6" name="Daily P&L" />
+              <Line type="monotone" dataKey="cum" stroke="#22c55e" strokeWidth={2} dot={false} name="Cumulative" />
+            </ComposedChart>
+          </ResponsiveContainer>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader><CardTitle>Per-day runs</CardTitle></CardHeader>
+        <CardContent>
+          <div className="overflow-auto max-h-[420px]">
+            <table className="w-full text-body-sm">
+              <thead className="text-fg-subtle border-b border-border sticky top-0 bg-surface">
+                <tr>
+                  <th className="text-left py-1.5">Date</th>
+                  <th className="text-right">Trades</th>
+                  <th className="text-right">Lots</th>
+                  <th className="text-right">P&L (pts)</th>
+                  <th className="text-right">P&L (INR)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.runs.map((r) => (
+                  <tr key={r.date} className="border-b border-border/40">
+                    <td className="py-1.5">{r.date}</td>
+                    <td className="text-right tabular-nums">{r.trades}</td>
+                    <td className="text-right tabular-nums">{r.total_lots}</td>
+                    <td className={cn("text-right tabular-nums", clsPnl(r.total_pnl_pts))}>{fmtNum(r.total_pnl_pts, 1)}</td>
+                    <td className={cn("text-right tabular-nums", clsPnl(r.total_pnl_inr))}>{fmtInr(r.total_pnl_inr)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }
