@@ -43,8 +43,22 @@ Return ONLY this JSON object — no markdown fences, no prose:
   "tasks": [{...}]
 }
 
-Don't propose duplicates of tasks already in the palace (compare on title).
-Cap at 8 tasks per cycle.
+DEDUP RULES — read carefully BEFORE proposing tasks:
+  1. The snapshot includes `shipped_titles` — every feature ALREADY
+     SHIPPED. Do NOT create a task whose title is a near-match (same
+     noun, same domain) to any shipped title. The trader_user agents
+     can be fooled into re-asking; you are the gatekeeper.
+  2. The Cockpit Catalog in the project briefing is the authoritative
+     list of live panels + endpoints. If a feature_request maps onto an
+     existing catalog entry, mark it as a no-op in your summary — do
+     NOT generate a task for it.
+  3. Parameter tweaks (e.g. "ORB 5m" when "ORB 15m" ships) are NOT new
+     tasks — they're config. Skip them unless the request explicitly
+     names a capability the shipped version lacks.
+  4. If a request is a genuine extension, frame the task title as
+     "EXTEND <existing feature>: <new capability>" so it threads onto
+     the right file.
+  5. Cap at 8 tasks per cycle. Fewer high-quality tasks > more echoes.
 """
 
 
@@ -55,7 +69,8 @@ def run() -> tuple[state.MindPalace, int]:
 
     started = state._now()
     snapshot = palace_snapshot(palace, include={
-        "open_bugs", "feature_requests", "tasks", "recent_runs", "recent_agent_runs",
+        "open_bugs", "feature_requests", "tasks", "shipped_titles",
+        "recent_runs", "recent_agent_runs",
     })
     prompt = (
         f"{SYSTEM}\n\n---\n\nPROJECT BRIEFING:\n{briefing_text()[:4000]}\n\n"

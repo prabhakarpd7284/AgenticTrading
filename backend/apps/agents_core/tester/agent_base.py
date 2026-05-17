@@ -32,7 +32,10 @@ def palace_snapshot(palace: state.MindPalace, *, include: set[str] | None = None
 
     Defaults to a sensible "what's actionable right now" snapshot.
     """
-    include = include or {"open_bugs", "feature_requests", "tasks", "recent_runs", "recent_agent_runs", "notes"}
+    include = include or {
+        "open_bugs", "feature_requests", "tasks", "shipped_titles",
+        "recent_runs", "recent_agent_runs", "notes",
+    }
     out: dict[str, Any] = {
         "fingerprint": palace.fingerprint,
         "last_run_at": palace.last_run_at,
@@ -57,6 +60,13 @@ def palace_snapshot(palace: state.MindPalace, *, include: set[str] | None = None
              "files": t.files[:6]}
             for t in palace.tasks[-TOP_N_TASKS:]
         ]
+    # NEW: token-cheap digest of EVERY done task so the trader_user +
+    # planner agents don't waste a cycle re-asking for already-shipped
+    # functionality. Title only, no scope / files / rationale.
+    if "shipped_titles" in include:
+        out["shipped_titles"] = sorted({
+            t.title for t in palace.tasks if t.status == "done" and t.title
+        })
     if "recent_runs" in include:
         out["recent_runs"] = [
             {"id": r.id, "started_at": r.started_at, "passed": r.passed,

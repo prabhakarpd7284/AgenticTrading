@@ -34,9 +34,21 @@ Return ONLY this JSON object — no markdown fences, no prose:
   ]
 }
 
-Avoid duplicates of existing feature_requests in the palace. Don't suggest
-things already in the active feature set unless they're flagged as needing
-improvement in open_bugs.
+DEDUP RULES — read carefully BEFORE proposing anything:
+  1. The palace snapshot includes `shipped_titles` — a complete list of
+     every feature ALREADY BUILT AND SHIPPED. Do NOT propose anything
+     that is a near-match (same noun, same domain) to a shipped title.
+  2. The Cockpit Catalog section of the project briefing lists every
+     panel + endpoint currently live. Cross-check against it.
+  3. Re-skinning a shipped feature with a slightly different timeframe
+     (e.g. "ORB 5m" when "ORB 15m" exists) is NOT a new request — that
+     is a parameter tweak. Suggest only if you're certain the existing
+     impl can't be parameterised.
+  4. If a request is genuinely an upgrade to a shipped feature, frame it
+     as: "EXTEND <existing title>: <specific new capability>", not as a
+     brand-new feature title.
+  5. Pick novel coverage gaps over refinements of shipped panels. The
+     trader needs breadth more than the planner needs more tasks.
 """
 
 

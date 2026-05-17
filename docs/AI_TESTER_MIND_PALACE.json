@@ -1,7 +1,7 @@
 {
   "context_version": 2,
   "fingerprint": "16440204a7bfb31e",
-  "last_run_at": "2026-05-17T15:57:59Z",
+  "last_run_at": "2026-05-17T15:58:17Z",
   "open_bugs": [],
   "fixed_bugs": [
     {
@@ -152,7 +152,6 @@
     }
   ],
   "notes": [
-    "[trader_user:intraday @ 2026-05-17T15:18:10Z] Intraday-scalper lens: palace has ORB/VWAP/tape/cost basics covered. Filing 4 gaps \u2014 sector dispersion heatmap, news-shock circuit, rolling vol-per-minute regime, partial-fill economics.",
     "[planner @ 2026-05-17T15:18:21Z] 8 new tasks created from open feature_requests across equity-swing, intraday-scalper, futures, and risk personas. No open bugs. All existing tasks done; no duplicates.",
     "[executor @ 2026-05-17T15:18:34Z] proposed prop-multi-timeframe-stage-scanner-weinstein-d-w-m-stage-2-alignment-008 for multi-timeframe-stage-scanner-weinstein-d-w-m-stage-2-alignment",
     {
@@ -165,7 +164,13 @@
     "[trader_user:futures @ 2026-05-17T15:57:07Z] Futures-trader lens: palace has zero futures-specific tooling \u2014 no basis, OI quadrants, roll calendar, SPAN margin efficiency, or cash-futures arb. Filing 5 gaps.",
     "[trader_user:equity @ 2026-05-17T15:57:20Z] Equity-swing lens: palace has zero swing-specific tooling \u2014 no RS leaderboard, RRG sectors, breakout classifier, earnings overlay for swings, or FII/DII regime gauge tailored for D/W holds.",
     "[trader_user:intraday @ 2026-05-17T15:57:32Z] Intraday scalper lens: palace has VWAP-Z, tape-speed, slippage, forced-flat, vol-per-min, news-shock. Gaps: ORB tracker, L2 depth/imbalance, OR retest map, capital-rotation $vol leaderboard, gap-fill stats.",
-    "[planner @ 2026-05-17T15:57:42Z] Drafted 8 tasks from the 8 open feature requests (no open bugs). Risk + report categories get high priority; chart/data get medium."
+    "[planner @ 2026-05-17T15:57:42Z] Drafted 8 tasks from the 8 open feature requests (no open bugs). Risk + report categories get high priority; chart/data get medium.",
+    "[executor @ 2026-05-17T15:57:59Z] proposed prop-swing-position-earnings-catalyst-heatmap-next-30-days-t-7-risk-alert-009 for swing-position-earnings-catalyst-heatmap-next-30-days-t-7-risk-alert",
+    {
+      "agent": "human",
+      "at": "2026-05-17T16:00:43.330386+00:00",
+      "summary": "Dropped 8 echo-loop tasks (all near-matches to already-shipped cockpits). Briefing updated with Cockpit Catalog + shipped_titles snapshot field to prevent recurrence."
+    }
   ],
   "feature_requests": [
     {
@@ -2687,7 +2692,7 @@
       "acceptance": "GET /api/v1/portfolios/earnings-heatmap/ returns a 30-day matrix of positions x event-dates with T-7 reduce flags, and the heatmap renders in the Positions feature.",
       "source": "feature_request",
       "source_id": "swing-position-earnings-catalyst-heatmap-next-30-days-t-7-risk-alert",
-      "status": "open",
+      "status": "dropped",
       "created_at": "2026-05-17T15:57:59Z"
     },
     {
@@ -2705,7 +2710,7 @@
       "acceptance": "GET /api/v1/market-data/orb-tracker/ returns each symbol's 5m/15m OR levels, state, and time-since-break, and the live grid renders with refreshing status badges.",
       "source": "feature_request",
       "source_id": "opening-range-breakout-tracker-5m-15m-with-live-status-grid",
-      "status": "open",
+      "status": "dropped",
       "created_at": "2026-05-17T15:57:59Z"
     },
     {
@@ -2723,7 +2728,7 @@
       "acceptance": "GET /api/v1/market-data/capital-rotation/ returns ranked symbols with velocity ratio + 15m/60m rotation delta, and the leaderboard renders with arrows in the Pulse feature.",
       "source": "feature_request",
       "source_id": "intraday-capital-rotation-leaderboard-volume-velocity-15m-60m",
-      "status": "open",
+      "status": "dropped",
       "created_at": "2026-05-17T15:57:59Z"
     },
     {
@@ -2741,7 +2746,7 @@
       "acceptance": "GET /api/v1/market-data/sector-rrg/ returns 11 sector indices with 8-point RS-Ratio/RS-Momentum series, and the RRG quadrant renders with tails on the Rotation page.",
       "source": "feature_request",
       "source_id": "sector-rrg-rs-ratio-vs-rs-momentum-with-weekly-8-week-tails-sector-level",
-      "status": "open",
+      "status": "dropped",
       "created_at": "2026-05-17T15:57:59Z"
     },
     {
@@ -2759,7 +2764,7 @@
       "acceptance": "GET /api/v1/market-data/flow-regime-swing/ returns 20/60-day cumulative flows + NIFTY series + regime label, and the gauge renders with overlay chart in the Pulse feature.",
       "source": "feature_request",
       "source_id": "fii-dii-cash-flow-regime-gauge-for-swing-hold-period-20-60-day-nifty-overlay",
-      "status": "open",
+      "status": "dropped",
       "created_at": "2026-05-17T15:57:59Z"
     },
     {
@@ -2777,7 +2782,7 @@
       "acceptance": "GET /api/v1/legacy/l2-depth/<symbol>/ returns top-5 bids/asks + imbalance + spoof count + microprice, and the heatstrip renders live in the Positions feature.",
       "source": "feature_request",
       "source_id": "level-2-depth-bid-ask-imbalance-heatstrip-top-5-levels",
-      "status": "open",
+      "status": "dropped",
       "created_at": "2026-05-17T15:57:59Z"
     },
     {
@@ -2795,7 +2800,7 @@
       "acceptance": "GET /api/v1/market-data/or-retest-map/ returns each symbol's current pattern + 60-session win-rate by pattern, and the map renders with pattern badges.",
       "source": "feature_request",
       "source_id": "opening-range-retest-vwap-reclaim-map-post-break-behaviour",
-      "status": "open",
+      "status": "dropped",
       "created_at": "2026-05-17T15:57:59Z"
     },
     {
@@ -2813,7 +2818,7 @@
       "acceptance": "GET /api/v1/market-data/gap-fill/ returns per-symbol gap-size-ATR, historical fill probability, and current fill %, and the stat card renders for each gapped-open name.",
       "source": "feature_request",
       "source_id": "gap-fill-probability-first-hour-reversion-stat-card-per-symbol",
-      "status": "open",
+      "status": "dropped",
       "created_at": "2026-05-17T15:57:59Z"
     }
   ],
@@ -3203,24 +3208,58 @@
       ],
       "status": "proposed",
       "created_at": "2026-05-17T15:18:48Z"
+    },
+    {
+      "id": "prop-swing-position-earnings-catalyst-heatmap-next-30-days-t-7-risk-alert-009",
+      "task_id": "swing-position-earnings-catalyst-heatmap-next-30-days-t-7-risk-alert",
+      "summary": "Adds a 30-day earnings/dividend/AGM catalyst heatmap aggregated across all open swing positions with a T-7 reduce-size alert, exposed via a new portfolio endpoint and rendered in the Positions feature.",
+      "files_changed": [
+        {
+          "path": "trading/models.py",
+          "change_kind": "modify",
+          "approach": "Add a new CatalystEvent model storing symbol, event_type (EARNINGS|DIVIDEND|AGM|EGM|RESULT|SPLIT), event_date, confidence/source, and notes so the heatmap has a single canonical event source. Index on (symbol, event_date).",
+          "code_outline": "class CatalystEvent(models.Model):\n    class Type(TextChoices): EARNINGS, DIVIDEND, AGM, EGM, RESULT, SPLIT, OTHER\n    symbol = CharField(max_length=30, db_index=True)\n    event_type = CharField(max_length=12, choices=Type.choices)\n    event_date = DateField(db_index=True)\n    source = CharField(max_length=40, blank=True)   # 'nse_corp_actions' | 'manual'\n    confidence = FloatField(default=1.0)\n    notes = TextField(blank=True, default='')\n    created_at = DateTimeField(auto_now_add=True)\n    class Meta:\n        unique_together = [('symbol','event_type','event_date')]\n        indexes = [Index(fields=['symbol','event_date']), Index(fields=['event_date'])]"
+        },
+        {
+          "path": "backend/apps/portfolio/services/earnings_heatmap.py",
+          "change_kind": "create",
+          "approach": "New service that pulls all open Positions for the tenant, queries CatalystEvent (via legacy bridge) for the next 30 trading days, and builds a positions \u00d7 event-dates matrix with per-cell event-type tags and a T-7 reduce_flag per position. Returns a dict consumable by DRF.",
+          "code_outline": "from datetime import date, timedelta\nfrom trading.utils.time_utils import next_n_trading_days, today_ist\nfrom trading.models import CatalystEvent\n\nT_MINUS = 7\nWINDOW_DAYS = 30\n\ndef build_earnings_heatmap(tenant, portfolio, today=None) -> dict:\n    today = today or today_ist()\n    trading_days = next_n_trading_days(today, WINDOW_DAYS)   # list[date]\n    positions = Position.objects.filter(tenant=tenant, portfolio=portfolio, status='OPEN')\n    symbols = [p.symbol for p in positions]\n    events = CatalystEvent.objects.filter(symbol__in=symbols, event_date__range=(trading_days[0], trading_days[-1]))\n    by_symbol = group_by(events, 'symbol')\n\n    rows = []\n    for p in positions:\n        cells = []\n        reduce_flag = False\n        reduce_reason = None\n        for d in trading_days:\n            evs = [e for e in by_symbol.get(p.symbol, []) if e.event_date == d]\n            cells.append({'date': d.isoformat(), 'types': [e.event_type for e in evs], 'count': len(evs)})\n            dte = (d - today).days\n            if evs and 0 <= dte <= T_MINUS:\n                reduce_flag = True\n                reduce_reason = f\"{evs[0].event_type} in {dte}d\"\n        rows.append({'symbol': p.symbol, 'qty': p.quantity, 'cells': cells,\n                     'reduce_flag': reduce_flag, 'reduce_reason': reduce_reason})\n\n    clustering = compute_daily_cluster_counts(rows, trading_days)  # date -> count\n    return {'dates': [d.isoformat() for d in trading_days],\n            't_minus_days': T_MINUS,\n            'positions': rows,\n            'clustering': clustering,\n            'generated_at': now_is"
+        },
+        {
+          "path": "backend/apps/portfolio/api/views.py",
+          "change_kind": "modify",
+          "approach": "Add EarningsHeatmapView (APIView, IsAuthenticated) that resolves the tenant's portfolio (same auto-create pattern as MonthlyReportView), invokes build_earnings_heatmap, and returns the payload. Cache 120s with ?force=1 bypass.",
+          "code_outline": "from apps.portfolio.services.earnings_heatmap import build_earnings_heatmap\n\nclass EarningsHeatmapView(APIView):\n    permission_classes = [IsAuthenticated]\n    def get(self, request):\n        portfolio_id = request.query_params.get('portfolio')\n        force = request.query_params.get('force') in ('1','true')\n        qs = Portfolio.objects.filter(tenant=request.tenant)\n        if portfolio_id: qs = qs.filter(id=portfolio_id)\n        portfolio = qs.first() or _auto_create_default(request.tenant)\n        payload = build_earnings_heatmap(request.tenant, portfolio)  # add cache_key + force\n        return Response(payload)"
+        },
+        {
+          "path": "backend/apps/portfolio/api/urls.py",
+          "change_kind": "modify",
+          "approach": "Wire the new endpoint above the portfolio detail catchall router, mirroring how earnings-overlay/ is mounted.",
+          "code_outline": "from apps.portfolio.api.views import EarningsHeatmapView\n# ...\n    path('earnings-heatmap/', EarningsHeatmapView.as_view(), name='earnings-heatmap'),\n# (placed before path('positions/', include(position_router.urls)) and the '' catchall)"
+        },
+        {
+          "path": "frontend/src/features/positions/EarningsCatalystHeatmap.tsx",
+          "change_kind": "create",
+          "approach": "New React component using TanStack Query to GET /api/v1/portfolios/earnings-heatmap/ and render a sticky-symbol-column \u00d7 30-trading-day grid. Cells are color-coded by event type, T-7 cells get an amber border, and rows with reduce_flag show a 'REDUCE SIZE' chip with the reason. Mounted into the Positions feature page (existing Positions route).",
+          "code_outline": "export function EarningsCatalystHeatmap({ portfolioId }: Props) {\n  const { data, isLoading } = useQuery({\n    queryKey: ['earnings-heatmap', portfolioId],\n    queryFn: () => api.get('/portfolios/earnings-heatmap/', { params: { portfolio: portfolioId } }).then(r => r.data),\n    staleTime: 120_000,\n  });\n  if (isLoading) return <KpiSkeleton/>;\n  return (\n    <Card>\n      <header>Earnings & Catalyst Heatmap (next 30 trading days)</header>\n      <table>\n        <thead><tr><th>Symbol</th>{data.dates.map(d => <th key={d}>{shortDate(d)}</th>)}</tr></thead>\n        <tbody>{data.positions.map(row => (\n          <tr key={row.symbol}>\n            <td>\n              {row.symbol}\n              {row.reduce_flag && <Badge tone='warning'>REDUCE \u2014 {row.reduce_reason}</Badge>}\n            </td>\n            {row.cells.map(c => <Cell key={c.date} types={c.types} isTMinus7={withinT7(c.date,data.t_minus_days)} />)}\n          </tr>\n        ))}</tbody>\n      </table>\n      <ClusterStrip data={data.clustering} />\n    </Card>\n  );\n}"
+        }
+      ],
+      "risks": [
+        "CatalystEvent has no ingestion pipeline yet \u2014 endpoint will return empty cells until a separate corp-actions fetch (NSE/BSE) is wired; UI must handle empty heatmap gracefully.",
+        "next_n_trading_days helper may not exist in trading/utils/time_utils.py \u2014 if absent, service must derive a holiday-aware trading-day list, otherwise weekend/holiday cells will misalign with T-7 math.",
+        "Adding CatalystEvent requires a migration; in tenants where Position lacks a portfolio FK the join will need to fall back to tenant-only filtering."
+      ],
+      "tests_needed": [
+        "Service test: seed 3 positions and CatalystEvent rows at T+2, T+7, T+15 \u2014 assert reduce_flag is true for T+2 and T+7 positions only and matrix dimensions equal len(trading_days).",
+        "API contract test: GET /api/v1/portfolios/earnings-heatmap/ returns 200 with keys {dates, t_minus_days, positions[], clustering}, length of dates == 30, and is auth-gated.",
+        "Frontend test: component renders a row per position, REDUCE chip appears only when reduce_flag is true, and T-7 cells receive the amber-border class."
+      ],
+      "status": "proposed",
+      "created_at": "2026-05-17T15:58:17Z"
     }
   ],
   "agent_runs": [
-    {
-      "id": "trader_user:options-2026-05-17t12-51-57z",
-      "agent_kind": "trader_user:options",
-      "started_at": "2026-05-17T12:51:57Z",
-      "ended_at": "2026-05-17T12:52:08Z",
-      "ok": true,
-      "summary": "Focused on options microstructure gaps not yet in palace: IV term structure, skew snapshot per expiry, gamma exposure mapping, RV/IV edge per expiry, and event-driven IV crush playbook.",
-      "produced_ids": [
-        "live-iv-term-structure-iv-rank-board-next-4-weekly-expiries",
-        "25-delta-risk-reversal-butterfly-skew-snapshot",
-        "dealer-gamma-exposure-gex-map-by-strike",
-        "realized-vs-implied-edge-per-expiry-with-forward-p-l-projection",
-        "event-driven-iv-crush-playbook-fomc-rbi-budget-earnings"
-      ]
-    },
     {
       "id": "trader_user:futures-2026-05-17t12-52-08z",
       "agent_kind": "trader_user:futures",
@@ -3806,6 +3845,17 @@
         "level-2-depth-bid-ask-imbalance-heatstrip-top-5-levels",
         "opening-range-retest-vwap-reclaim-map-post-break-behaviour",
         "gap-fill-probability-first-hour-reversion-stat-card-per-symbol"
+      ]
+    },
+    {
+      "id": "executor-2026-05-17t15-57-59z",
+      "agent_kind": "executor",
+      "started_at": "2026-05-17T15:57:59Z",
+      "ended_at": "2026-05-17T15:58:17Z",
+      "ok": true,
+      "summary": "Proposed change for task 'Swing-Position Earnings & Catalyst Heatmap (next 30 days, T-7 risk alert)'",
+      "produced_ids": [
+        "prop-swing-position-earnings-catalyst-heatmap-next-30-days-t-7-risk-alert-009"
       ]
     }
   ]

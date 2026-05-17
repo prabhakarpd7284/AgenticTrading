@@ -26,7 +26,10 @@ from typing import Any
 # Bump when the schema / scope of the mind palace meaningfully changes.
 # v2: added feature_requests / tasks / proposals / agent_runs for the
 #     multi-agent team (trader_user · planner · executor · tester).
-CONTEXT_VERSION = 2
+# v3: briefing gained the Cockpit Catalog + echo-loop dedup rules; the
+#     palace_snapshot now emits a `shipped_titles` digest so the
+#     trader_user + planner can dedupe against every shipped task.
+CONTEXT_VERSION = 3
 
 # state.py → tester/ → agents_core/ → apps/ → backend/ → AgenticTrading/
 _REPO_ROOT = Path(__file__).resolve().parents[4]

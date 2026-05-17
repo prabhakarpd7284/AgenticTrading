@@ -155,6 +155,73 @@ The agent **never edits files itself** — it writes the proposal into the
 mind palace under each finding's `suggested_fix`, and a human (or Claude
 Code) applies it. This keeps the test-and-fix loop auditable.
 
+## Cockpit catalog (already shipped — DO NOT re-propose)
+
+The `/cockpits` page already ships **41 read-only panels** organised into 7
+categories. Every endpoint listed below is live; the trader_user + planner
+agents must NOT propose a duplicate or a parameter-tweak refinement.
+
+Frontend lives at `frontend/src/features/cockpits/CockpitsPage.tsx`.
+Backend services at `backend/apps/{portfolio,market_data,strategies}/services/`.
+
+| Category | Panel | Backend service | Endpoint |
+|---|---|---|---|
+| Capital & Risk | Capital cockpit             | `portfolio/services/cockpits.build_capital_cockpit`  | GET `/portfolios/capital-cockpit/` |
+| Capital & Risk | Risk budget + drawdown      | `portfolio/services/cockpits.build_risk_budget`      | GET `/portfolios/risk-budget/` |
+| Capital & Risk | Gap risk dashboard          | `portfolio/services/gap_risk`                        | GET `/portfolios/gap-risk/` |
+| Capital & Risk | Correlation matrix          | `portfolio/services/correlation_matrix`              | GET `/portfolios/correlation/` |
+| Capital & Risk | Structural stops + ledger   | `portfolio/services/structural_stops`                | GET `/portfolios/structural-stops/` |
+| Options & Expiry | Greeks heatmap            | `portfolio/services/cockpits.build_greeks_heatmap`   | GET `/portfolios/greeks-heatmap/` |
+| Options & Expiry | Theta forecast            | `portfolio/services/cockpits.build_theta_forecast`   | GET `/portfolios/theta-forecast/` |
+| Options & Expiry | Expiry cockpit            | `portfolio/services/cockpits.build_expiry_cockpit`   | GET `/portfolios/expiry-cockpit/` |
+| Setups & Signals | Signal funnel             | `portfolio/services/cockpits.build_signal_funnel`    | GET `/portfolios/signal-funnel/` |
+| Setups & Signals | Edge decay                | `portfolio/services/cockpits.build_edge_decay`       | GET `/portfolios/edge-decay/` |
+| Setups & Signals | Regime heatmap            | `portfolio/services/cockpits.build_regime_heatmap`   | GET `/portfolios/regime-heatmap/` |
+| Setups & Signals | MTF stage scanner (D/W/M + Weinstein S2) | `strategies/services/mtf_stage_scanner` | GET `/strategies/mtf-stage/?symbols=` |
+| Setups & Signals | Fresh vs Extended classifier (% + ATR)   | `strategies/services/breakout_classifier` | GET `/strategies/breakout-classifier/?symbols=` |
+| Setups & Signals | Base quality scorer       | `strategies/services/base_quality`                   | GET `/strategies/base-quality/?symbols=` |
+| Setups & Signals | Opening-Range tracker (9:15–9:30, state machine) | `market_data/services/orb_tracker` | GET `/market-data/orb/` |
+| Setups & Signals | OR failure & reversal     | `market_data/services/orb_failure`                   | GET `/market-data/orb-failure/` |
+| Setups & Signals | First 5-min profile       | `market_data/services/first_5min`                    | GET `/market-data/first-5min/` |
+| Setups & Signals | 2nd 5-min classifier      | `market_data/services/second_5min`                   | GET `/market-data/second-5min/` |
+| Setups & Signals | Gap-fill probability      | `market_data/services/gap_fill`                      | GET `/market-data/gap-fill/` |
+| Tape & Microstructure | VWAP bands + z-score | `market_data/services/vwap_bands`                    | GET `/market-data/vwap-bands/?symbol=` |
+| Tape & Microstructure | Vol regime strip (1m + 15m + day percentile) | `market_data/services/vol_regime_strip` | GET `/market-data/vol-regime/?symbol=` |
+| Tape & Microstructure | Tape speed + 10s EMA | `market_data/services/tape_speed`                    | GET `/market-data/tape-speed/?symbol=` |
+| Tape & Microstructure | Liquidity map        | `market_data/services/liquidity_map`                 | GET `/market-data/liquidity/` |
+| Tape & Microstructure | Depth imbalance proxy | `market_data/services/depth_imbalance`              | GET `/market-data/depth-imbalance/` |
+| Sectors & Flow | Sector RRG (daily / weekly 13w tails)  | `market_data/services/sector_rrg`    | GET `/market-data/sector-rrg/?weekly=1` |
+| Sectors & Flow | Stock RRG (weekly 8w tails)            | `market_data/services/stock_rrg`     | GET `/market-data/stock-rrg/?symbols=` |
+| Sectors & Flow | Sector dispersion + leaders/laggards   | `market_data/services/sector_dispersion` | GET `/market-data/sector-dispersion/` |
+| Sectors & Flow | Sector heatmap (5-min slots)           | `market_data/services/intraday_sector_heatmap` | GET `/market-data/intraday-sector-heatmap/` |
+| Sectors & Flow | FII/DII flow + regime classifier       | `market_data/services/fii_dii_flow`  | GET `/market-data/fii-dii-flow/?days=` |
+| Sectors & Flow | News shocks + circuit-breaker          | `market_data/services/news_shock`    | GET `/market-data/news-shocks/` + POST `/pause/` + POST `/unpause/` |
+| Sectors & Flow | Earnings overlay (yfinance)            | `portfolio/services/earnings_overlay` | GET `/portfolios/earnings-overlay/` |
+| Execution & Trades | Plan vs Actual          | `portfolio/services/cockpits.build_plan_vs_actual`   | GET `/portfolios/plan-vs-actual/` |
+| Execution & Trades | Edge ledger (gross/cost/net + drag) | `portfolio/services/edge_ledger`             | GET `/portfolios/edge-ledger/` |
+| Execution & Trades | Partial-fill economics  | `portfolio/services/partial_fill`                    | GET `/portfolios/partial-fill/` |
+| Execution & Trades | Post-mortem annotator   | `portfolio/services/post_mortem`                     | GET `/portfolios/post-mortem/?month=YYYY-MM` |
+| Execution & Trades | Broker reconciliation   | `portfolio/services/cockpits.build_broker_reconciliation` | GET `/portfolios/broker-recon/` |
+| Execution & Trades | Forced flat (15:15 + carry cost + flatten button) | `portfolio/services/forced_flat` | GET `/portfolios/forced-flat/` + POST `/flatten/` |
+| Execution & Trades | Intraday capital rotation (5-min) | `portfolio/services/intraday_rotation`     | GET `/portfolios/intraday-rotation/?date=` |
+| Tools | What-If sizer                                   | `portfolio/services/sizer_simulator`                 | POST `/portfolios/sizer/simulate/` |
+| Tools | Slippage vs Edge (setup-family catalog)         | `portfolio/services/slippage_edge`                   | POST `/portfolios/slippage-edge/` + GET `/setups/` |
+| Tools | Reset / Seed (CLI mirror)                       | `portfolio/management/commands/reset_trading_data`   | POST `/portfolios/reset/` |
+
+### Echo-loop prevention rules
+
+When the trader_user agents propose features and the planner promotes them:
+
+1. The mind palace snapshot now includes a `shipped_titles` array — a
+   full list of every done task. Both trader_user and planner MUST
+   compare every proposed title against this list before emitting it.
+2. A parameter tweak (different timeframe, longer tail, narrower scope)
+   is NOT a new feature — it's config on the existing impl. Suggest
+   only when the existing endpoint genuinely can't be parameterised.
+3. Real extensions should be framed `"EXTEND <existing title>:
+   <new capability>"` so the planner threads onto the right file.
+4. When in doubt, novel coverage > yet another refinement.
+
 ## Versioning
 
 Bump `CONTEXT_VERSION` at the top of `state.py` whenever the test plan,
