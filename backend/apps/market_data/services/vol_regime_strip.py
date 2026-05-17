@@ -76,13 +76,24 @@ def build_vol_regime(symbol: str) -> dict[str, Any]:
     vol_history: list[float] = []
     for i, b in enumerate(bars):
         window = rets[max(0, i - _VOL_WINDOW + 1) : i + 1]
-        if len(window) >= 3:
-            sd = statistics.pstdev(window)
-        else:
-            sd = 0.0
+        sd = statistics.pstdev(window) if len(window) >= 3 else 0.0
         realised_vol_ann = sd * math.sqrt(_ANN_BARS) * 100.0   # %
         vol_history.append(realised_vol_ann)
         mean_realised = statistics.mean(vol_history[-30:]) if len(vol_history) >= 3 else 0.0
+
+        # 15-minute rolling vol — a smoother view than the per-minute σ.
+        win15 = rets[max(0, i - 14) : i + 1]
+        sd_15 = statistics.pstdev(win15) if len(win15) >= 3 else 0.0
+        vol_15m_ann = round(sd_15 * math.sqrt(_ANN_BARS) * 100.0, 2)
+
+        # Day percentile = where this minute's vol ranks vs the rest of today.
+        if len(vol_history) >= 5:
+            sorted_vols = sorted(vol_history)
+            rank = sum(1 for v in sorted_vols if v <= realised_vol_ann)
+            day_percentile = round(rank / len(sorted_vols) * 100.0, 1)
+        else:
+            day_percentile = 0.0
+
         drift = sum(window) if window else 0.0
         bar_v = vols[i]
         tps = round(bar_v / 60.0, 1)
@@ -100,6 +111,8 @@ def build_vol_regime(symbol: str) -> dict[str, Any]:
             "t": b["t"],
             "c": round(b["c"], 2),
             "realised_vol_ann": round(realised_vol_ann, 2),
+            "vol_15m_ann": vol_15m_ann,
+            "day_percentile": day_percentile,
             "trades_per_sec": tps,
             "regime": regime,
         })

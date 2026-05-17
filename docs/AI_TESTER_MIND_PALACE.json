@@ -1,7 +1,7 @@
 {
   "context_version": 2,
   "fingerprint": "16440204a7bfb31e",
-  "last_run_at": "2026-05-17T13:52:40Z",
+  "last_run_at": "2026-05-17T15:18:48Z",
   "open_bugs": [],
   "fixed_bugs": [
     {
@@ -131,35 +131,36 @@
       "passed": 15,
       "failed": 0,
       "finding_ids": []
+    },
+    {
+      "id": "451988099bad",
+      "started_at": "2026-05-17T15:17:11Z",
+      "ended_at": "2026-05-17T15:17:18Z",
+      "total": 15,
+      "passed": 15,
+      "failed": 0,
+      "finding_ids": []
     }
   ],
   "notes": [
-    {
-      "agent": "executor",
-      "at": "2026-05-17T13:32:12.736729+00:00",
-      "summary": "Closed 3 planner tasks: VWAP bands, first-5-min classifier, base-quality scorer. New tabs on /cockpits + endpoints under /market-data + /strategies."
-    },
-    {
-      "agent": "executor",
-      "at": "2026-05-17T13:37:37.203458+00:00",
-      "summary": "Closed 4 planner tasks: MTF stage scanner, OR failure tracker, round-trip edge ledger, fresh-breakout classifier. 4 new tabs on /cockpits + endpoints under /strategies + /market-data + /portfolios."
-    },
-    {
-      "agent": "executor",
-      "at": "2026-05-17T13:50:47.043673+00:00",
-      "summary": "Closed 12 planner tasks across 3 batches: 4 pure-compute + 3 sector/index + 4 stub-with-clear-extension-path. Total 11 new cockpit tabs."
-    },
-    "[trader_user:default @ 2026-05-17T13:51:15Z] Quant lens on a palace with zero open bugs and all 12 prior feature tasks done \u2014 focused on portfolio-level edge, capital efficiency, leverage exposure, and a unified plan vs reality scorecard not yet covered.",
-    "[trader_user:options @ 2026-05-17T13:51:27Z] Options trader lens: palace has zero IV surface, skew, term-structure, book-Greeks, or expiry-pin tooling. Focused on volatility intelligence and Greeks-aware position management.",
-    "[trader_user:futures @ 2026-05-17T13:51:38Z] Futures trader lens: palace has zero futures-specific tooling \u2014 no basis, OI quadrants, roll calendar, SPAN margin efficiency, or MTM preview. Focused on basis/carry, OI structure, and roll mechanics.",
-    "[trader_user:equity @ 2026-05-17T13:51:48Z] Equity swing lens on a palace heavy with intraday/options/futures tooling but zero D/W/M RS leaderboards, earnings/dividend overlays, RRG-style sector rotation for swings, breakout-quality scoring, or position-level catalyst risk.",
-    "[trader_user:intraday @ 2026-05-17T13:51:59Z] Intraday scalper lens: palace has First-5/Second-5, OR-failure, depth imbalance, vol-regime strip, cost ledger \u2014 but no live ORB tracker board, no slippage-vs-edge per setup pre-trade calc, no tape-speed gauge, no forced-flat 3:15 checklist",
     "[planner @ 2026-05-17T13:52:12Z] 8 new tasks from open feature requests: breakout classifier, weekly RRG, swing-stop ledger, live ORB board, VWAP z-score, tape speed, slippage calc, 3:15 forced-flat checklist.",
     "[executor @ 2026-05-17T13:52:26Z] proposed prop-fresh-breakout-vs-extended-from-base-classifier-pivot-distance-atr-units-007 for fresh-breakout-vs-extended-from-base-classifier-pivot-distance-atr-units",
     {
       "agent": "executor",
       "at": "2026-05-17T14:04:09.607855+00:00",
       "summary": "Closed 8 planner tasks as in-place enhancements to existing services: structural ledger history, ORB state transitions, forced-flat carry-cost, breakout ATR-units, weekly RRG with 13w tails, VWAP z-score + alert level, tape-speed 10s EMA, slippage setup-family catalog."
+    },
+    "[trader_user:default @ 2026-05-17T15:17:18Z] Generalist quant lens on a palace heavy with intraday/scalp tooling but missing portfolio-level views: capital deployment, leverage, edge attribution, and regime context.",
+    "[trader_user:options @ 2026-05-17T15:17:28Z] Options trader lens this cycle: weekly NIFTY/BANKNIFTY expiry workflow \u2014 palace has zero IV/skew/greeks/term-structure tooling. Need surface visibility before strike selection.",
+    "[trader_user:futures @ 2026-05-17T15:17:40Z] Futures trader lens: palace has zero futures-specific tooling \u2014 no basis, OI quadrant, roll calendar, SPAN margin, or MTM views. Filing 5 foundational futures workflows.",
+    "[trader_user:equity @ 2026-05-17T15:17:55Z] Equity-swing lens: palace has zero positional-swing tooling (no RS leaderboard, MTF stage, earnings overlay, FII/DII tape, or RRG-vs-stocks). Filing 5 foundational swing workflows.",
+    "[trader_user:intraday @ 2026-05-17T15:18:10Z] Intraday-scalper lens: palace has ORB/VWAP/tape/cost basics covered. Filing 4 gaps \u2014 sector dispersion heatmap, news-shock circuit, rolling vol-per-minute regime, partial-fill economics.",
+    "[planner @ 2026-05-17T15:18:21Z] 8 new tasks created from open feature_requests across equity-swing, intraday-scalper, futures, and risk personas. No open bugs. All existing tasks done; no duplicates.",
+    "[executor @ 2026-05-17T15:18:34Z] proposed prop-multi-timeframe-stage-scanner-weinstein-d-w-m-stage-2-alignment-008 for multi-timeframe-stage-scanner-weinstein-d-w-m-stage-2-alignment",
+    {
+      "agent": "executor",
+      "at": "2026-05-17T15:26:16.034081+00:00",
+      "summary": "Closed 8 cycle-8 tasks across 2 rounds. Round 1 enhanced 4 existing services in-place (MTF stage2_aligned, news-shock circuit-breaker + cooldown, FII/DII regime classifier, vol-regime 15m + day percentile). Round 2 shipped 4 new services (stock-level RRG, partial-fill economics, intraday sector heatmap, earnings via yfinance)."
     }
   ],
   "feature_requests": [
@@ -913,8 +914,8 @@
     {
       "id": "oi-vs-price-quadrant-scanner-long-build-up-short-cover-long-unwind-short-build-u",
       "title": "OI vs Price Quadrant Scanner (Long Build-up / Short Cover / Long Unwind / Short Build-up)",
-      "rationale": "Every 5 minutes, classify NIFTY/BANKNIFTY and F&O single stocks into the four OI\u00d7price quadrants using session OI delta and price change, ranked by absolute OI change and notional. Without this I'm guessing whether a move is fresh positioning or just covering \u2014 the single most useful F&O tape read.",
-      "category": "report",
+      "rationale": "For every NSE F&O symbol classify the session into one of the four OI-vs-price quadrants using % change in price and % change in OI vs prior-day close, with ATR-normalised price move and OI-rank (vs 20-day). Sortable board flags the strongest long build-up and short-covering names \u2014 the cleanest momentum candidates for intraday and overnight futures. Currently no view of where smart-money is positioning across the futures universe.",
+      "category": "chart",
       "status": "open",
       "created_at": "2026-05-17T13:27:57Z",
       "requested_by": "trader_user:futures"
@@ -1250,6 +1251,231 @@
       "category": "workflow",
       "status": "open",
       "created_at": "2026-05-17T13:52:12Z",
+      "requested_by": "trader_user:intraday"
+    },
+    {
+      "id": "capital-deployment-leverage-heatmap-gross-net-exposure-by-strategy-product",
+      "title": "Capital Deployment & Leverage Heatmap (gross/net exposure by strategy + product)",
+      "rationale": "Single view of capital deployed vs available across equity intraday, F&O monthly, weekly index options, and pyramid \u2014 broken down by gross exposure, net exposure, notional leverage (SPAN + premium tied), and % of MAX_POSITION_SIZE_PCT consumed. Without this I'm flying blind on whether I'm over-levered when straddles + pyramids + intraday all stack up on the same day.",
+      "category": "report",
+      "status": "open",
+      "created_at": "2026-05-17T15:17:28Z",
+      "requested_by": "trader_user:default"
+    },
+    {
+      "id": "edge-decay-curve-per-setup-family-rolling-20-60-120-trade-win-rate-avg-r",
+      "title": "Edge-Decay Curve per Setup Family (rolling 20/60/120-trade win-rate \u00d7 avg-R)",
+      "rationale": "Plots expectancy (win-rate \u00d7 avg-R minus costs) for each setup_family over rolling windows so I can see which edges are degrading vs holding. Decision unlocked: cut size or pause families whose 20-trade expectancy has dropped >1\u03c3 below their 120-trade baseline before they bleed the book.",
+      "category": "chart",
+      "status": "open",
+      "created_at": "2026-05-17T15:17:28Z",
+      "requested_by": "trader_user:default"
+    },
+    {
+      "id": "cross-workflow-correlation-concentration-monitor-directional-straddle-pyramid",
+      "title": "Cross-Workflow Correlation & Concentration Monitor (directional + straddle + pyramid)",
+      "rationale": "Shows realized P&L correlation between the three engines over rolling 20 sessions plus shared underlying/sector concentration (e.g. NIFTY straddle short-gamma + NIFTY pyramid long-gamma cancelling, or three equity longs all in Bank Nifty constituents). Decision unlocked: detect hidden correlated bets that look diversified on the surface.",
+      "category": "risk",
+      "status": "open",
+      "created_at": "2026-05-17T15:17:28Z",
+      "requested_by": "trader_user:default"
+    },
+    {
+      "id": "daily-risk-budget-burn-down-max-daily-loss-pct-pacing-with-intraday-projection",
+      "title": "Daily Risk-Budget Burn-Down (MAX_DAILY_LOSS_PCT pacing with intraday projection)",
+      "rationale": "Live gauge showing % of daily loss budget consumed, burn rate vs time-of-day baseline, and projected EOD drawdown if current burn continues \u2014 with a hard line at MAX_DAILY_LOSS_PCT and a soft line at 50%. Decision unlocked: know when to halve size or stop adding new positions before @RiskGuard force-blocks me at the gate.",
+      "category": "risk",
+      "status": "open",
+      "created_at": "2026-05-17T15:17:28Z",
+      "requested_by": "trader_user:default"
+    },
+    {
+      "id": "plan-vs-reality-adherence-scorecard-premarket-basket-actual-trades-taken",
+      "title": "Plan-vs-Reality Adherence Scorecard (premarket basket \u2192 actual trades taken)",
+      "rationale": "Compares each morning's basket/shortlist plan against trades actually executed: hit-rate on planned names, P&L of taken-vs-skipped, and P&L of off-plan impulse trades. Decision unlocked: quantify discretion drift \u2014 am I making money on the plan and giving it back on FOMO entries, or vice versa?",
+      "category": "report",
+      "status": "open",
+      "created_at": "2026-05-17T15:17:28Z",
+      "requested_by": "trader_user:default"
+    },
+    {
+      "id": "live-iv-surface-skew-snapshot-25-rr-fly-atm-iv-per-expiry",
+      "title": "Live IV Surface & Skew Snapshot (25\u0394 RR + Fly, ATM IV per expiry)",
+      "rationale": "Single panel showing ATM IV, 25\u0394 risk-reversal (put IV \u2212 call IV), and 25\u0394 butterfly across the next 4 weekly expiries for NIFTY/BANKNIFTY, with intraday delta and 20-day percentile bands. Tells me when puts are bid vs calls (directional bias from the surface) and when to sell wings vs body. Decision unlocked: pick straddle vs strangle vs put-spread based on where skew is rich.",
+      "category": "data",
+      "status": "open",
+      "created_at": "2026-05-17T15:17:40Z",
+      "requested_by": "trader_user:options"
+    },
+    {
+      "id": "iv-rank-iv-percentile-term-structure-next-4-expiries-252-day-lookback",
+      "title": "IV Rank & IV Percentile Term Structure (next 4 expiries, 252-day lookback)",
+      "rationale": "Per-expiry IVR/IVP table plus a term-structure line (front-week \u2192 month-end) with contango/backwardation flag. Short-premium setups need IVR > 50 in the expiry I'm selling; backwardation warns of event risk (RBI, CPI, expiry-week gamma). Decision unlocked: gate every new straddle/strangle entry on IVR threshold per leg-expiry.",
+      "category": "chart",
+      "status": "open",
+      "created_at": "2026-05-17T15:17:40Z",
+      "requested_by": "trader_user:options"
+    },
+    {
+      "id": "position-payoff-greeks-aggregator-net-vega-across-all-open-option-legs",
+      "title": "Position Payoff & Greeks Aggregator (net \u0394/\u0393/\u0398/Vega across all open option legs)",
+      "rationale": "Combined payoff diagram for all live option legs (straddles + verticals + pyramids) by underlying, with net greeks at current spot and \u00b11\u03c3/\u00b12\u03c3 shocks, plus per-strike greeks bar. Surfaces hidden concentration (e.g. three trades all short-gamma at 24200). Decision unlocked: see real book-level greeks instead of per-trade greeks in isolation.",
+      "category": "report",
+      "status": "open",
+      "created_at": "2026-05-17T15:17:40Z",
+      "requested_by": "trader_user:options"
+    },
+    {
+      "id": "delta-drift-hedge-suggester-auto-rebalance-trigger-when-threshold",
+      "title": "Delta-Drift Hedge Suggester (auto-rebalance trigger when |\u0394| > threshold)",
+      "rationale": "Monitors net portfolio delta per underlying and when |\u0394| exceeds a configurable band (e.g. 0.10 \u00d7 lot-size of NIFTY), proposes the cheapest hedge \u2014 futures lots, ATM option, or strike-roll \u2014 with cost in \u20b9 and resulting delta. Logs every drift event for post-trade review. Decision unlocked: stop eyeballing delta on short straddles; act on a deterministic trigger.",
+      "category": "workflow",
+      "status": "open",
+      "created_at": "2026-05-17T15:17:40Z",
+      "requested_by": "trader_user:options"
+    },
+    {
+      "id": "expiry-day-pin-risk-max-pain-radar-intraday-t-0-only",
+      "title": "Expiry-Day Pin-Risk & Max-Pain Radar (intraday, T+0 only)",
+      "rationale": "On expiry day show live max-pain strike, OI-weighted gravity strike, distance from spot, change in OI at ATM \u00b13 strikes every 5 min, and gamma-exposure (GEX) profile. Flags pin risk for any short-strike within \u00bd ATR of spot after 2:00 PM IST. Decision unlocked: know when to flatten short straddles before pin-driven mean reversion crushes the wing I'm short.",
+      "category": "risk",
+      "status": "open",
+      "created_at": "2026-05-17T15:17:40Z",
+      "requested_by": "trader_user:options"
+    },
+    {
+      "id": "realised-vs-implied-vol-edge-curve-per-expiry-rolling",
+      "title": "Realised vs Implied Vol Edge Curve (per expiry, rolling)",
+      "rationale": "Plots realised vol (Parkinson/Garman-Klass) of the underlying over the holding window vs IV sold at entry for each closed short-premium trade, bucketed by expiry-bucket and IVR-at-entry. Shows where my vol-selling edge actually lives (and where it's negative). Decision unlocked: cut entries from buckets where realised has been beating implied for 20+ trades.",
+      "category": "report",
+      "status": "open",
+      "created_at": "2026-05-17T15:17:40Z",
+      "requested_by": "trader_user:options"
+    },
+    {
+      "id": "per-strategy-theta-burn-decay-schedule-hour-by-hour",
+      "title": "Per-Strategy Theta-Burn & Decay Schedule (hour-by-hour)",
+      "rationale": "For each open short-premium position show today's expected theta in \u20b9, realised decay so far, decay-vs-schedule deviation, and an hourly burn-curve from entry to expiry (accounting for weekend decay and Tuesday/Thursday expiry calendar). Highlights when realised decay lags schedule \u2014 usually means IV is creeping or gamma is hurting. Decision unlocked: roll or close when 2-day decay is <50% of expected.",
+      "category": "chart",
+      "status": "open",
+      "created_at": "2026-05-17T15:17:40Z",
+      "requested_by": "trader_user:options"
+    },
+    {
+      "id": "live-basis-cost-of-carry-monitor-spot-vs-current-next-month-futures",
+      "title": "Live Basis & Cost-of-Carry Monitor (spot vs current/next-month futures)",
+      "rationale": "Real-time panel showing spot, current-month future, next-month future, basis in points and %, annualised cost-of-carry vs MIBOR, and 20-day percentile bands per underlying (NIFTY, BANKNIFTY, top SSF). Surfaces cash-and-carry/reverse-arb windows and warns when basis collapses (squaring-off pressure) or balloons (event premium). Today I'm flying blind on whether the future is rich or cheap relative to fair value.",
+      "category": "data",
+      "status": "open",
+      "created_at": "2026-05-17T15:17:55Z",
+      "requested_by": "trader_user:futures"
+    },
+    {
+      "id": "roll-day-calendar-roll-spread-cost-tracker-t-5-to-expiry",
+      "title": "Roll-Day Calendar & Roll-Spread Cost Tracker (T-5 to expiry)",
+      "rationale": "Expiry-month calendar showing days-to-expiry, current roll spread (next \u2212 current) in points and annualised %, roll-percentage completed (next-month OI / total OI), and historical roll-cost percentile for each underlying. Tells me whether to roll early (cheap spread, low % rolled) or wait, and surfaces backwardated rolls that signal stress. Critical from T-5 onwards; absent today.",
+      "category": "report",
+      "status": "open",
+      "created_at": "2026-05-17T15:17:55Z",
+      "requested_by": "trader_user:futures"
+    },
+    {
+      "id": "span-elm-margin-vs-notional-efficiency-table-live",
+      "title": "SPAN+ELM Margin vs Notional Efficiency Table (live)",
+      "rationale": "Per open/proposed futures leg show SPAN, exposure, ELM, additional margin, total blocked margin, notional value, and leverage ratio (notional/margin), with portfolio aggregate and headroom vs broker limit. Also previews margin shock on +/-2% / +/-5% underlying moves. Lets me size new futures without breaching margin and spot inefficient hedges that block disproportionate margin.",
+      "category": "risk",
+      "status": "open",
+      "created_at": "2026-05-17T15:17:55Z",
+      "requested_by": "trader_user:futures"
+    },
+    {
+      "id": "eod-mark-to-market-preview-settlement-cash-flow-estimator-3-25-pm-cutoff",
+      "title": "EOD Mark-to-Market Preview & Settlement Cash-Flow Estimator (3:25 PM cutoff)",
+      "rationale": "At 3:20 IST surface every open futures position with entry price, current LTP, estimated settlement price (last 30-min VWAP), expected MTM debit/credit per leg, aggregate cash impact tonight, and post-settlement carry margin requirement. Flags positions whose MTM debit would breach next-day margin so I can trim before close. No view of overnight cash impact today \u2014 settlement surprises are a real risk.",
+      "category": "workflow",
+      "status": "open",
+      "created_at": "2026-05-17T15:17:55Z",
+      "requested_by": "trader_user:futures"
+    },
+    {
+      "id": "rs-vs-nifty50-leaderboard-mansfield-ibd-style-rank-daily-weekly",
+      "title": "RS-vs-NIFTY50 Leaderboard (Mansfield + IBD-style rank, daily + weekly)",
+      "rationale": "Compute Mansfield RS and IBD-style 1-3-6-12 month percentile RS for the full F&O + NIFTY 500 universe vs NIFTY 50, with a 4-week rank delta column to surface emerging leaders before they're obvious. Filter to RS > 80 AND rising for the swing watchlist; this is the single most-used pre-trade screen for positional equity and is currently absent.",
+      "category": "report",
+      "status": "open",
+      "created_at": "2026-05-17T15:18:10Z",
+      "requested_by": "trader_user:equity"
+    },
+    {
+      "id": "multi-timeframe-stage-scanner-weinstein-stage-1-2-3-4-across-d-w-m",
+      "title": "Multi-Timeframe Stage Scanner (Weinstein Stage 1/2/3/4 across D/W/M)",
+      "rationale": "Classify each NIFTY 500 name into Weinstein stage on daily, weekly, and monthly bars using price vs 30W-SMA slope and 40W-SMA, then flag only names in Stage 2 across all three timeframes (true MTF alignment). Output a table with stage, weeks-in-stage, and stage-transition dates so the trader can buy fresh Stage 1->2 breakouts and avoid late-Stage-2 chases.",
+      "category": "data",
+      "status": "open",
+      "created_at": "2026-05-17T15:18:10Z",
+      "requested_by": "trader_user:equity"
+    },
+    {
+      "id": "earnings-corporate-action-calendar-overlay-on-open-positions",
+      "title": "Earnings & Corporate-Action Calendar Overlay on Open Positions",
+      "rationale": "For every open swing position show next earnings date, days-to-event, historical avg gap on results day, ex-dividend date, and any board meeting / split / bonus within the holding horizon. Auto-flag positions with earnings inside 5 trading days so the trader can decide to trim, hedge, or hold through the event instead of being blindsided.",
+      "category": "workflow",
+      "status": "open",
+      "created_at": "2026-05-17T15:18:10Z",
+      "requested_by": "trader_user:equity"
+    },
+    {
+      "id": "fii-dii-cash-f-o-flow-tape-with-5-20-day-regime-classifier",
+      "title": "FII/DII Cash & F&O Flow Tape with 5/20-Day Regime Classifier",
+      "rationale": "Daily panel showing FII cash, DII cash, FII index-futures net long-short, FII index-options net delta, plus 5-day and 20-day rolling sums with percentile bands. Classify the flow regime (Risk-On / Risk-Off / Distribution / Accumulation) and tag every new swing entry with the prevailing regime so post-trade attribution can show which regimes actually pay for breakout buying.",
+      "category": "data",
+      "status": "open",
+      "created_at": "2026-05-17T15:18:10Z",
+      "requested_by": "trader_user:equity"
+    },
+    {
+      "id": "stock-level-rrg-quadrant-for-open-positions-shortlist-weekly-8-week-tails",
+      "title": "Stock-Level RRG Quadrant for Open Positions + Shortlist (weekly, 8-week tails)",
+      "rationale": "Existing weekly RRG covers sector indices; swing trader also needs single-stock RRG vs NIFTY 50 for current holdings and shortlist candidates to spot Leading->Weakening rotation early and trim before the move dies. Render quadrant with 8-week tails, position size proportional to deployed capital, and an alert when a holding crosses from Leading into Weakening.",
+      "category": "chart",
+      "status": "open",
+      "created_at": "2026-05-17T15:18:10Z",
+      "requested_by": "trader_user:equity"
+    },
+    {
+      "id": "intraday-sector-dispersion-capital-rotation-heatmap-5-min",
+      "title": "Intraday Sector Dispersion & Capital-Rotation Heatmap (5-min)",
+      "rationale": "Per-sector intraday breadth (% members > VWAP, sector return, advance/decline, cumulative ATR-normalized move) refreshed every 5 minutes with a leader/laggard pair board. Scalpers rotate capital toward the dispersing sector before the move matures; current palace has sector RRG (weekly) and pulse breadth but no minute-grained dispersion view that says 'IT is leading, FMCG is bleeding, rotate now'.",
+      "category": "chart",
+      "status": "open",
+      "created_at": "2026-05-17T15:18:20Z",
+      "requested_by": "trader_user:intraday"
+    },
+    {
+      "id": "news-shock-circuit-breaker-re-entry-cooldown-guard",
+      "title": "News-Shock Circuit-Breaker & Re-Entry Cooldown Guard",
+      "rationale": "Detect per-symbol intraday vol-spike (range > 3x 5-min ATR or tick velocity > 5\u03c3 in 60s) plus headline-tag (corp action, block deal, regulator news), auto-flag affected symbols as HALT-NEW-ENTRIES with a 15-min cooldown, and require explicit override. Scalpers get destroyed walking into a news gap after a halt \u2014 current palace tracks tape speed but has no shock-classification or entry-block workflow tying news to size.",
+      "category": "risk",
+      "status": "open",
+      "created_at": "2026-05-17T15:18:20Z",
+      "requested_by": "trader_user:intraday"
+    },
+    {
+      "id": "vol-per-minute-regime-tape-min-rolling-15m-day-percentile",
+      "title": "Vol-Per-Minute Regime Tape (\u03c3/min rolling 15m & day-percentile)",
+      "rationale": "Live tape per symbol of realized \u03c3-per-minute computed over rolling 1/5/15 min windows, plotted vs the symbol's 20-day intraday baseline by time-of-day bucket, with regime labels (DEAD / NORMAL / HOT / OVERHEATED). Scalp size should scale inversely with \u03c3; right now size sits on ATR(14)-daily which lags intraday regime shifts by hours.",
+      "category": "data",
+      "status": "open",
+      "created_at": "2026-05-17T15:18:20Z",
+      "requested_by": "trader_user:intraday"
+    },
+    {
+      "id": "partial-fill-queue-position-economics-report-post-trade",
+      "title": "Partial-Fill & Queue-Position Economics Report (post-trade)",
+      "rationale": "Per scalp log intended size, filled size, average fill price vs touch, queue-jump count (re-pricing), unfilled slippage cost, and aborted-entry rate by setup. Aggregate into a daily report ranking setups by fill-quality decay. Scalping P&L dies from partial fills more than from being wrong; the existing cost-edge ledger covers gross-vs-net but not execution-quality decomposition.",
+      "category": "report",
+      "status": "open",
+      "created_at": "2026-05-17T15:18:20Z",
       "requested_by": "trader_user:intraday"
     }
   ],
@@ -2081,6 +2307,150 @@
       "source_id": "3-15-pm-forced-flat-checklist-closing-auction-carry-cost-estimator",
       "status": "done",
       "created_at": "2026-05-17T13:52:26Z"
+    },
+    {
+      "id": "multi-timeframe-stage-scanner-weinstein-d-w-m-stage-2-alignment",
+      "title": "Multi-Timeframe Stage Scanner (Weinstein D/W/M Stage 2 alignment)",
+      "priority": "high",
+      "scope": "Classify NIFTY 500 names into Weinstein stage on daily/weekly/monthly bars using price vs 30W-SMA slope and 40W-SMA; flag names in Stage 2 across all three timeframes.",
+      "files": [
+        "backend/apps/strategies/services/mtf_stage_scanner.py",
+        "backend/apps/strategies/api/views.py",
+        "backend/apps/strategies/api/urls.py",
+        "frontend/src/features/shortlist/MTFStageScanner.tsx",
+        "trading/utils/indicators.py"
+      ],
+      "acceptance": "GET /api/v1/strategies/mtf-stage/ returns JSON {symbol, daily_stage, weekly_stage, monthly_stage, aligned_stage2:bool} for NIFTY 500 universe and UI badge renders Stage on /shortlist.",
+      "source": "feature_request",
+      "source_id": "multi-timeframe-stage-scanner-weinstein-stage-1-2-3-4-across-d-w-m",
+      "status": "done",
+      "created_at": "2026-05-17T15:18:34Z"
+    },
+    {
+      "id": "earnings-corporate-action-calendar-overlay-on-open-positions",
+      "title": "Earnings & Corporate-Action Calendar Overlay on Open Positions",
+      "priority": "high",
+      "scope": "For every open swing position show next earnings date, days-to-event, historical avg gap on results day, ex-dividend/board/split/bonus dates; auto-flag positions inside the event window.",
+      "files": [
+        "backend/apps/portfolio/services/event_overlay.py",
+        "backend/apps/portfolio/api/views.py",
+        "backend/apps/portfolio/api/urls.py",
+        "frontend/src/features/positions/EventCalendarOverlay.tsx",
+        "trading/models.py"
+      ],
+      "acceptance": "GET /api/v1/portfolios/event-overlay/ returns per-position event payload and /positions page shows event-window flag badge.",
+      "source": "feature_request",
+      "source_id": "earnings-corporate-action-calendar-overlay-on-open-positions",
+      "status": "done",
+      "created_at": "2026-05-17T15:18:34Z"
+    },
+    {
+      "id": "fii-dii-cash-f-o-flow-tape-with-5-20-day-regime-classifier",
+      "title": "FII/DII Cash & F&O Flow Tape with 5/20-Day Regime Classifier",
+      "priority": "high",
+      "scope": "Daily panel of FII cash, DII cash, FII index-futures net long-short, FII index-options net delta, plus 5/20-day rolling sums with percentile bands and Risk-On/Off regime label.",
+      "files": [
+        "backend/apps/market_data/services/flow_tape.py",
+        "backend/apps/market_data/api/views.py",
+        "backend/apps/market_data/api/urls.py",
+        "frontend/src/features/pulse/FlowTape.tsx",
+        "frontend/src/lib/api.ts"
+      ],
+      "acceptance": "GET /api/v1/market-data/flow-tape/ returns flows + regime classification and /pulse renders the regime badge with rolling percentile bars.",
+      "source": "feature_request",
+      "source_id": "fii-dii-cash-f-o-flow-tape-with-5-20-day-regime-classifier",
+      "status": "done",
+      "created_at": "2026-05-17T15:18:34Z"
+    },
+    {
+      "id": "stock-level-rrg-quadrant-for-open-positions-shortlist-weekly-8-week-tails",
+      "title": "Stock-Level RRG Quadrant for Open Positions + Shortlist (weekly, 8-week tails)",
+      "priority": "medium",
+      "scope": "Compute single-stock weekly JdK RS-Ratio and RS-Momentum vs NIFTY 50 for open positions and shortlist, render RRG quadrant with 8-week tails.",
+      "files": [
+        "backend/apps/market_data/services/stock_rrg.py",
+        "backend/apps/market_data/api/views.py",
+        "backend/apps/market_data/api/urls.py",
+        "frontend/src/features/rotation/StockRRG.tsx",
+        "frontend/src/lib/api.ts"
+      ],
+      "acceptance": "GET /api/v1/market-data/stock-rrg/ returns rs_ratio/rs_momentum tail arrays per symbol and UI plots Leading/Weakening/Lagging/Improving quadrants.",
+      "source": "feature_request",
+      "source_id": "stock-level-rrg-quadrant-for-open-positions-shortlist-weekly-8-week-tails",
+      "status": "done",
+      "created_at": "2026-05-17T15:18:34Z"
+    },
+    {
+      "id": "intraday-sector-dispersion-capital-rotation-heatmap-5-min",
+      "title": "Intraday Sector Dispersion & Capital-Rotation Heatmap (5-min)",
+      "priority": "medium",
+      "scope": "Per-sector intraday breadth (% members > VWAP, return, advance/decline, cumulative ATR-normalized move) refreshed every 5 minutes with a leader/laggard pair board.",
+      "files": [
+        "backend/apps/market_data/services/sector_dispersion.py",
+        "backend/apps/market_data/api/views.py",
+        "backend/apps/market_data/api/urls.py",
+        "frontend/src/features/pulse/SectorDispersionHeatmap.tsx",
+        "trading/services/data_service.py"
+      ],
+      "acceptance": "GET /api/v1/market-data/sector-dispersion/ returns per-sector breadth metrics on 5-min cadence and /pulse renders heatmap with leader/laggard pairs.",
+      "source": "feature_request",
+      "source_id": "intraday-sector-dispersion-capital-rotation-heatmap-5-min",
+      "status": "done",
+      "created_at": "2026-05-17T15:18:34Z"
+    },
+    {
+      "id": "news-shock-circuit-breaker-re-entry-cooldown-guard",
+      "title": "News-Shock Circuit-Breaker & Re-Entry Cooldown Guard",
+      "priority": "high",
+      "scope": "Detect per-symbol intraday vol-spike (range > 3x 5-min ATR or tick velocity > 5sigma in 60s) plus headline-tag; auto-flag affected symbols as HALT-NEW-ENTRIES with cooldown.",
+      "files": [
+        "backend/apps/market_data/services/news_shock_guard.py",
+        "backend/apps/market_data/api/views.py",
+        "backend/apps/market_data/api/urls.py",
+        "frontend/src/features/positions/NewsShockGuardStrip.tsx",
+        "trading/services/risk_engine.py"
+      ],
+      "acceptance": "GET /api/v1/market-data/news-shock/ returns symbols with halt_flag and cooldown_until; @RiskGuard blocks new entries for halted symbols in unit test.",
+      "source": "feature_request",
+      "source_id": "news-shock-circuit-breaker-re-entry-cooldown-guard",
+      "status": "done",
+      "created_at": "2026-05-17T15:18:34Z"
+    },
+    {
+      "id": "vol-per-minute-regime-tape-sigma-min-rolling-15m-day-percentile",
+      "title": "Vol-Per-Minute Regime Tape (sigma/min rolling 15m & day-percentile)",
+      "priority": "medium",
+      "scope": "Live tape per symbol of realized sigma-per-minute over rolling 1/5/15 min windows vs 20-day intraday baseline by time-of-day bucket with DEAD/NORMAL/HOT regime labels.",
+      "files": [
+        "backend/apps/market_data/services/vol_per_minute.py",
+        "backend/apps/market_data/api/views.py",
+        "backend/apps/market_data/api/urls.py",
+        "frontend/src/features/positions/VolPerMinuteTape.tsx",
+        "trading/utils/indicators.py"
+      ],
+      "acceptance": "GET /api/v1/market-data/vol-per-minute/ returns rolling sigma + regime label per symbol and tape strip renders on /positions.",
+      "source": "feature_request",
+      "source_id": "vol-per-minute-regime-tape-min-rolling-15m-day-percentile",
+      "status": "done",
+      "created_at": "2026-05-17T15:18:34Z"
+    },
+    {
+      "id": "partial-fill-queue-position-economics-report-post-trade",
+      "title": "Partial-Fill & Queue-Position Economics Report (post-trade)",
+      "priority": "high",
+      "scope": "Per scalp log intended/filled size, avg fill vs touch, queue-jump count, unfilled slippage cost, aborted-entry rate by setup; aggregate into a daily report ranking setups.",
+      "files": [
+        "backend/apps/portfolio/services/partial_fill_report.py",
+        "backend/apps/portfolio/api/views.py",
+        "backend/apps/portfolio/api/urls.py",
+        "frontend/src/features/dashboard/PartialFillReport.tsx",
+        "trading/models.py"
+      ],
+      "acceptance": "GET /api/v1/portfolios/partial-fill-report/ returns per-setup-family fill economics and /dashboard renders ranked table.",
+      "source": "feature_request",
+      "source_id": "partial-fill-queue-position-economics-report-post-trade",
+      "status": "done",
+      "created_at": "2026-05-17T15:18:34Z"
     }
   ],
   "proposals": [
@@ -2420,80 +2790,58 @@
       ],
       "status": "proposed",
       "created_at": "2026-05-17T13:52:40Z"
+    },
+    {
+      "id": "prop-multi-timeframe-stage-scanner-weinstein-d-w-m-stage-2-alignment-008",
+      "task_id": "multi-timeframe-stage-scanner-weinstein-d-w-m-stage-2-alignment",
+      "summary": "Wire the existing MTF stage scanner service end-to-end so /shortlist surfaces a Stage badge sourced from /api/v1/strategies/mtf-stage/ covering the NIFTY 500 universe with D/W/M alignment.",
+      "files_changed": [
+        {
+          "path": "backend/apps/strategies/services/mtf_stage_scanner.py",
+          "change_kind": "modify",
+          "approach": "Expand the universe loader beyond the 60-row legacy watchlist to the full NIFTY 500 (via ticker_service or a bundled constituents list), and ensure the result dict returns per-symbol {symbol, daily_stage, weekly_stage, monthly_stage, aligned_stage2} matching the acceptance contract. Keep cache TTL and per-symbol try/except so a single broker failure can't poison the batch.",
+          "code_outline": "def _universe() -> list[str]:\n    # prefer NIFTY 500 constituents (ticker_service.nifty500() or static JSON);\n    # fallback to WatchlistEntry; cap at configurable MAX_SYMBOLS\n\ndef build_mtf_stage_scanner(symbols=None) -> dict:\n    syms = symbols or _universe()\n    results = []\n    for s in syms:\n        daily = _fetch_daily(s)\n        if not daily: continue\n        d = _classify_phase([b['c'] for b in daily])\n        w = _classify_phase(_resample_weekly(daily))\n        m = _classify_phase(_resample_monthly(daily))\n        aligned = d['stage']==w['stage']=='STAGE_2'==m['stage']\n        results.append({'symbol': s,\n                        'daily_stage': d['stage'],\n                        'weekly_stage': w['stage'],\n                        'monthly_stage': m['stage'],\n                        'aligned_stage2': aligned,\n                        'detail': {'daily': d, 'weekly': w, 'monthly': m}})\n    return {'as_of': date.today().isoformat(),\n            'universe_size': len(syms),\n            'aligned_count': sum(1 for r in results if r['aligned_stage2']),\n            'results': results}"
+        },
+        {
+          "path": "backend/apps/strategies/api/views.py",
+          "change_kind": "modify",
+          "approach": "MTFStageScannerView already exists; add an `aligned_only=true` query-param shortcut so the /shortlist UI can pull just the Stage-2-aligned subset cheaply, and pass through the optional `limit` param to cap response size for the badge call.",
+          "code_outline": "class MTFStageScannerView(APIView):\n    def get(self, request):\n        syms = parse_csv(request.query_params.get('symbols'))\n        payload = build_mtf_stage_scanner(symbols=syms)\n        if request.query_params.get('aligned_only') in ('1','true'):\n            payload['results'] = [r for r in payload['results'] if r['aligned_stage2']]\n        return Response(payload)"
+        },
+        {
+          "path": "backend/apps/strategies/api/urls.py",
+          "change_kind": "modify",
+          "approach": "No new routes needed \u2014 confirm `mtf-stage/` is registered (it is). Touch only if we add an `aligned/` sub-route; otherwise leave as-is.",
+          "code_outline": "# unchanged \u2014 mtf-stage/ already routed to MTFStageScannerView"
+        },
+        {
+          "path": "frontend/src/features/shortlist/MTFStageScanner.tsx",
+          "change_kind": "create",
+          "approach": "New React component that fetches /api/v1/strategies/mtf-stage/ via the shared api client, exposes a `useMtfStage()` hook keyed by symbol, and renders a small Stage badge (Stage 1/2/3/4 + green dot if D/W/M aligned) consumable from the shortlist row.",
+          "code_outline": "export function useMtfStage() {\n  return useQuery({\n    queryKey: ['mtf-stage'],\n    queryFn: () => api.get('/strategies/mtf-stage/').then(r => r.data),\n    staleTime: 10 * 60_000,\n  });\n}\n\nexport function MTFStageBadge({ symbol }: { symbol: string }) {\n  const { data } = useMtfStage();\n  const row = data?.results.find(r => r.symbol === symbol);\n  if (!row) return null;\n  const tone = row.aligned_stage2 ? 'success'\n              : row.daily_stage === 'STAGE_4' ? 'danger' : 'neutral';\n  return <Badge tone={tone} title={`D:${row.daily_stage} W:${row.weekly_stage} M:${row.monthly_stage}`}>\n           {row.aligned_stage2 ? 'S2\u2713' : row.daily_stage.replace('STAGE_','S')}\n         </Badge>;\n}\n\n// then in features/shortlist/ShortlistTable.tsx add a <MTFStageBadge symbol={row.symbol}/> cell"
+        },
+        {
+          "path": "trading/utils/indicators.py",
+          "change_kind": "modify",
+          "approach": "Add a small `sma_slope_pct(series, window, lookback)` helper so the scanner (and any future stage-aware scanner) stops re-implementing the slope calc inline. Pure math, no broker dependency, consistent with existing function style.",
+          "code_outline": "def sma_slope_pct(closes: list[float], window: int = 30, lookback: int = 5) -> float:\n    if len(closes) < window + lookback: return 0.0\n    now = sum(closes[-window:]) / window\n    then = sum(closes[-window-lookback:-lookback]) / window\n    return (now - then) / then * 100.0 if then > 0 else 0.0"
+        }
+      ],
+      "risks": [
+        "Scanning NIFTY 500 via per-symbol broker daily-candle fetches will blow past Angel One rate limits unless throttled or backed by a nightly cache \u2014 the current 600s cache won't help on first call of th",
+        "Weekly/monthly resampling by `daily[::5]` / `daily[::21]` is a proxy, not true ISO-week / calendar-month bars; stage labels can flip on holiday-shortened weeks and won't match TradingView Weinstein pu",
+        "Frontend badge keyed on full-universe payload could ship megabytes to the browser; without `aligned_only` or paginated fetch the /shortlist page TTFB will regress."
+      ],
+      "tests_needed": [
+        "Tester suite hits GET /api/v1/strategies/mtf-stage/?symbols=RELIANCE,HDFCBANK and asserts each row has the four required keys (daily_stage, weekly_stage, monthly_stage, aligned_stage2) with stage \u2208 {S",
+        "Unit-test `_classify_phase` with synthetic series for each stage (rising-above-MA, falling-below-MA, flat, rolling-over) to lock the slope/gap thresholds.",
+        "Frontend snapshot/integration test: shortlist row renders the MTFStageBadge with the right tone when API mock returns aligned_stage2:true vs mixed stages."
+      ],
+      "status": "proposed",
+      "created_at": "2026-05-17T15:18:48Z"
     }
   ],
   "agent_runs": [
-    {
-      "id": "trader_user-2026-05-17t11-53-28z",
-      "agent_kind": "trader_user",
-      "started_at": "2026-05-17T11:53:28Z",
-      "ended_at": "2026-05-17T11:53:37Z",
-      "ok": true,
-      "summary": "Mind palace is empty (no existing requests/bugs). Focused on whole-picture views: capital deployment, leverage exposure, edge decay, and plan-vs-actual reconciliation across equity + F&O.",
-      "produced_ids": [
-        "unified-capital-leverage-cockpit",
-        "strategy-edge-decay-chart-rolling-expectancy-by-strategy",
-        "plan-vs-actual-reconciliation-report",
-        "options-greeks-heatmap-portfolio-level-delta-gamma-theta-vega",
-        "signal-to-trade-funnel-capture-rate-breakdown"
-      ]
-    },
-    {
-      "id": "planner-2026-05-17t11-53-37z",
-      "agent_kind": "planner",
-      "started_at": "2026-05-17T11:53:37Z",
-      "ended_at": "2026-05-17T11:53:46Z",
-      "ok": true,
-      "summary": "Translated 5 open feature_requests into prioritised tasks. No open bugs to address. Risk/report categories that unlock decisions promoted to high.",
-      "produced_ids": [
-        "unified-capital-leverage-cockpit",
-        "plan-vs-actual-reconciliation-report",
-        "options-greeks-heatmap-portfolio-level",
-        "signal-to-trade-funnel-capture-rate-breakdown",
-        "strategy-edge-decay-chart"
-      ]
-    },
-    {
-      "id": "executor-2026-05-17t11-53-46z",
-      "agent_kind": "executor",
-      "started_at": "2026-05-17T11:53:46Z",
-      "ended_at": "2026-05-17T11:54:04Z",
-      "ok": true,
-      "summary": "Proposed change for task 'Unified Capital & Leverage Cockpit'",
-      "produced_ids": [
-        "prop-unified-capital-leverage-cockpit-001"
-      ]
-    },
-    {
-      "id": "trader_user-2026-05-17t12-18-13z",
-      "agent_kind": "trader_user",
-      "started_at": "2026-05-17T12:18:13Z",
-      "ended_at": "2026-05-17T12:18:23Z",
-      "ok": true,
-      "summary": "Mind palace already has 5 high-quality 'whole picture' requests open. Focused on adjacent gaps: regime-aware sizing, drawdown anatomy, theta budgeting, expiry-day playbook, and broker reconciliation.",
-      "produced_ids": [
-        "daily-risk-budget-drawdown-anatomy",
-        "theta-decay-premium-burn-forecast-curve",
-        "expiry-day-tactical-cockpit-nifty-tue-sensex-thu",
-        "broker-vs-journal-reconciliation-report",
-        "regime-conditioned-strategy-allocation-heatmap"
-      ]
-    },
-    {
-      "id": "planner-2026-05-17t12-18-23z",
-      "agent_kind": "planner",
-      "started_at": "2026-05-17T12:18:23Z",
-      "ended_at": "2026-05-17T12:18:36Z",
-      "ok": true,
-      "summary": "Translated 5 newly-open feature_requests into prioritised tasks. No open bugs. Risk/report/expiry-workflow categories promoted to high; chart/data left medium.",
-      "produced_ids": [
-        "daily-risk-budget-drawdown-anatomy",
-        "theta-decay-premium-burn-forecast-curve",
-        "expiry-day-tactical-cockpit",
-        "broker-vs-journal-reconciliation-report",
-        "regime-conditioned-strategy-allocation-heatmap"
-      ]
-    },
     {
       "id": "executor-2026-05-17t12-18-36z",
       "agent_kind": "executor",
@@ -2978,6 +3326,111 @@
       "summary": "Proposed change for task 'Fresh Breakout vs Extended-from-Base Classifier (pivot-distance & ATR-units)'",
       "produced_ids": [
         "prop-fresh-breakout-vs-extended-from-base-classifier-pivot-distance-atr-units-007"
+      ]
+    },
+    {
+      "id": "trader_user:default-2026-05-17t15-17-18z",
+      "agent_kind": "trader_user:default",
+      "started_at": "2026-05-17T15:17:18Z",
+      "ended_at": "2026-05-17T15:17:28Z",
+      "ok": true,
+      "summary": "Generalist quant lens on a palace heavy with intraday/scalp tooling but missing portfolio-level views: capital deployment, leverage, edge attribution, and regime context.",
+      "produced_ids": [
+        "capital-deployment-leverage-heatmap-gross-net-exposure-by-strategy-product",
+        "edge-decay-curve-per-setup-family-rolling-20-60-120-trade-win-rate-avg-r",
+        "cross-workflow-correlation-concentration-monitor-directional-straddle-pyramid",
+        "daily-risk-budget-burn-down-max-daily-loss-pct-pacing-with-intraday-projection",
+        "plan-vs-reality-adherence-scorecard-premarket-basket-actual-trades-taken"
+      ]
+    },
+    {
+      "id": "trader_user:options-2026-05-17t15-17-28z",
+      "agent_kind": "trader_user:options",
+      "started_at": "2026-05-17T15:17:28Z",
+      "ended_at": "2026-05-17T15:17:40Z",
+      "ok": true,
+      "summary": "Options trader lens this cycle: weekly NIFTY/BANKNIFTY expiry workflow \u2014 palace has zero IV/skew/greeks/term-structure tooling. Need surface visibility before strike selection.",
+      "produced_ids": [
+        "live-iv-surface-skew-snapshot-25-rr-fly-atm-iv-per-expiry",
+        "iv-rank-iv-percentile-term-structure-next-4-expiries-252-day-lookback",
+        "position-payoff-greeks-aggregator-net-vega-across-all-open-option-legs",
+        "delta-drift-hedge-suggester-auto-rebalance-trigger-when-threshold",
+        "expiry-day-pin-risk-max-pain-radar-intraday-t-0-only",
+        "realised-vs-implied-vol-edge-curve-per-expiry-rolling",
+        "per-strategy-theta-burn-decay-schedule-hour-by-hour"
+      ]
+    },
+    {
+      "id": "trader_user:futures-2026-05-17t15-17-40z",
+      "agent_kind": "trader_user:futures",
+      "started_at": "2026-05-17T15:17:40Z",
+      "ended_at": "2026-05-17T15:17:55Z",
+      "ok": true,
+      "summary": "Futures trader lens: palace has zero futures-specific tooling \u2014 no basis, OI quadrant, roll calendar, SPAN margin, or MTM views. Filing 5 foundational futures workflows.",
+      "produced_ids": [
+        "live-basis-cost-of-carry-monitor-spot-vs-current-next-month-futures",
+        "oi-vs-price-quadrant-scanner-long-build-up-short-cover-long-unwind-short-build-u",
+        "roll-day-calendar-roll-spread-cost-tracker-t-5-to-expiry",
+        "span-elm-margin-vs-notional-efficiency-table-live",
+        "eod-mark-to-market-preview-settlement-cash-flow-estimator-3-25-pm-cutoff"
+      ]
+    },
+    {
+      "id": "trader_user:equity-2026-05-17t15-17-55z",
+      "agent_kind": "trader_user:equity",
+      "started_at": "2026-05-17T15:17:55Z",
+      "ended_at": "2026-05-17T15:18:10Z",
+      "ok": true,
+      "summary": "Equity-swing lens: palace has zero positional-swing tooling (no RS leaderboard, MTF stage, earnings overlay, FII/DII tape, or RRG-vs-stocks). Filing 5 foundational swing workflows.",
+      "produced_ids": [
+        "rs-vs-nifty50-leaderboard-mansfield-ibd-style-rank-daily-weekly",
+        "multi-timeframe-stage-scanner-weinstein-stage-1-2-3-4-across-d-w-m",
+        "earnings-corporate-action-calendar-overlay-on-open-positions",
+        "fii-dii-cash-f-o-flow-tape-with-5-20-day-regime-classifier",
+        "stock-level-rrg-quadrant-for-open-positions-shortlist-weekly-8-week-tails"
+      ]
+    },
+    {
+      "id": "trader_user:intraday-2026-05-17t15-18-10z",
+      "agent_kind": "trader_user:intraday",
+      "started_at": "2026-05-17T15:18:10Z",
+      "ended_at": "2026-05-17T15:18:20Z",
+      "ok": true,
+      "summary": "Intraday-scalper lens: palace has ORB/VWAP/tape/cost basics covered. Filing 4 gaps \u2014 sector dispersion heatmap, news-shock circuit, rolling vol-per-minute regime, partial-fill economics.",
+      "produced_ids": [
+        "intraday-sector-dispersion-capital-rotation-heatmap-5-min",
+        "news-shock-circuit-breaker-re-entry-cooldown-guard",
+        "vol-per-minute-regime-tape-min-rolling-15m-day-percentile",
+        "partial-fill-queue-position-economics-report-post-trade"
+      ]
+    },
+    {
+      "id": "planner-2026-05-17t15-18-21z",
+      "agent_kind": "planner",
+      "started_at": "2026-05-17T15:18:21Z",
+      "ended_at": "2026-05-17T15:18:34Z",
+      "ok": true,
+      "summary": "8 new tasks created from open feature_requests across equity-swing, intraday-scalper, futures, and risk personas. No open bugs. All existing tasks done; no duplicates.",
+      "produced_ids": [
+        "multi-timeframe-stage-scanner-weinstein-d-w-m-stage-2-alignment",
+        "earnings-corporate-action-calendar-overlay-on-open-positions",
+        "fii-dii-cash-f-o-flow-tape-with-5-20-day-regime-classifier",
+        "stock-level-rrg-quadrant-for-open-positions-shortlist-weekly-8-week-tails",
+        "intraday-sector-dispersion-capital-rotation-heatmap-5-min",
+        "news-shock-circuit-breaker-re-entry-cooldown-guard",
+        "vol-per-minute-regime-tape-sigma-min-rolling-15m-day-percentile",
+        "partial-fill-queue-position-economics-report-post-trade"
+      ]
+    },
+    {
+      "id": "executor-2026-05-17t15-18-34z",
+      "agent_kind": "executor",
+      "started_at": "2026-05-17T15:18:34Z",
+      "ended_at": "2026-05-17T15:18:48Z",
+      "ok": true,
+      "summary": "Proposed change for task 'Multi-Timeframe Stage Scanner (Weinstein D/W/M Stage 2 alignment)'",
+      "produced_ids": [
+        "prop-multi-timeframe-stage-scanner-weinstein-d-w-m-stage-2-alignment-008"
       ]
     }
   ]

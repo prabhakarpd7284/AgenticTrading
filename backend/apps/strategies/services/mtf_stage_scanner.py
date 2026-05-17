@@ -116,7 +116,8 @@ def build_mtf_stage_scanner(symbols: list[str] | None = None) -> dict[str, Any]:
         daily = _fetch_daily(sym)
         if len(daily) < 40:
             rows.append({"symbol": sym, "daily": None, "weekly": None,
-                         "monthly": None, "alignment": "no_data"})
+                         "monthly": None, "alignment": "no_data",
+                         "stage2_aligned": False})
             continue
         d_closes = [b["c"] for b in daily]
         w_closes = _resample_weekly(daily)
@@ -135,10 +136,20 @@ def build_mtf_stage_scanner(symbols: list[str] | None = None) -> dict[str, Any]:
         else:
             alignment = "mixed"
 
+        # Weinstein "Stage 2 alignment" specifically requires daily AND
+        # weekly to be Stage 2 (monthly STAGE_1 or STAGE_2 acceptable). This
+        # is the trader's classic textbook long set-up — break it out for
+        # easy filtering in the FE.
+        weinstein_stage2 = (
+            d_phase["stage"] == "STAGE_2" and w_phase["stage"] == "STAGE_2"
+            and m_phase["stage"] in ("STAGE_1", "STAGE_2")
+        )
+
         rows.append({
             "symbol": sym,
             "daily": d_phase, "weekly": w_phase, "monthly": m_phase,
             "alignment": alignment,
+            "stage2_aligned": weinstein_stage2,
         })
 
     rows.sort(key=lambda r: (

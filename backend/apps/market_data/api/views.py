@@ -20,12 +20,16 @@ from apps.market_data.services.fii_dii_flow import build_fii_dii_flow
 from apps.market_data.services.first_5min import build_first_5min
 from apps.market_data.services.gap_fill import build_gap_fill
 from apps.market_data.services.liquidity_map import build_liquidity_map
-from apps.market_data.services.news_shock import build_news_shock
+from apps.market_data.services.news_shock import (
+    build_news_shock, pause_symbol, unpause_symbol,
+)
 from apps.market_data.services.orb_failure import build_orb_failure
 from apps.market_data.services.orb_tracker import build_orb
 from apps.market_data.services.second_5min import build_second_5min
+from apps.market_data.services.intraday_sector_heatmap import build_intraday_sector_heatmap
 from apps.market_data.services.sector_dispersion import build_sector_dispersion
 from apps.market_data.services.sector_rrg import build_sector_rrg
+from apps.market_data.services.stock_rrg import build_stock_rrg
 from apps.market_data.services.tape_speed import build_tape_speed
 from apps.market_data.services.vol_regime_strip import build_vol_regime
 from apps.market_data.services.vwap_bands import build_vwap_bands
@@ -554,6 +558,29 @@ class NewsShockView(APIView):
         return Response(build_news_shock(getattr(request, "tenant", None)))
 
 
+class NewsShockPauseView(APIView):
+    """POST /api/v1/market-data/news-shocks/pause/  {symbol, minutes?, reason?}"""
+    permission_classes = [IsAuthenticated]
+    def post(self, request):
+        body = request.data or {}
+        try:
+            minutes = int(body.get("minutes") or 15)
+        except (TypeError, ValueError):
+            minutes = 15
+        return Response(pause_symbol(
+            body.get("symbol") or "",
+            minutes=minutes,
+            reason=body.get("reason") or "manual",
+        ))
+
+
+class NewsShockUnpauseView(APIView):
+    """POST /api/v1/market-data/news-shocks/unpause/  {symbol}"""
+    permission_classes = [IsAuthenticated]
+    def post(self, request):
+        return Response(unpause_symbol((request.data or {}).get("symbol") or ""))
+
+
 class FIIDIIFlowView(APIView):
     """GET /api/v1/market-data/fii-dii-flow/?days=30"""
     permission_classes = [IsAuthenticated]
@@ -570,3 +597,19 @@ class DepthImbalanceView(APIView):
     permission_classes = [IsAuthenticated]
     def get(self, request):
         return Response(build_depth_imbalance(getattr(request, "tenant", None)))
+
+
+class StockRRGView(APIView):
+    """GET /api/v1/market-data/stock-rrg/?symbols=A,B,C"""
+    permission_classes = [IsAuthenticated]
+    def get(self, request):
+        raw = request.query_params.get("symbols") or ""
+        syms = [s.strip().upper() for s in raw.split(",") if s.strip()] if raw else None
+        return Response(build_stock_rrg(symbols=syms))
+
+
+class IntradaySectorHeatmapView(APIView):
+    """GET /api/v1/market-data/intraday-sector-heatmap/"""
+    permission_classes = [IsAuthenticated]
+    def get(self, request):
+        return Response(build_intraday_sector_heatmap(getattr(request, "tenant", None)))

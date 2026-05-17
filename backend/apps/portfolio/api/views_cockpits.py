@@ -36,6 +36,7 @@ from apps.portfolio.services.earnings_overlay import build_earnings_overlay
 from apps.portfolio.services.edge_ledger import build_edge_ledger
 from apps.portfolio.services.forced_flat import build_forced_flat, flatten_all
 from apps.portfolio.services.intraday_rotation import build_intraday_rotation
+from apps.portfolio.services.partial_fill import build_partial_fill_report
 from apps.portfolio.services.gap_risk import build_gap_risk_report
 from apps.portfolio.services.post_mortem import build_post_mortem_report
 from apps.portfolio.services.sizer_simulator import simulate as simulate_sizer
@@ -328,3 +329,15 @@ class EarningsOverlayView(_BaseCockpitView):
     """GET /api/v1/portfolios/earnings-overlay/"""
     def get(self, request):
         return Response(build_earnings_overlay(getattr(request, "tenant", None)))
+
+
+class PartialFillView(_BaseCockpitView):
+    """GET /api/v1/portfolios/partial-fill/?limit=200"""
+    def get(self, request):
+        try:
+            limit = int(request.query_params.get("limit", 200) or 200)
+        except ValueError:
+            limit = 200
+        return Response(build_partial_fill_report(
+            getattr(request, "tenant", None), limit=limit,
+        ))
