@@ -212,6 +212,10 @@ def _stats_to_payload(
         avg_bars_held=stats.avg_bars_held,
         phase_stats=phase_stats,
         weekly_pnl=stats.weekly_pnl,
+        # trades was being built above but never wired into the payload —
+        # users saw aggregate stats with no "which stocks traded" detail
+        # for any mode that went through this serializer (intraday / basket).
+        trades=trades,
         equity_curve=stats.equity_curve,
         tf_grid=tf_grid or [],
         best_config=best_config or {},

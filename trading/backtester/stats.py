@@ -47,6 +47,11 @@ class BacktestStats:
     # Equity curve for charting
     equity_curve: List[Dict] = field(default_factory=list)
 
+    # Raw trade list — kept so callers can render per-trade detail
+    # (which stock, entry/exit, P&L, exit reason). Underscore prefix
+    # signals "do not serialize directly; convert via .to_dict()".
+    _trades: List = field(default_factory=list)
+
 
 class StatsAggregator:
     """Computes BacktestStats from a list of Trade objects.
@@ -69,6 +74,7 @@ class StatsAggregator:
             total_signals=total_signals,
             skipped_signals=skipped,
             total_trades=len(trades),
+            _trades=list(trades),  # keep raw trades so API can render per-trade detail
         )
 
         if not trades:
