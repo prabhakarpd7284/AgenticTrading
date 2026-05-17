@@ -50,6 +50,11 @@ dependencies = [
     "python-dotenv>=1.0",
     "mplfinance>=0.12.10b0",
     "matplotlib>=3.7",
+    # apps.market_data.services.pulse_service uses yfinance for the
+    # NIFTY/BANKNIFTY/VIX/S&P-500 quotes that feed /market-data/pulse/
+    # (and downstream /rotation, /shortlist, /setup). Without it, the
+    # service returns its empty fallback and the Pulse page is blank.
+    "yfinance>=0.2",
 ]
 
 [project.optional-dependencies]
