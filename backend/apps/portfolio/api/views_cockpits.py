@@ -16,6 +16,9 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from django.core.cache import cache
+from django.core.management import call_command
+
 from apps.portfolio.services.cockpits import (
     build_broker_reconciliation,
     build_capital_cockpit,
@@ -235,6 +238,65 @@ class SlippageEdgeSetupsView(_BaseCockpitView):
     """GET /api/v1/portfolios/slippage-edge/setups/ — setup-family catalog"""
     def get(self, request):
         return Response(setup_catalog())
+
+
+class ResetTradingDataView(_BaseCockpitView):
+    """POST /api/v1/portfolios/reset/  body: {flags, capital?}
+
+    Mirrors the `python manage.py reset_trading_data --confirm` CLI.
+
+      flags        list of: journal, straddles, snapshots, audit, signals,
+                   watchlist, orders, runs, positions, cache, all
+      keep_watchlist  bool  — only honored when "all" is in flags
+      capital      number   — seed today's snapshot with this capital
+    """
+    def post(self, request):
+        body = request.data or {}
+        flags = [str(f).lower() for f in (body.get("flags") or [])]
+        if not flags and body.get("capital") is None:
+            return Response(
+                {"error": "supply at least one flag in `flags` (or `capital`)"},
+                status=400,
+            )
+
+        cli_kwargs: dict = {"confirm": True, "verbosity": 0}
+        all_flags = (
+            "journal", "straddles", "snapshots", "audit", "signals",
+            "watchlist", "orders", "runs", "positions", "cache",
+        )
+        if "all" in flags:
+            cli_kwargs["all"] = True
+            if body.get("keep_watchlist"):
+                cli_kwargs["keep_watchlist"] = True
+        else:
+            for f in flags:
+                if f in all_flags:
+                    cli_kwargs[f] = True
+        if body.get("capital") is not None:
+            try:
+                cli_kwargs["capital"] = float(body.get("capital"))
+            except (TypeError, ValueError):
+                return Response({"error": "capital must be a number"}, status=400)
+
+        # Capture command output so the FE can show what was wiped.
+        from io import StringIO
+        buf = StringIO()
+        try:
+            call_command("reset_trading_data", stdout=buf, **cli_kwargs)
+        except Exception as e:  # noqa: BLE001
+            return Response({"error": str(e)}, status=500)
+
+        # Always flush the local Django cache too — even if --cache wasn't
+        # explicitly chosen — because every cockpit panel caches per-symbol
+        # broker calls and we don't want stale numbers post-reset.
+        cache.clear()
+
+        return Response({
+            "ok": True,
+            "summary": buf.getvalue().strip(),
+            "flags": flags,
+            "capital": cli_kwargs.get("capital"),
+        })
 
 
 class EdgeLedgerView(_BaseCockpitView):

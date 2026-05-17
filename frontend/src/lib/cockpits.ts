@@ -792,3 +792,24 @@ export const useEarningsOverlay = () =>
     queryFn: () => api.get<EarningsOverlay>("/portfolios/earnings-overlay/").then((r) => r.data),
     ...COMMON,
   });
+
+// ---------------------------------------------------------------------------
+// Reset trading data — wipes journal / straddles / runs / cache / etc.
+// ---------------------------------------------------------------------------
+export interface ResetRequest {
+  flags: string[];            // e.g. ["all"] or ["journal","cache"]
+  keep_watchlist?: boolean;
+  capital?: number;
+}
+export interface ResetResponse {
+  ok: boolean;
+  summary: string;
+  flags: string[];
+  capital?: number;
+  error?: string;
+}
+
+export async function resetTradingData(payload: ResetRequest): Promise<ResetResponse> {
+  const { data } = await api.post<ResetResponse>("/portfolios/reset/", payload);
+  return data;
+}

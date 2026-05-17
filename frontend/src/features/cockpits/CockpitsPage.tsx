@@ -7,10 +7,11 @@
 import * as React from "react";
 import {
   Activity, AlertTriangle, Award, BarChart3, Bell, BookOpen, Briefcase,
-  Calculator, Calendar, Check, Clock, Compass, Droplets, Flag, FlaskConical,
-  Gauge, GitCompareArrows, Grid3X3, Hourglass, Layers, LineChart, Microscope,
-  Pencil, Radar, Receipt, RotateCw, Scale, Shield, Sigma, Sunrise,
-  Sunrise as DaybreakIcon, Target, TrendingDown, Waves, X, Zap, ZapOff,
+  Calculator, Calendar, Check, Clock, Compass, Droplets, Eraser, Flag,
+  FlaskConical, Gauge, GitCompareArrows, Grid3X3, Hourglass, Layers,
+  LineChart, Microscope, Pencil, Radar, Receipt, RotateCw, Scale, Shield,
+  Sigma, Sunrise, Sunrise as DaybreakIcon, Target, TrendingDown, Waves, X,
+  Zap, ZapOff,
 } from "lucide-react";
 import {
   Bar, BarChart, CartesianGrid, Line, LineChart as RLineChart,
@@ -69,7 +70,7 @@ function Help({ label, text }: { label: string; text: string }) {
 }
 import { useQueryClient } from "@tanstack/react-query";
 import {
-  checkSlippageEdge, flattenAll, setCapital, simulateSizer,
+  checkSlippageEdge, flattenAll, resetTradingData, setCapital, simulateSizer,
   useBaseQuality, useBreakoutClassifier, useBrokerRecon, useCapitalCockpit,
   useCorrelationMatrix, useDepthImbalance, useEarningsOverlay, useEdgeDecay,
   useEdgeLedger, useExpiryCockpit, useFIIDIIFlow, useFirst5Min, useForcedFlat,
@@ -120,6 +121,7 @@ const TABS = [
   { id: "fii-dii",       label: "FII/DII Flow", icon: LineChart },
   { id: "depth",         label: "Depth Proxy",  icon: BarChart3 },
   { id: "earnings",      label: "Earnings",     icon: Calendar },
+  { id: "reset",         label: "Reset / Seed", icon: Eraser },
 ] as const;
 
 export function CockpitsPage() {
@@ -183,6 +185,7 @@ export function CockpitsPage() {
         <TabsContent value="fii-dii"><FIIDIIFlowPanel /></TabsContent>
         <TabsContent value="depth"><DepthImbalancePanel /></TabsContent>
         <TabsContent value="earnings"><EarningsOverlayPanel /></TabsContent>
+        <TabsContent value="reset"><ResetPanel /></TabsContent>
       </Tabs>
     </div>
   );
@@ -2698,6 +2701,174 @@ function EarningsOverlayPanel() {
               </table>
             </div>
           )}
+        </CardContent>
+      </Card>
+    </PanelWrap>
+  );
+}
+
+/* ------------------------------ 38. Reset / Seed -------------------------- */
+const RESET_OPTIONS = [
+  { id: "journal",   label: "TradeJournal",       blurb: "Legacy equity + option trade rows" },
+  { id: "straddles", label: "StraddlePosition",   blurb: "Active short straddles" },
+  { id: "snapshots", label: "PortfolioSnapshot",  blurb: "Legacy + v2 capital snapshots" },
+  { id: "audit",     label: "AuditLog",           blurb: "Every agent / risk-engine decision" },
+  { id: "signals",   label: "SignalLog",          blurb: "Live-screener signals" },
+  { id: "watchlist", label: "WatchlistEntry",     blurb: "Legacy watchlist (be careful!)" },
+  { id: "orders",    label: "v2 Order + Outbox",  blurb: "Outbox-pattern order queue" },
+  { id: "runs",      label: "AgentRun + Step",    blurb: "Agent console run history" },
+  { id: "positions", label: "v2 Position",        blurb: "v2 positions ledger" },
+  { id: "cache",     label: "Django cache",       blurb: "Cockpit broker-call cache (always cleared)" },
+] as const;
+
+function ResetPanel() {
+  const qc = useQueryClient();
+  const [picked, setPicked] = React.useState<Set<string>>(new Set());
+  const [capital, setCapital] = React.useState<string>("");
+  const [pending, setPending] = React.useState(false);
+  const [result, setResult] = React.useState<string | null>(null);
+  const [error, setError] = React.useState<string | null>(null);
+
+  const toggle = (id: string) => {
+    const s = new Set(picked);
+    s.has(id) ? s.delete(id) : s.add(id);
+    setPicked(s);
+  };
+  const selectAll = () => setPicked(new Set(RESET_OPTIONS.map((o) => o.id)));
+  const clearAll = () => setPicked(new Set());
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null); setResult(null);
+    const flags = Array.from(picked);
+    const capNum = capital ? Number(capital) : undefined;
+    if (flags.length === 0 && capNum === undefined) {
+      setError("Pick at least one thing to reset, or set a capital seed.");
+      return;
+    }
+    if (capNum !== undefined && (!Number.isFinite(capNum) || capNum <= 0)) {
+      setError("Capital must be a positive number.");
+      return;
+    }
+    const message =
+      flags.includes("journal") || flags.includes("straddles")
+        ? `This deletes ${flags.length} table${flags.length === 1 ? "" : "s"} of trading data. There is no undo. Continue?`
+        : `Apply reset to ${flags.length} target${flags.length === 1 ? "" : "s"}${capNum ? ` + capital ₹${capNum.toLocaleString("en-IN")}` : ""}?`;
+    if (!confirm(message)) return;
+
+    setPending(true);
+    try {
+      const r = await resetTradingData({ flags, capital: capNum });
+      if (r.error) setError(r.error);
+      else setResult(r.summary || "Done.");
+      await qc.invalidateQueries({ queryKey: ["cockpits"] });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "request failed");
+    } finally {
+      setPending(false);
+    }
+  };
+
+  return (
+    <PanelWrap>
+      <HelpBlock
+        what="Wipe trading data (journal, positions, snapshots, agent runs, cache) so you can start a fresh paper session and watch new trades flow in."
+        why="The cockpits accumulate state across runs — stale entries pollute the views. A clean slate makes it obvious which trade is the one you just placed."
+        act="Tick the tables to wipe, optionally seed today's capital, then Reset. The Django cache is always flushed so the cockpits don't show pre-reset numbers."
+      />
+      <Card>
+        <CardHeader>
+          <CardTitle>Reset trading data</CardTitle>
+          <CardDescription>
+            Mirrors <code>python manage.py reset_trading_data --confirm</code>.
+            Destructive — there is no undo.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={submit} className="space-y-4">
+            <div className="flex items-center gap-2">
+              <button type="button" onClick={selectAll}
+                      className="h-8 px-3 text-body-sm bg-surface-2 border border-border rounded-sm hover:bg-surface-3">
+                Select all
+              </button>
+              <button type="button" onClick={clearAll}
+                      className="h-8 px-3 text-body-sm bg-surface-2 border border-border rounded-sm hover:bg-surface-3">
+                Clear
+              </button>
+              <span className="text-body-sm text-fg-subtle ml-2">
+                {picked.size} selected
+              </span>
+            </div>
+
+            <div className="grid sm:grid-cols-2 gap-2">
+              {RESET_OPTIONS.map((o) => (
+                <label key={o.id}
+                       className={cn(
+                         "flex items-start gap-3 p-3 rounded-md border cursor-pointer",
+                         "border-border bg-surface hover:bg-surface-2 transition-colors",
+                         picked.has(o.id) && "border-accent/60 bg-accent/5",
+                       )}>
+                  <input
+                    type="checkbox"
+                    checked={picked.has(o.id)}
+                    onChange={() => toggle(o.id)}
+                    className="mt-0.5"
+                  />
+                  <div>
+                    <div className="font-mono text-body-sm">{o.label}</div>
+                    <div className="text-caption text-fg-subtle">{o.blurb}</div>
+                  </div>
+                </label>
+              ))}
+            </div>
+
+            <div className="flex items-end gap-3 flex-wrap">
+              <Field label="Seed capital (optional, INR)">
+                <input
+                  type="number" min={1} step="any"
+                  value={capital}
+                  onChange={(e) => setCapital(e.target.value)}
+                  placeholder="e.g. 500000"
+                  className="w-48 h-9 px-2 bg-surface border border-border rounded-sm text-body-sm tabular-nums"
+                />
+              </Field>
+              <button
+                type="submit"
+                disabled={pending}
+                className="h-9 px-4 bg-pnl-down text-white rounded-sm text-body-sm font-medium disabled:opacity-50"
+              >
+                {pending ? "Resetting…" : "Reset"}
+              </button>
+            </div>
+
+            {error ? (
+              <div className="text-body-sm text-pnl-down flex items-center gap-2">
+                <AlertTriangle className="h-4 w-4" /> {error}
+              </div>
+            ) : null}
+            {result ? (
+              <pre className="text-caption font-mono whitespace-pre-wrap p-3 bg-surface-2 border border-border rounded-sm">{result}</pre>
+            ) : null}
+          </form>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>CLI equivalent</CardTitle>
+          <CardDescription>Same operation from a terminal.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <pre className="text-caption font-mono p-3 bg-surface-2 border border-border rounded-sm overflow-x-auto">
+{`# Wipe everything except watchlist, seed 500k capital
+python manage.py reset_trading_data --all --keep-watchlist --capital 500000 --confirm
+
+# Just clear today's agent runs + Django cache
+python manage.py reset_trading_data --runs --cache --confirm
+
+# Wipe trade journal only (paranoid mode)
+python manage.py reset_trading_data --journal --confirm`}
+          </pre>
         </CardContent>
       </Card>
     </PanelWrap>
