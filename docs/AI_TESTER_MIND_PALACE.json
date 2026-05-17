@@ -189,6 +189,11 @@
       "agent": "executor",
       "at": "2026-05-17T16:21:07.608022+00:00",
       "summary": "Cycle-10: closed 15 tasks. Phase 1 = echo cleanup (8 stale tasks + 40 stale FRs closed; mark_task_done helper added). Phase 2 = 10 backtester services (walk-forward, MC, regime, cost-sens, drift, capacity, sweep, bootstrap, registry, suggest). Phase 3 = 5 intraday services (news resumption, scratch economics, 10:30 refinement, cool-down, lunchtime reset)."
+    },
+    {
+      "agent": "executor",
+      "at": "2026-05-17T16:23:32.747536+00:00",
+      "summary": "Closed 1 task: TICK internal strip (NSE-500 ad/dec snapshot + extremes flag) shipped at /market-data/tick-strip/. Open backlog now empty."
     }
   ],
   "feature_requests": [
@@ -2195,7 +2200,7 @@
       "title": "Micro Advance/Decline & TICK Internal Strip (NSE-500 1-min, with extremes flag)",
       "rationale": "Scalpers read internals tick-by-tick: NSE-500 1-min net advancers-minus-decliners, up-volume vs down-volume ratio, and a TICK-style oscillator flagging >+400 / <-400 extremes that historically precede 3-5 min mean-reversion. Index Pulse is daily-regime; this is the minute-by-minute breadth pulse scalpers actually trade off.",
       "category": "chart",
-      "status": "open",
+      "status": "done",
       "created_at": "2026-05-17T16:10:35Z",
       "requested_by": "trader_user:intraday"
     },
@@ -3818,7 +3823,7 @@
       "acceptance": "GET /api/v1/market-data/micro-ad-tick/ returns 1-min series for the current session with fields {ts, ad_net, up_down_vol_ratio, tick, extreme_flag} and front-end strip renders extreme markers when |tick|>=400.",
       "source": "feature_request",
       "source_id": "micro-advance-decline-tick-internal-strip-nse-500-1-min-with-extremes-flag",
-      "status": "open",
+      "status": "done",
       "created_at": "2026-05-17T16:11:07Z"
     },
     {

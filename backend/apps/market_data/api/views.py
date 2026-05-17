@@ -30,6 +30,7 @@ from apps.market_data.services.intraday_sector_heatmap import build_intraday_sec
 from apps.market_data.services.lunchtime_reset import build_lunchtime_reset
 from apps.market_data.services.market_health import build_market_health
 from apps.market_data.services.stop_hunt import build_stop_hunt
+from apps.market_data.services.tick_strip import build_tick_strip
 from apps.market_data.services.sector_dispersion import build_sector_dispersion
 from apps.market_data.services.sector_rrg import build_sector_rrg
 from apps.market_data.services.stock_rrg import build_stock_rrg
@@ -640,3 +641,10 @@ class LunchtimeResetView(APIView):
             getattr(request, "tenant", None),
             underlying=request.query_params.get("underlying") or "NIFTY",
         ))
+
+
+class TickStripView(APIView):
+    """GET /api/v1/market-data/tick-strip/"""
+    permission_classes = [IsAuthenticated]
+    def get(self, request):
+        return Response(build_tick_strip(getattr(request, "tenant", None)))

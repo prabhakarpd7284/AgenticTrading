@@ -24,6 +24,7 @@ from apps.market_data.api.views import (
     Second5MinView,
     StockRRGView,
     StopHuntView,
+    TickStripView,
     SetupPreviewView,
     ShortlistView,
     SwingScannerView,
@@ -65,4 +66,5 @@ urlpatterns = [
     path("stop-hunt/",      StopHuntView.as_view(),       name="stop-hunt"),
     path("market-health/",  MarketHealthView.as_view(),   name="market-health"),
     path("lunchtime-reset/", LunchtimeResetView.as_view(), name="lunchtime-reset"),
+    path("tick-strip/",     TickStripView.as_view(),      name="tick-strip"),
 ]
