@@ -24,7 +24,9 @@ from pathlib import Path
 from typing import Any
 
 # Bump when the schema / scope of the mind palace meaningfully changes.
-CONTEXT_VERSION = 1
+# v2: added feature_requests / tasks / proposals / agent_runs for the
+#     multi-agent team (trader_user · planner · executor · tester).
+CONTEXT_VERSION = 2
 
 # state.py → tester/ → agents_core/ → apps/ → backend/ → AgenticTrading/
 _REPO_ROOT = Path(__file__).resolve().parents[4]
@@ -62,6 +64,58 @@ class TestRun:
 
 
 @dataclass
+class FeatureRequest:
+    """A "what would a trader want next" item, produced by the trader_user agent."""
+    id: str
+    title: str
+    rationale: str
+    category: str = "general"        # "report" | "chart" | "data" | "workflow" | "general"
+    status: str = "open"             # "open" | "planned" | "done" | "rejected"
+    created_at: str = ""
+    requested_by: str = "trader_user"
+
+
+@dataclass
+class Task:
+    """An actionable engineering task — bug fix or feature implementation."""
+    id: str
+    title: str
+    priority: str = "medium"         # "high" | "medium" | "low"
+    scope: str = ""
+    files: list[str] = field(default_factory=list)
+    acceptance: str = ""
+    source: str = ""                 # "bug" | "feature_request" | "ad_hoc"
+    source_id: str = ""              # id of the source bug / request
+    status: str = "open"             # "open" | "proposed" | "in_review" | "done" | "dropped"
+    created_at: str = ""
+
+
+@dataclass
+class Proposal:
+    """A code-change proposal produced by the executor agent. NEVER auto-applied."""
+    id: str
+    task_id: str
+    summary: str
+    files_changed: list[dict] = field(default_factory=list)   # [{path, change_kind, approach, code_outline}]
+    risks: list[str] = field(default_factory=list)
+    tests_needed: list[str] = field(default_factory=list)
+    status: str = "proposed"         # "proposed" | "applied" | "rejected"
+    created_at: str = ""
+
+
+@dataclass
+class AgentRunLog:
+    """Meta log — every time any team agent ran."""
+    id: str
+    agent_kind: str                  # "trader_user" | "planner" | "executor" | "tester"
+    started_at: str
+    ended_at: str
+    ok: bool
+    summary: str = ""
+    produced_ids: list[str] = field(default_factory=list)
+
+
+@dataclass
 class MindPalace:
     context_version: int = CONTEXT_VERSION
     fingerprint: str = ""
@@ -71,6 +125,11 @@ class MindPalace:
     runs: list[TestRun] = field(default_factory=list)
     # Free-form notes the LLM can append between runs without us schema-policing.
     notes: list[str] = field(default_factory=list)
+    # Multi-agent team state (v2):
+    feature_requests: list[FeatureRequest] = field(default_factory=list)
+    tasks: list[Task] = field(default_factory=list)
+    proposals: list[Proposal] = field(default_factory=list)
+    agent_runs: list[AgentRunLog] = field(default_factory=list)
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -94,13 +153,16 @@ def load() -> MindPalace:
         fixed_bugs=[Finding(**b) for b in raw.get("fixed_bugs", [])],
         runs=[TestRun(**r) for r in raw.get("runs", [])],
         notes=list(raw.get("notes", [])),
+        feature_requests=[FeatureRequest(**f) for f in raw.get("feature_requests", [])],
+        tasks=[Task(**t) for t in raw.get("tasks", [])],
+        proposals=[Proposal(**p) for p in raw.get("proposals", [])],
+        agent_runs=[AgentRunLog(**a) for a in raw.get("agent_runs", [])],
     )
     if palace.context_version != CONTEXT_VERSION:
-        # Soft reset — keep open_bugs (they're still actionable), drop runs +
-        # fingerprint so the next pass re-validates everything.
+        # Soft reset — preserve all collections (they're still actionable),
+        # only drop the fingerprint so the next pass re-validates the surface.
         palace.context_version = CONTEXT_VERSION
         palace.fingerprint = ""
-        palace.runs = []
     return palace
 
 
@@ -108,6 +170,10 @@ def save(palace: MindPalace) -> None:
     palace.last_run_at = _now()
     # Roll runs forward
     palace.runs = sorted(palace.runs, key=lambda r: r.started_at)[-MAX_RUNS_KEPT:]
+    # Also roll older agent_runs and proposals so the file doesn't grow
+    # unbounded over many cycles.
+    palace.agent_runs = sorted(palace.agent_runs, key=lambda r: r.started_at)[-40:]
+    palace.proposals = palace.proposals[-40:]
     MIND_PALACE_PATH.parent.mkdir(parents=True, exist_ok=True)
     MIND_PALACE_PATH.write_text(json.dumps({
         "context_version": palace.context_version,
@@ -117,6 +183,10 @@ def save(palace: MindPalace) -> None:
         "fixed_bugs": [asdict(b) for b in palace.fixed_bugs],
         "runs": [asdict(r) for r in palace.runs],
         "notes": palace.notes,
+        "feature_requests": [asdict(f) for f in palace.feature_requests],
+        "tasks": [asdict(t) for t in palace.tasks],
+        "proposals": [asdict(p) for p in palace.proposals],
+        "agent_runs": [asdict(a) for a in palace.agent_runs],
     }, indent=2))
 
 
@@ -195,3 +265,68 @@ def compute_fingerprint(strategies: list[str], plugin_dirs: list[Path]) -> str:
 
 def _now() -> str:
     return datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Multi-agent collection helpers (all dedupe by slug(title) so re-runs
+# stay token-cheap and don't pollute the palace)
+# ─────────────────────────────────────────────────────────────────────────
+def upsert_feature_request(palace: MindPalace, *, title: str, rationale: str,
+                            category: str = "general", requested_by: str = "trader_user") -> FeatureRequest:
+    fid = slugify(title)
+    for f in palace.feature_requests:
+        if f.id == fid:
+            f.rationale = rationale
+            f.category = category
+            return f
+    f = FeatureRequest(id=fid, title=title, rationale=rationale, category=category,
+                        status="open", created_at=_now(), requested_by=requested_by)
+    palace.feature_requests.append(f)
+    return f
+
+
+def upsert_task(palace: MindPalace, *, title: str, priority: str = "medium",
+                scope: str = "", files: list[str] | None = None,
+                acceptance: str = "", source: str = "ad_hoc", source_id: str = "") -> Task:
+    tid = slugify(title)
+    for t in palace.tasks:
+        if t.id == tid:
+            t.priority = priority
+            t.scope = scope or t.scope
+            t.files = files or t.files
+            t.acceptance = acceptance or t.acceptance
+            return t
+    t = Task(id=tid, title=title, priority=priority, scope=scope, files=files or [],
+              acceptance=acceptance, source=source, source_id=source_id,
+              status="open", created_at=_now())
+    palace.tasks.append(t)
+    return t
+
+
+def append_proposal(palace: MindPalace, *, task_id: str, summary: str,
+                     files_changed: list[dict], risks: list[str] | None = None,
+                     tests_needed: list[str] | None = None) -> Proposal:
+    pid = f"prop-{task_id}-{len(palace.proposals)+1:03d}"
+    p = Proposal(id=pid, task_id=task_id, summary=summary,
+                  files_changed=files_changed, risks=risks or [],
+                  tests_needed=tests_needed or [], status="proposed",
+                  created_at=_now())
+    palace.proposals.append(p)
+    # Move related task into review state so the planner skips it next cycle.
+    for t in palace.tasks:
+        if t.id == task_id and t.status == "open":
+            t.status = "proposed"
+            break
+    return p
+
+
+def record_agent_run(palace: MindPalace, *, agent_kind: str, started_at: str,
+                      ended_at: str, ok: bool, summary: str = "",
+                      produced_ids: list[str] | None = None) -> AgentRunLog:
+    a = AgentRunLog(
+        id=f"{agent_kind}-{slugify(started_at)}",
+        agent_kind=agent_kind, started_at=started_at, ended_at=ended_at,
+        ok=ok, summary=summary, produced_ids=produced_ids or [],
+    )
+    palace.agent_runs.append(a)
+    return a

@@ -400,10 +400,18 @@ def run(only: str | None = None, verbose: bool = False) -> tuple[state.MindPalac
 
     for case in cases:
         t0 = time.time()
+        finding_id = state.slugify(f"[{case.suite}] {case.title}")
         try:
             case.fn(ctx)
             results.append(TestResult(case=case, passed=True, duration_ms=int((time.time() - t0) * 1000)))
-            if verbose:
+            # If this test had previously opened a finding and is now green,
+            # close it — keeps the palace honest about what's still broken.
+            if state.close_finding(palace, finding_id):
+                if verbose:
+                    print(f"  ✓ {case.id:36}  {int((time.time() - t0)*1000):>5}ms  (closed: {finding_id})")
+                else:
+                    pass
+            elif verbose:
                 print(f"  ✓ {case.id:36}  {int((time.time() - t0)*1000):>5}ms")
         except TestFailure as e:
             msg = str(e)
