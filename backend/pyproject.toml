@@ -58,6 +58,8 @@ dev = [
 [project.entry-points."alphadesk.strategies"]
 directional = "plugins.strategy_directional.strategy:DirectionalStrategy"
 short_straddle = "plugins.strategy_short_straddle.strategy:ShortStraddleStrategy"
+vertical_spread = "plugins.strategy_vertical_spread.strategy:VerticalSpreadStrategy"
+pyramid = "plugins.strategy_pyramid.strategy:PyramidStrategy"
 
 [project.entry-points."alphadesk.retrievers"]
 portfolio = "apps.rag.retrievers.portfolio:PortfolioRetriever"
