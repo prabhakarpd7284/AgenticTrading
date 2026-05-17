@@ -7,6 +7,7 @@ from apps.accounts.api.jwt import (
     TenantTokenObtainPairView,
     TenantTokenRefreshView,
 )
+from apps.agents_core.api.views_palace import task_board
 
 api_v1 = [
     # JWT views that embed the user's active tenant_id in the token claims —
@@ -39,4 +40,6 @@ urlpatterns = [
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
     path("api/docs/", SpectacularSwaggerView.as_view(url_name="schema"), name="swagger-ui"),
     path("healthz/", include("apps.common.health_urls")),
+    # Standalone Jira-style HTML board over the AI Tester mind palace.
+    path("board/", task_board, name="task-board"),
 ]
