@@ -98,6 +98,25 @@ def is_paused(symbol: str) -> bool:
     return bool(cache.get(f"{_PAUSE_PREFIX}{sym}"))
 
 
+def _resumption_playbook(symbol: str) -> dict:
+    """Per-symbol playbook for what to do AFTER a halt lifts.
+
+    Hard-coded heuristics for now; the planner can wire real per-event
+    rules once a news feed lands. The shape is stable so the FE always
+    has something useful even if a feed never ships.
+    """
+    return {
+        "symbol": symbol,
+        "first_5_min": "WATCH ONLY — do not enter. Note the new range, the 9:15-style ORH/ORL.",
+        "after_5_min": "If the post-halt 5-min bar closes inside the pre-halt range, fade the breakout. Outside the range, wait for a higher-timeframe retest.",
+        "size_first_trade_pct": 25,
+        "size_after_validation_pct": 75,
+        "cancel_resting_stops": True,
+        "cancel_resting_targets": True,
+        "max_attempts_in_session": 2,
+    }
+
+
 def build_news_shock(tenant=None) -> dict[str, Any]:
     try:
         from trading.models import TradeJournal, WatchlistEntry
@@ -111,17 +130,22 @@ def build_news_shock(tenant=None) -> dict[str, Any]:
 
     events = _fetch_events()
     paused = _active_pauses()
+    # Resumption playbooks are surfaced for every paused symbol so the
+    # operator has a ready checklist the moment the cooldown clears.
+    resumption_cards = [_resumption_playbook(p["symbol"]) for p in paused]
     return {
         "events": events,
         "paused_symbols": paused,
         "active_pause_count": len(paused),
+        "resumption_playbooks": resumption_cards,
         "coverage_symbols": coverage,
         "as_of": _now().isoformat(),
         "data_source": "stub" if not events else "live",
         "default_cooldown_min": _DEFAULT_COOLDOWN_MIN,
         "note": (
             "Pause a symbol (via /pause/) to block new entries for N minutes. "
-            "Cooldown clears automatically. The events array stays empty "
-            "until the NSE corporate-action feed is wired."
+            "Cooldown clears automatically. Every paused row gets a "
+            "resumption_playbook card so you know exactly what to do when "
+            "the symbol comes back."
         ),
     }

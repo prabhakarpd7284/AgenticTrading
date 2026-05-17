@@ -35,6 +35,7 @@ from apps.portfolio.services.correlation_matrix import build_correlation_report
 from apps.portfolio.services.earnings_overlay import build_earnings_overlay
 from apps.portfolio.services.edge_ledger import build_edge_ledger
 from apps.portfolio.services.forced_flat import build_forced_flat, flatten_all
+from apps.portfolio.services.cool_down import build_cool_down
 from apps.portfolio.services.intraday_rotation import build_intraday_rotation
 from apps.portfolio.services.partial_fill import build_partial_fill_report
 from apps.portfolio.services.pyramid_triggers import build_pyramid_triggers
@@ -348,3 +349,13 @@ class PyramidTriggersView(_BaseCockpitView):
     """GET /api/v1/portfolios/pyramid-triggers/"""
     def get(self, request):
         return Response(build_pyramid_triggers(getattr(request, "tenant", None)))
+
+
+class CoolDownView(_BaseCockpitView):
+    """GET /api/v1/portfolios/cool-down/?threshold=3"""
+    def get(self, request):
+        try:
+            threshold = int(request.query_params.get("threshold", 3) or 3)
+        except ValueError:
+            threshold = 3
+        return Response(build_cool_down(getattr(request, "tenant", None), threshold=threshold))

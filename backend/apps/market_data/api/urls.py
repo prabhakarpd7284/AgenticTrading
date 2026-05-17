@@ -6,6 +6,7 @@ from apps.market_data.api.views import (
     FIIDIIFlowView,
     First5MinView,
     IntradaySectorHeatmapView,
+    LunchtimeResetView,
     MarketHealthView,
     GapFillView,
     LiquidityMapView,
@@ -63,4 +64,5 @@ urlpatterns = [
     path("intraday-sector-heatmap/", IntradaySectorHeatmapView.as_view(), name="intraday-sector-heatmap"),
     path("stop-hunt/",      StopHuntView.as_view(),       name="stop-hunt"),
     path("market-health/",  MarketHealthView.as_view(),   name="market-health"),
+    path("lunchtime-reset/", LunchtimeResetView.as_view(), name="lunchtime-reset"),
 ]

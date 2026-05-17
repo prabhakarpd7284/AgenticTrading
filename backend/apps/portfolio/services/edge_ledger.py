@@ -106,11 +106,32 @@ def build_edge_ledger(tenant=None, *, limit: int = 200) -> dict[str, Any]:
     symbol_summary = dict(sorted(symbol_summary.items(),
                                   key=lambda kv: kv[1]["trades"], reverse=True)[:15])
 
+    # Per-symbol scratch economics — how many trades land near net-zero
+    # after costs. Scratch = abs(net_edge) <= total_cost. Surfaces the
+    # symbols where you're paying to play.
+    scratch_per_symbol: dict[str, dict] = {}
+    for sym, items in by_symbol.items():
+        scratch = sum(1 for r in items if abs(r["net_edge_inr"]) <= r["total_cost_inr"])
+        n = len(items)
+        scratch_per_symbol[sym] = {
+            "trades": n,
+            "scratch_count": scratch,
+            "scratch_pct": round(scratch / n * 100, 1) if n else 0.0,
+            "avg_tick_edge_bps": round(
+                sum(r["edge_bps"] for r in items) / n, 1,
+            ) if n else 0.0,
+        }
+    # Surface worst scratch offenders first (top-10)
+    scratch_top = dict(sorted(
+        scratch_per_symbol.items(), key=lambda kv: -kv[1]["scratch_pct"],
+    )[:10])
+
     return {
         "count": len(rows),
         "totals": _agg(rows),
         "by_strategy": strategy_summary,
         "by_symbol": symbol_summary,
+        "scratch_economics": scratch_top,
         "rows": rows[:50],   # cap payload
         "note": (
             "Spread cost = 5 bps × qty × 2 (entry + exit). Brokerage = ₹40 "

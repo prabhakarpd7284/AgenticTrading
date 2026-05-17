@@ -306,6 +306,24 @@ def upsert_task(palace: MindPalace, *, title: str, priority: str = "medium",
     return t
 
 
+def mark_task_done(palace: MindPalace, task_id: str) -> bool:
+    """Flip a task to `done` AND auto-close its parent feature_request.
+
+    Returns True if the task was found. Used by the cleanup helpers and the
+    executor's post-apply hook so the planner never re-tasks a shipped
+    feature on the next cycle.
+    """
+    task = next((t for t in palace.tasks if t.id == task_id), None)
+    if not task:
+        return False
+    task.status = "done"
+    if task.source == "feature_request" and task.source_id:
+        fr = next((f for f in palace.feature_requests if f.id == task.source_id), None)
+        if fr and fr.status != "done":
+            fr.status = "done"
+    return True
+
+
 def append_proposal(palace: MindPalace, *, task_id: str, summary: str,
                      files_changed: list[dict], risks: list[str] | None = None,
                      tests_needed: list[str] | None = None) -> Proposal:

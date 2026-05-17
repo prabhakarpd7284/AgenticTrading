@@ -27,6 +27,7 @@ from apps.market_data.services.orb_failure import build_orb_failure
 from apps.market_data.services.orb_tracker import build_orb
 from apps.market_data.services.second_5min import build_second_5min
 from apps.market_data.services.intraday_sector_heatmap import build_intraday_sector_heatmap
+from apps.market_data.services.lunchtime_reset import build_lunchtime_reset
 from apps.market_data.services.market_health import build_market_health
 from apps.market_data.services.stop_hunt import build_stop_hunt
 from apps.market_data.services.sector_dispersion import build_sector_dispersion
@@ -629,3 +630,13 @@ class MarketHealthView(APIView):
     permission_classes = [IsAuthenticated]
     def get(self, request):
         return Response(build_market_health(getattr(request, "tenant", None)))
+
+
+class LunchtimeResetView(APIView):
+    """GET /api/v1/market-data/lunchtime-reset/?underlying=NIFTY"""
+    permission_classes = [IsAuthenticated]
+    def get(self, request):
+        return Response(build_lunchtime_reset(
+            getattr(request, "tenant", None),
+            underlying=request.query_params.get("underlying") or "NIFTY",
+        ))
