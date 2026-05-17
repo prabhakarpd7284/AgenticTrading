@@ -184,8 +184,8 @@ function BacktestResults({ data }: { data: OKBacktestPayload }) {
     const trades = [...data.trades];
     const { key, dir } = tradeSort;
     trades.sort((a, b) => {
-      const av = (a as Record<string, unknown>)[key];
-      const bv = (b as Record<string, unknown>)[key];
+      const av = (a as unknown as Record<string, unknown>)[key];
+      const bv = (b as unknown as Record<string, unknown>)[key];
       const cmp = typeof av === "number" && typeof bv === "number" ? av - bv : String(av).localeCompare(String(bv));
       return dir === "asc" ? cmp : -cmp;
     });

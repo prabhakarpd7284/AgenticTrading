@@ -1,4 +1,3 @@
-import * as React from "react";
 import { ArrowDown, ArrowUp } from "lucide-react";
 import { cn, fmtInr, fmtPct, clsPnl } from "@/lib/utils";
 import { Skeleton } from "./Skeleton";
@@ -62,7 +61,18 @@ export function KPI({
 
 function DeltaChip({ delta, format }: { delta: number; format: "pct" | "inr" }) {
   const sign = delta > 0 ? "+" : delta < 0 ? "−" : "";
-  const body = format === "pct" ? fmtPct(Math.abs(delta)) : fmtInr(Math.abs(delta));
+  // Build the magnitude string WITHOUT a sign — DeltaChip prepends its own
+  // glyph (+ / −) below, so re-running through fmtPct (which always stamps
+  // its own "+" for positives) would double the sign on negatives, e.g.
+  // "−+0.89%". Render an unsigned magnitude here instead.
+  const magnitude =
+    format === "pct"
+      ? `${Math.abs(delta).toFixed(2)}%`
+      : fmtInr(Math.abs(delta));
+  // Concatenate sign + magnitude into ONE string so it lands as a single
+  // text node — RTL `getByText` cannot match across adjacent text nodes
+  // produced by `{sign}{magnitude}` interpolation.
+  const label = `${sign}${magnitude}`;
   const Icon = delta >= 0 ? ArrowUp : ArrowDown;
   return (
     <span className={cn(
@@ -72,7 +82,7 @@ function DeltaChip({ delta, format }: { delta: number; format: "pct" | "inr" }) 
     )}>
       <Icon className="h-3 w-3" aria-hidden />
       <span className="sr-only">{delta >= 0 ? "up" : "down"}</span>
-      {sign}{body}
+      {label}
     </span>
   );
 }

@@ -87,7 +87,10 @@ describe("AgentConsolePage — RiskGuard breach", () => {
     renderWithRouter();
 
     // wait for the run to load + effect to mount the ws
-    await screen.findByText(/Intraday Momentum/i);
+    // "Intraday Momentum" appears in both the run rail and the page header,
+    // so findByText would fail with "multiple elements". findAllByText waits
+    // for at least one and accepts duplicates.
+    await screen.findAllByText(/Intraday Momentum/i);
     expect(wsEmit).not.toBeNull();
 
     const rejected: AgentEvent = {
@@ -117,7 +120,10 @@ describe("AgentConsolePage — RiskGuard breach", () => {
 
   it("does not render the alert for an approved plan", async () => {
     renderWithRouter();
-    await screen.findByText(/Intraday Momentum/i);
+    // "Intraday Momentum" appears in both the run rail and the page header,
+    // so findByText would fail with "multiple elements". findAllByText waits
+    // for at least one and accepts duplicates.
+    await screen.findAllByText(/Intraday Momentum/i);
 
     const approved: AgentEvent = {
       seq: 7,

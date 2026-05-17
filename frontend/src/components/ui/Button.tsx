@@ -67,6 +67,27 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
   ) => {
     const Comp: any = asChild ? Slot : "button";
     const isDisabled = disabled || loading;
+
+    // Radix Slot uses React.Children.only — it can only forward a SINGLE
+    // child element. Wrapping leading/trailing/spinner inside the slotted
+    // child would change its tag (e.g. <a>). So when asChild is set we
+    // render the consumer's child verbatim and skip the affordances.
+    // The variant + size + interaction classes still flow through via
+    // Slot's className merge.
+    const inner = asChild ? (
+      children
+    ) : (
+      <>
+        {loading ? (
+          <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden />
+        ) : (
+          leading
+        )}
+        {children}
+        {!loading && trailing}
+      </>
+    );
+
     return (
       <Comp
         ref={ref}
@@ -76,13 +97,7 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
         disabled={isDisabled}
         {...props}
       >
-        {loading ? (
-          <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden />
-        ) : (
-          leading
-        )}
-        {children}
-        {!loading && trailing}
+        {inner}
       </Comp>
     );
   },

@@ -57,10 +57,17 @@ if (!("ResizeObserver" in window)) {
 }
 
 // --- scrollTo / scrollIntoView ------------------------------------------
-// Radix primitives call these during focus management.
+// Radix primitives call these during focus management. Pages with virtual
+// feeds (e.g. AgentConsolePage) also call .scrollTo on an element ref to
+// autoscroll on new events — jsdom doesn't implement scrollTo on either
+// Window or Element, so we shim both.
 if (!("scrollTo" in window)) {
   // @ts-expect-error -- shim
   window.scrollTo = vi.fn();
+}
+if (!("scrollTo" in Element.prototype)) {
+  // @ts-expect-error -- shim
+  Element.prototype.scrollTo = vi.fn();
 }
 if (!Element.prototype.scrollIntoView) {
   Element.prototype.scrollIntoView = vi.fn();

@@ -1,4 +1,3 @@
-import * as React from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { ArrowRight, CheckCircle2, Lock, RotateCw, ShieldAlert, ShieldCheck } from "lucide-react";

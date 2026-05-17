@@ -13,21 +13,29 @@ export interface CardProps extends React.HTMLAttributes<HTMLDivElement> {
 }
 
 export const Card = React.forwardRef<HTMLDivElement, CardProps>(
-  ({ className, interactive, as: As = "div", ...props }, ref) => (
-    <As
-      ref={ref as any}
-      className={cn(
-        "rounded-md border border-border bg-surface",
-        "shadow-sm",
-        interactive &&
-          "cursor-pointer transition-[box-shadow,transform,border-color] duration-120 " +
-            "hover:border-border-strong hover:shadow-md " +
-            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60",
-        className,
-      )}
-      {...props}
-    />
-  ),
+  ({ className, interactive, as: As = "div", ...props }, ref) => {
+    // `As` is a union of every JSX intrinsic — TS chokes trying to merge
+    // HTMLDivElement props with SVG element props ("Expression produces a
+    // union type that is too complex to represent"). Cast the component to
+    // a permissive type so JSX type-checks against the resolved tag at
+    // runtime instead of the union.
+    const Tag = As as React.ElementType;
+    return (
+      <Tag
+        ref={ref as React.Ref<HTMLDivElement>}
+        className={cn(
+          "rounded-md border border-border bg-surface",
+          "shadow-sm",
+          interactive &&
+            "cursor-pointer transition-[box-shadow,transform,border-color] duration-120 " +
+              "hover:border-border-strong hover:shadow-md " +
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60",
+          className,
+        )}
+        {...props}
+      />
+    );
+  },
 );
 Card.displayName = "Card";
 
