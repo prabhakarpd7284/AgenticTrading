@@ -13,6 +13,11 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
+from django.core.cache import cache
+
+_RETURNS_TTL = 600       # daily-return series only changes overnight
+_REPORT_TTL = 120
+
 # A tiny sector classifier — enough to populate the bars without pulling
 # in a full reference data feed. Index options map to INDEX.
 _SECTOR_BY_PREFIX = {
@@ -56,7 +61,15 @@ def _resolve_underlying(symbol: str) -> str:
 
 
 def _fetch_daily_returns(underlying: str, days: int = 60) -> list[float]:
-    """Pull a list of daily-close returns via the legacy broker. Empty on failure."""
+    """Pull a list of daily-close returns via the legacy broker. Empty on failure.
+
+    Cached for 10 minutes because the source is daily candles — no point
+    re-paying the broker round trip on a page refresh.
+    """
+    key = f"corr:returns:{underlying}:{days}"
+    cached = cache.get(key)
+    if cached is not None:
+        return cached
     try:
         from trading.services.data_service import BrokerClient
         from trading.services.ticker_service import ticker_service
@@ -74,10 +87,14 @@ def _fetch_daily_returns(underlying: str, days: int = 60) -> list[float]:
             raw = broker.fetch_candles(token, start, end, "ONE_DAY") or []
         closes = [float(r[4]) for r in raw if len(r) >= 5]
         if len(closes) < 2:
+            cache.set(key, [], _RETURNS_TTL)
             return []
         rets = [(closes[i] - closes[i - 1]) / closes[i - 1] for i in range(1, len(closes))]
-        return rets[-days:]
+        out = rets[-days:]
+        cache.set(key, out, _RETURNS_TTL)
+        return out
     except Exception:  # noqa: BLE001
+        cache.set(key, [], _RETURNS_TTL)
         return []
 
 
@@ -120,6 +137,10 @@ def _independent_bets(matrix: list[list[float]]) -> int:
 
 
 def build_correlation_report(tenant=None) -> dict[str, Any]:
+    cache_key = "corr:report"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
     from trading.models import TradeJournal, StraddlePosition
 
     trades = list(TradeJournal.objects.filter(status__in=("EXECUTED", "PAPER", "APPROVED")))
@@ -146,11 +167,13 @@ def build_correlation_report(tenant=None) -> dict[str, Any]:
         weights[u] = weights.get(u, 0.0) + notional
 
     if not underlyings:
-        return {
+        empty = {
             "symbols": [], "matrix": [], "independent_bets": 0,
             "sector_weights": {}, "factor_weights": {},
             "as_of": datetime.now(timezone.utc).isoformat(),
         }
+        cache.set(cache_key, empty, _REPORT_TTL)
+        return empty
 
     returns_by_sym: dict[str, list[float]] = {}
     for u in underlyings:
@@ -172,7 +195,7 @@ def build_correlation_report(tenant=None) -> dict[str, Any]:
         sector_weights[_classify_sector(sym)] = sector_weights.get(_classify_sector(sym), 0.0) + w / total_notional
         factor_weights[_classify_factor(sym)] = factor_weights.get(_classify_factor(sym), 0.0) + w / total_notional
 
-    return {
+    report = {
         "symbols": underlyings,
         "matrix": matrix,
         "independent_bets": _independent_bets(matrix),
@@ -180,3 +203,5 @@ def build_correlation_report(tenant=None) -> dict[str, Any]:
         "factor_weights": {k: round(v, 4) for k, v in factor_weights.items()},
         "as_of": datetime.now(timezone.utc).isoformat(),
     }
+    cache.set(cache_key, report, _REPORT_TTL)
+    return report
