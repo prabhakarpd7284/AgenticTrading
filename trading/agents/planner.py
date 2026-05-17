@@ -162,17 +162,32 @@ Output ONLY the JSON object. No markdown fences, no explanation, no extra text."
 def _audit_log(event_type: str, symbol: str = "", prompt: str = "",
                response: str = "", model_name: str = "",
                latency_ms: int = None, trade_journal=None):
-    """Write an audit log entry. Fails silently — never blocks trading."""
+    """Write a v2 Event row for the LLM exchange. Never blocks trading."""
     try:
-        from trading.models import AuditLog
-        AuditLog.objects.create(
-            event_type=event_type,
-            symbol=symbol,
-            prompt=prompt[:10000],
-            response=response[:10000],
-            model_name=model_name,
-            latency_ms=latency_ms,
-            trade_journal=trade_journal,
+        from apps.events.services.event_writer import emit
+        from apps.events.models import Event
+        from apps.tenants.models import Membership
+
+        mem = (
+            Membership.objects.filter(is_active=True, role="owner")
+            .select_related("tenant").first()
+        )
+        if mem is None:
+            return
+        # LLM_RESPONSE if we have a response payload, else LLM_REQUEST.
+        ev_type = Event.Type.LLM_RESPONSE if response else Event.Type.LLM_REQUEST
+        emit(
+            tenant=mem.tenant,
+            type=ev_type,
+            text=f"{event_type} {symbol}".strip(),
+            payload={
+                "event_type": event_type,
+                "symbol": symbol,
+                "prompt": (prompt or "")[:10000],
+                "response": (response or "")[:10000],
+                "model_name": model_name,
+                "latency_ms": latency_ms,
+            },
         )
     except Exception as e:
         logger.warning(f"Audit log write failed (non-fatal): {e}")

@@ -434,13 +434,23 @@ class PremarketScanner:
         return setups
 
     def _persist_watchlist(self, setups: List[StockSetup], trading_date: str):
-        """Save watchlist to WatchlistEntry model for tracking outcomes."""
+        """Save watchlist to v2 apps.strategies.WatchlistEntry."""
         try:
-            from trading.models import WatchlistEntry
+            from apps.strategies.models import WatchlistEntry
+            from apps.tenants.models import Membership
+            mem = (
+                Membership.objects.filter(is_active=True, role="owner")
+                .select_related("tenant").first()
+            )
+            if mem is None:
+                logger.warning("Watchlist persist skipped: no owner Membership.")
+                return
+            tenant = mem.tenant
             scan_date = datetime.strptime(trading_date, "%Y-%m-%d").date()
 
             for setup in setups:
                 WatchlistEntry.objects.update_or_create(
+                    tenant=tenant,
                     symbol=setup.symbol,
                     scan_date=scan_date,
                     defaults={

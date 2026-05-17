@@ -204,7 +204,21 @@ class IntradayMonitor:
 
         Returns trade result dict.
         """
-        from trading.models import TradeJournal, AuditLog, PortfolioSnapshot
+        from apps.trading.models import Trade, Portfolio
+        from apps.tenants.models import Membership
+
+        # Resolve tenant + default portfolio for this single-trader bootstrap.
+        _mem = (
+            Membership.objects.filter(is_active=True, role="owner")
+            .select_related("tenant").first()
+        )
+        _tenant = _mem.tenant if _mem else None
+        _portfolio = None
+        if _tenant is not None:
+            _portfolio = (
+                Portfolio.objects.filter(tenant=_tenant).order_by("created_at").first()
+                or Portfolio.objects.create(tenant=_tenant, name="Default")
+            )
 
         # Convert signal to trade plan (same format as directional planner output)
         plan = {
@@ -233,23 +247,27 @@ class IntradayMonitor:
         if not approved:
             logger.warning(f"  RISK REJECTED: {signal.symbol} — {reason}")
 
-            # Journal the rejection
+            # Journal the rejection as a v2 Trade row.
             try:
                 from datetime import date as _date
-                TradeJournal.objects.create(
-                    symbol=signal.symbol,
-                    side=plan["side"],
-                    entry_price=plan["entry_price"],
-                    stop_loss=plan["stop_loss"],
-                    target=plan["target"],
-                    quantity=plan["quantity"],
-                    status="REJECTED",
-                    reasoning=f"[{signal.setup_type.value}] {signal.reason}",
-                    confidence=signal.confidence,
-                    risk_approved=False,
-                    risk_reason=reason,
-                    trade_date=_date.today(),
-                )
+                if _tenant and _portfolio:
+                    Trade.objects.create(
+                        tenant=_tenant,
+                        portfolio=_portfolio,
+                        symbol=signal.symbol,
+                        side=plan["side"],
+                        entry_price=plan["entry_price"],
+                        stop_loss=plan["stop_loss"],
+                        target=plan["target"],
+                        quantity=plan["quantity"],
+                        status=Trade.Status.REJECTED,
+                        reasoning=f"[{signal.setup_type.value}] {signal.reason}",
+                        confidence=signal.confidence,
+                        risk_approved=False,
+                        risk_reason=reason[:255],
+                        origin=Trade.Origin.WORKFLOW,
+                        trade_date=_date.today(),
+                    )
             except Exception as e:
                 logger.warning(f"Failed to journal rejected trade for {signal.symbol}: {e}")
 
@@ -276,40 +294,45 @@ class IntradayMonitor:
             logger.error(f"  Execution failed: {e}")
             exec_result = {"status": "FAILED", "error": str(e)}
 
-        # 3. Journal the trade
-        status = "EXECUTED" if trading_mode == "live" else "PAPER"
+        # 3. Journal the trade as a v2 Trade row.
+        status = Trade.Status.FILLED if exec_result.get("success") else Trade.Status.APPROVED
         try:
             from datetime import date as _date
-            TradeJournal.objects.create(
-                symbol=signal.symbol,
-                side=plan["side"],
-                entry_price=plan["entry_price"],
-                stop_loss=plan["stop_loss"],
-                target=plan["target"],
-                quantity=plan["quantity"],
-                status=status,
-                reasoning=f"[{signal.setup_type.value}] {signal.reason}",
-                confidence=signal.confidence,
-                risk_approved=True,
-                risk_reason="Approved by risk engine",
-                order_id=exec_result.get("order_id", ""),
-                trade_date=_date.today(),
-            )
+            if _tenant and _portfolio:
+                Trade.objects.create(
+                    tenant=_tenant,
+                    portfolio=_portfolio,
+                    symbol=signal.symbol,
+                    side=plan["side"],
+                    entry_price=plan["entry_price"],
+                    stop_loss=plan["stop_loss"],
+                    target=plan["target"],
+                    quantity=plan["quantity"],
+                    status=status,
+                    reasoning=f"[{signal.setup_type.value}] {signal.reason}",
+                    confidence=signal.confidence,
+                    risk_approved=True,
+                    risk_reason="Approved by risk engine",
+                    origin=Trade.Origin.WORKFLOW,
+                    trade_date=_date.today(),
+                )
         except Exception as e:
             logger.error(f"  Journal failed: {e}")
 
-        # 4. Audit log
+        # 4. Audit — write an Event row in the unified log.
         try:
-            AuditLog.objects.create(
-                event_type="EXECUTION",
-                symbol=signal.symbol,
-                prompt=f"Signal: {signal.setup_type.value} for {signal.symbol}",
-                response=str(plan),
-                risk_details=risk_details,
-                execution_details=exec_result,
-            )
+            from apps.events.services.event_writer import emit
+            from apps.events.models import Event
+            if _tenant:
+                emit(
+                    tenant=_tenant,
+                    type=Event.Type.RISK_APPROVED,
+                    text=f"EXECUTION {signal.symbol} {plan['side']} {plan['quantity']}x",
+                    payload={"signal": signal.setup_type.value,
+                             "plan": plan, "risk": risk_details, "exec": exec_result},
+                )
         except Exception as e:
-            logger.warning(f"Audit log write failed (non-fatal): {e}")
+            logger.warning(f"Audit event write failed (non-fatal): {e}")
 
         # 5. Update state
         self.state.open_positions += 1
@@ -331,7 +354,7 @@ class IntradayMonitor:
 
         # Update WatchlistEntry to TRADED
         try:
-            from trading.models import WatchlistEntry
+            from apps.strategies.models import WatchlistEntry
             WatchlistEntry.objects.filter(
                 symbol=signal.symbol, scan_date=date.today(),
             ).update(outcome="TRADED", triggered_setup=signal.setup_type.value)
@@ -411,7 +434,7 @@ class IntradayMonitor:
     def _update_watchlist_outcome(self, setup, signal):
         """Update WatchlistEntry when a structure triggers."""
         try:
-            from trading.models import WatchlistEntry
+            from apps.strategies.models import WatchlistEntry
             WatchlistEntry.objects.filter(
                 symbol=setup.symbol,
                 scan_date=date.today(),

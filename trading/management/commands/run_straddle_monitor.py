@@ -253,21 +253,24 @@ class Command(BaseCommand):
             logger.exception(f"Straddle monitor cycle failed: {e}")
 
     def _get_positions(self, position_id=None):
-        """Get positions to monitor."""
-        from trading.models import StraddlePosition
+        """Get positions to monitor — reads v2 apps.trading.OptionsPosition."""
+        from apps.trading.models import OptionsPosition
+        active_statuses = [
+            OptionsPosition.Status.ACTIVE,
+            OptionsPosition.Status.PARTIAL,
+            OptionsPosition.Status.HEDGED,
+        ]
         if position_id:
             try:
-                pos = StraddlePosition.objects.get(id=position_id)
-                if pos.status in ("ACTIVE", "PARTIAL", "HEDGED"):
+                pos = OptionsPosition.objects.get(id=position_id)
+                if pos.status in active_statuses:
                     return [pos]
                 self._log(f"Position {position_id} is {pos.status}, not active.")
                 return []
-            except StraddlePosition.DoesNotExist:
+            except OptionsPosition.DoesNotExist:
                 self._log(f"Position {position_id} not found.", style="ERROR")
                 return []
-        return list(StraddlePosition.objects.filter(
-            status__in=["ACTIVE", "PARTIAL", "HEDGED"]
-        ))
+        return list(OptionsPosition.objects.filter(status__in=active_statuses))
 
     def _fetch_nifty_quick(self, svc) -> float:
         """Quick NIFTY spot fetch for move detection (uses TTL cache)."""

@@ -155,14 +155,24 @@ class Command(BaseCommand):
         self.stdout.write(f"\nWatchlist saved to DB ({len(watchlist)} entries)")
 
     def _save_watchlist(self, state):
-        """Persist watchlist to WatchlistEntry model."""
-        from trading.models import WatchlistEntry
+        """Persist watchlist to v2 apps.strategies.WatchlistEntry."""
+        from apps.strategies.models import WatchlistEntry
+        from apps.tenants.models import Membership
         from datetime import datetime
 
-        scan_date = datetime.strptime(state.trading_date, "%Y-%m-%d").date()
+        mem = (
+            Membership.objects.filter(is_active=True, role="owner")
+            .select_related("tenant").first()
+        )
+        if mem is None:
+            self.stdout.write(self.style.WARNING("Watchlist save skipped: no owner Membership."))
+            return
+        tenant = mem.tenant
 
+        scan_date = datetime.strptime(state.trading_date, "%Y-%m-%d").date()
         for setup in state.watchlist:
             WatchlistEntry.objects.update_or_create(
+                tenant=tenant,
                 symbol=setup.symbol,
                 scan_date=scan_date,
                 defaults={
@@ -181,8 +191,8 @@ class Command(BaseCommand):
             )
 
     def _show_watchlist(self, trading_date: str):
-        """Display today's watchlist from DB."""
-        from trading.models import WatchlistEntry
+        """Display today's watchlist from v2 ledger."""
+        from apps.strategies.models import WatchlistEntry
         from datetime import datetime
 
         scan_date = datetime.strptime(trading_date, "%Y-%m-%d").date()
@@ -205,12 +215,12 @@ class Command(BaseCommand):
             self.stdout.write(f"   {e.reason}")
 
     def _show_trades(self, trading_date: str):
-        """Display today's intraday trades from journal."""
-        from trading.models import TradeJournal
+        """Display today's intraday trades from the v2 Trade ledger."""
+        from apps.trading.models import Trade
         from datetime import datetime
 
         trade_date = datetime.strptime(trading_date, "%Y-%m-%d").date()
-        trades = TradeJournal.objects.filter(trade_date=trade_date).order_by("created_at")
+        trades = Trade.objects.filter(trade_date=trade_date).order_by("created_at")
 
         self.stdout.write(f"\nIntraday trades for {trading_date}: {trades.count()} trades\n")
 
@@ -219,13 +229,16 @@ class Command(BaseCommand):
             return
 
         for t in trades:
-            status_style = self.style.SUCCESS if t.status == "PAPER" else (
-                self.style.ERROR if t.status == "REJECTED" else self.style.WARNING
+            ok_statuses = {Trade.Status.FILLED, Trade.Status.PARTIAL, Trade.Status.CLOSED}
+            status_style = (
+                self.style.SUCCESS if t.status in ok_statuses
+                else self.style.ERROR if t.status == Trade.Status.REJECTED
+                else self.style.WARNING
             )
             self.stdout.write(
                 f"  {t.created_at.strftime('%H:%M:%S')} | "
-                f"{t.symbol} {t.side} {t.quantity}x @ {t.entry_price:.2f} | "
-                f"SL {t.stop_loss:.2f} | Target {t.target:.2f} | "
+                f"{t.symbol} {t.side} {t.quantity}x @ {float(t.entry_price):.2f} | "
+                f"SL {float(t.stop_loss):.2f} | Target {float(t.target):.2f} | "
                 f"{status_style(t.status)}"
             )
             if t.reasoning:

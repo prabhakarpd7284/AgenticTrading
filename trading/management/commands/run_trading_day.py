@@ -15,6 +15,24 @@ Usage:
     python manage.py run_trading_day --universe high_volume --skip-llm
     python manage.py run_trading_day --dry-run  # no execution, analysis only
 """
+
+EPILOG = """
+Examples:
+  # Standard day (paper mode unless TRADING_MODE=live)
+  run_trading_day
+
+  # Analysis only, no orders even with TRADING_MODE=live
+  run_trading_day --dry-run
+
+  # Deterministic mode: skip LLM, use rule-based plans only
+  run_trading_day --skip-llm
+
+  # Tighter polling cycle for a volatile day
+  run_trading_day --equity-interval 3 --straddle-interval 5
+
+The process honours SIGINT/SIGTERM: it finishes the current cycle, prints a
+shutdown summary, and exits cleanly. Safe to Ctrl-C at any time.
+"""
 import json
 import os
 import signal
@@ -37,6 +55,13 @@ class Command(BaseCommand):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._running = True
+
+    def create_parser(self, prog_name, subcommand, **kwargs):
+        import argparse
+        parser = super().create_parser(prog_name, subcommand, **kwargs)
+        parser.epilog = EPILOG
+        parser.formatter_class = argparse.RawDescriptionHelpFormatter
+        return parser
 
     def add_arguments(self, parser):
         parser.add_argument("--universe", default="high_volume", help="Stock universe (default: high_volume)")
@@ -64,6 +89,21 @@ class Command(BaseCommand):
         self._broker = BrokerClient.get_instance()
         self._broker.ensure_login()
 
+        # Loud, unambiguous mode banner. Real money is on the line — make it
+        # impossible to confuse paper mode with live.
+        mode = os.getenv("TRADING_MODE", "paper").lower()
+        if self._dry_run:
+            mode_banner = "[DRY RUN] Analysis only. No orders will be placed."
+        elif mode == "live":
+            mode_banner = (
+                "[LIVE MODE - REAL MONEY] All orders will be sent to the broker. "
+                "Ctrl-C to abort."
+            )
+        else:
+            mode_banner = "[PAPER MODE] Simulated fills only. No real orders sent."
+        bar = "=" * max(60, len(mode_banner) + 2)
+        self.stdout.write(f"{bar}\n{mode_banner}\n{bar}")
+
         self._log(
             f"\n{'='*60}\n"
             f"TRADING DAY: {date.today()}\n"
@@ -73,7 +113,7 @@ class Command(BaseCommand):
             f"  Equity cycle   : every {self._equity_interval} min\n"
             f"  Straddle cycle : every {self._straddle_interval} min\n"
             f"  Dry run        : {self._dry_run}\n"
-            f"  Trading mode   : {os.getenv('TRADING_MODE', 'paper').upper()}\n"
+            f"  Trading mode   : {mode.upper()}\n"
             f"{'='*60}",
             style="SUCCESS",
         )
@@ -194,7 +234,7 @@ class Command(BaseCommand):
 
         from trading.intraday.scanner import PremarketScanner
         from trading.intraday.state import IntradayState, Phase, StockSetup, TradeBias, SetupType
-        from trading.models import WatchlistEntry
+        from apps.strategies.models import WatchlistEntry
 
         # Resume: if watchlist already exists in DB for today, load it
         existing = WatchlistEntry.objects.filter(scan_date=date.today()).order_by("-score")
@@ -242,7 +282,7 @@ class Command(BaseCommand):
         except Exception:
             pass
         try:
-            from trading.models import PortfolioSnapshot
+            from apps.trading.models import PortfolioSnapshot
             snap = PortfolioSnapshot.objects.latest()
             if snap.capital > 0:
                 capital = snap.capital
@@ -251,7 +291,7 @@ class Command(BaseCommand):
             pass
 
         # Count already-open equity positions from today (resume support)
-        from trading.models import TradeJournal
+        from apps.trading.models import Trade as TradeJournal
         open_today = TradeJournal.objects.filter(
             trade_date=date.today(), status__in=["EXECUTED", "PAPER"]
         ).count()
@@ -289,7 +329,7 @@ class Command(BaseCommand):
         # Auto-register straddle after market opens (once per day)
         if not self._straddle_registered and now.hour >= 9 and now.minute >= 20:
             # Check if one already exists (resume case)
-            from trading.models import StraddlePosition
+            from apps.trading.models import OptionsPosition as StraddlePosition
             if StraddlePosition.objects.filter(status__in=["ACTIVE", "PARTIAL", "HEDGED"]).exists():
                 self._straddle_registered = True
                 self._log("Straddle already active — skipping auto-registration")
@@ -317,7 +357,7 @@ class Command(BaseCommand):
 
         # Heartbeat every cycle — use cached equity data (no API call here)
         # Live prices are fetched only during equity scan cycles (every 5 min)
-        from trading.models import TradeJournal, StraddlePosition
+        from apps.trading.models import Trade as TradeJournal, OptionsPosition as StraddlePosition
 
         open_eq = TradeJournal.objects.filter(
             trade_date=date.today(), status__in=["EXECUTED", "PAPER"]
@@ -351,7 +391,7 @@ class Command(BaseCommand):
 
     def _post_hourly_snapshot(self, now: datetime, open_eq: int, active_str: int, realized_pnl: float):
         """Post an hourly portfolio snapshot to event log + Telegram."""
-        from trading.models import TradeJournal, StraddlePosition
+        from apps.trading.models import Trade as TradeJournal, OptionsPosition as StraddlePosition
         from trading.options.data_service import OptionsDataService
 
         # Equity unrealized
@@ -558,7 +598,7 @@ class Command(BaseCommand):
 
     def _check_equity_exits(self, now: datetime):
         """Check SL/target hits + cache live prices for dashboard."""
-        from trading.models import TradeJournal
+        from apps.trading.models import Trade as TradeJournal
         from trading.services.ticker_service import ticker_service
 
         # Refresh snapshot (1 batch API call — prices cached for dashboard)
@@ -652,7 +692,7 @@ class Command(BaseCommand):
                 })
 
     def _run_straddle_cycle(self, now: datetime):
-        from trading.models import StraddlePosition
+        from apps.trading.models import OptionsPosition as StraddlePosition
 
         active = list(StraddlePosition.objects.filter(status__in=["ACTIVE", "PARTIAL", "HEDGED"]))
         if not active:
@@ -905,7 +945,7 @@ class Command(BaseCommand):
         self._log("=" * 50)
 
         # 1. Force-close all 0 DTE straddles
-        from trading.models import StraddlePosition
+        from apps.trading.models import OptionsPosition as StraddlePosition
         from trading.options.data_service import OptionsDataService
         from trading.services.broker_service import BrokerService
 
@@ -968,7 +1008,7 @@ class Command(BaseCommand):
         self._log("PHASE: SQUARE OFF — 3:15 PM", style="WARNING")
         self._log("=" * 50)
 
-        from trading.models import TradeJournal
+        from apps.trading.models import Trade as TradeJournal
         from trading.services.broker_service import BrokerService
         from trading.services.ticker_service import ticker_service
 
@@ -1029,7 +1069,8 @@ class Command(BaseCommand):
         self._log("PHASE: DAILY REVIEW", style="SUCCESS")
         self._log("=" * 50)
 
-        from trading.models import TradeJournal, StraddlePosition, WatchlistEntry
+        from apps.trading.models import Trade as TradeJournal, OptionsPosition as StraddlePosition
+        from apps.strategies.models import WatchlistEntry
 
         trades = TradeJournal.objects.filter(trade_date=date.today())
         eq_pnl = sum(t.pnl or 0 for t in trades)
@@ -1138,7 +1179,7 @@ class Command(BaseCommand):
 
         # ── Update portfolio snapshot ──
         try:
-            from trading.models import PortfolioSnapshot
+            from apps.trading.models import PortfolioSnapshot
             snap, _ = PortfolioSnapshot.objects.get_or_create(
                 snapshot_date=date.today(),
                 defaults={"capital": 500000, "available_cash": 500000},
@@ -1159,7 +1200,7 @@ class Command(BaseCommand):
         """Run at startup — clean zombies, validate universe, check readiness."""
         self._log("Running startup health check...", style="SUCCESS")
 
-        from trading.models import TradeJournal, StraddlePosition
+        from apps.trading.models import Trade as TradeJournal, OptionsPosition as StraddlePosition
 
         # 1. Close zombie intraday positions from previous days
         zombies = TradeJournal.objects.filter(
@@ -1193,7 +1234,8 @@ class Command(BaseCommand):
             self._log(f"  Universe validated: {len(symbols)} tickers OK")
 
         # 4. Reconcile WatchlistEntry outcomes from TradeJournal
-        from trading.models import WatchlistEntry, TradeJournal
+        from apps.strategies.models import WatchlistEntry
+        from apps.trading.models import Trade as TradeJournal
         traded_symbols = TradeJournal.objects.filter(
             trade_date=date.today(), status__in=["EXECUTED", "PAPER", "FILLED"],
         ).values_list("symbol", flat=True).distinct()
@@ -1227,7 +1269,7 @@ class Command(BaseCommand):
           VIX > 20 + flat→ Skip
           0 DTE + VIX<25 → Expiry-day theta
         """
-        from trading.models import StraddlePosition
+        from apps.trading.models import OptionsPosition as StraddlePosition
         from trading.options.data_service import OptionsDataService, find_option_token, find_atm_strike
         from trading.options.adaptive import AdaptiveOptionsEngine
         from trading.utils.expiry_utils import iso_to_angel, next_expiry_date
@@ -1306,7 +1348,7 @@ class Command(BaseCommand):
         """Register a straddle position from an adaptive decision."""
         from trading.options.data_service import find_option_token
         from trading.utils.expiry_utils import iso_to_angel
-        from trading.models import StraddlePosition
+        from apps.trading.models import OptionsPosition as StraddlePosition
 
         exp_fmt = iso_to_angel(expiry.isoformat()) if expiry else None
         if not exp_fmt:
@@ -1349,7 +1391,7 @@ class Command(BaseCommand):
         from trading.options.data_service import find_option_token
         from trading.utils.expiry_utils import iso_to_angel
         from trading.services.broker_service import BrokerService
-        from trading.models import StraddlePosition
+        from apps.trading.models import OptionsPosition as StraddlePosition
 
         exp_fmt = iso_to_angel(expiry.isoformat()) if expiry else None
         if not exp_fmt:
@@ -1442,7 +1484,7 @@ class Command(BaseCommand):
 
     def _register_single_straddle(self, cfg: dict):
         """Register a single ATM straddle for the given underlying config."""
-        from trading.models import StraddlePosition
+        from apps.trading.models import OptionsPosition as StraddlePosition
         from trading.options.data_service import OptionsDataService, find_option_token, find_atm_strike
         from trading.utils.expiry_utils import iso_to_angel
 
@@ -1525,7 +1567,7 @@ class Command(BaseCommand):
     # ══════════════════════════════════════════════
     def _refresh_equity_snapshot(self):
         """Fetch live prices for open equity and cache for heartbeat/dashboard."""
-        from trading.models import TradeJournal
+        from apps.trading.models import Trade as TradeJournal
         from trading.services.ticker_service import ticker_service
         from trading.services.data_service import BrokerClient
         from trading.utils.pnl_utils import compute_equity_pnl
@@ -1581,6 +1623,13 @@ class Command(BaseCommand):
     def _shutdown(self, signum, frame):
         self._log("\nShutdown signal — finishing current cycle...", style="WARNING")
         self._running = False
+        # Surface the natural follow-up commands. Operator typically wants to
+        # review what just happened and either re-run premarket or audit the
+        # journal — printing these saves them flipping to docs.
+        self.stdout.write("\nExiting cleanly. Suggested next:")
+        self.stdout.write("  > python manage.py manage_straddle --list")
+        self.stdout.write("  > python manage.py enrich_signals  # EOD outcome enrichment")
+        self.stdout.write("  > Open /monthly in the React UI for the post-trade review.")
 
     def _log(self, msg: str, style: str = None):
         ts = datetime.now().strftime("%H:%M:%S")

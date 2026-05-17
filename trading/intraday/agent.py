@@ -256,13 +256,13 @@ def _square_off_all(state: IntradayState):
     Close all open intraday positions before market close.
     Intraday rule: never carry positions overnight.
     """
-    from trading.models import TradeJournal
+    from apps.trading.models import Trade
     from trading.services.broker_service import BrokerService
     from trading.services.data_service import BrokerClient
 
-    open_trades = TradeJournal.objects.filter(
+    open_trades = Trade.objects.filter(
         trade_date=date.today(),
-        status__in=["EXECUTED", "FILLED", "PAPER"],
+        status__in=[Trade.Status.SENT, Trade.Status.PARTIAL, Trade.Status.FILLED],
     )
 
     if not open_trades.exists():
@@ -274,14 +274,15 @@ def _square_off_all(state: IntradayState):
 
     for trade in open_trades:
         exit_side = "SELL" if trade.side == "BUY" else "BUY"
+        entry_price = float(trade.entry_price)
 
         # Get current LTP for exit price
         ltp = 0.0
         try:
             data = b.ltp("NSE", f"{trade.symbol}-EQ", "")
-            ltp = data.get("ltp", trade.entry_price)
+            ltp = float(data.get("ltp", entry_price))
         except Exception:
-            ltp = trade.entry_price  # fallback to entry
+            ltp = entry_price  # fallback to entry
 
         result = broker_svc.place_order(
             symbol=trade.symbol,
@@ -295,15 +296,18 @@ def _square_off_all(state: IntradayState):
         if result.get("success"):
             # Compute P&L
             if trade.side == "BUY":
-                pnl = (ltp - trade.entry_price) * trade.quantity
+                pnl = (ltp - entry_price) * trade.quantity
             else:
-                pnl = (trade.entry_price - ltp) * trade.quantity
+                pnl = (entry_price - ltp) * trade.quantity
 
-            trade.pnl = round(pnl, 2)
-            trade.pnl_percent = round(pnl / (trade.entry_price * trade.quantity) * 100, 2)
-            trade.fill_price = ltp
-            trade.status = "FILLED"
-            trade.save()
+            trade.realized_pnl = round(pnl, 2)
+            trade.pnl_percent = round(pnl / (entry_price * trade.quantity) * 100, 2)
+            trade.exit_price = ltp
+            trade.exit_quantity = trade.quantity
+            trade.status = Trade.Status.CLOSED
+            trade.close_reason = Trade.CloseReason.EOD
+            trade.save(update_fields=["realized_pnl", "pnl_percent", "exit_price",
+                                       "exit_quantity", "status", "close_reason"])
 
             state.daily_loss += max(0, -pnl)
             logger.info(
@@ -395,11 +399,11 @@ def run_intraday_agent(
             state.capital = net
             logger.info(f"Loaded capital from broker margin: {state.capital:,.0f} INR")
         else:
-            # Fallback to portfolio snapshot (paper mode or margin not available)
-            from trading.models import PortfolioSnapshot
-            snap = PortfolioSnapshot.objects.order_by("-created_at").first()
+            # Fallback to v2 portfolio snapshot (paper mode or margin not available)
+            from apps.trading.models import PortfolioSnapshot
+            snap = PortfolioSnapshot.objects.order_by("-captured_at").first()
             if snap:
-                state.capital = float(snap.capital)
+                state.capital = float(snap.equity)
                 logger.info(f"Loaded capital from portfolio: {state.capital:,.0f} INR")
     except Exception:
         pass

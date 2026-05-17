@@ -46,15 +46,43 @@ _broker_service = BrokerService()
 # ──────────────────────────────────────────────
 def _audit(event_type: str, symbol: str = "", risk_details: dict = None,
            execution_details: dict = None, trade_journal=None):
-    """Write audit log. Never blocks trading flow."""
+    """Write a v2 Event row. Never blocks trading flow.
+
+    Maps the legacy `event_type` string onto the closest Event.Type and
+    packs the rest into the payload — the unified Event log is now the
+    canonical audit surface (apps.events).
+    """
     try:
-        from trading.models import AuditLog
-        AuditLog.objects.create(
-            event_type=event_type,
-            symbol=symbol,
-            risk_details=risk_details,
-            execution_details=execution_details,
-            trade_journal=trade_journal,
+        from apps.events.services.event_writer import emit
+        from apps.events.models import Event
+        from apps.tenants.models import Membership
+
+        mem = (
+            Membership.objects.filter(is_active=True, role="owner")
+            .select_related("tenant").first()
+        )
+        if mem is None:
+            return  # no tenant → silently skip (single-trader bootstrap)
+
+        # Crude legacy→v2 type mapping. Anything unknown falls back to
+        # WORKFLOW_STEP_COMPLETED so the row still lands in the unified log.
+        type_map = {
+            "RISK_APPROVE":  Event.Type.RISK_APPROVED,
+            "RISK_REJECT":   Event.Type.RISK_REJECTED,
+            "EXECUTION":     Event.Type.ORDER_SENT,
+            "RECONCILE":     Event.Type.WORKFLOW_STEP_COMPLETED,
+            "LLM_CALL":      Event.Type.LLM_REQUEST,
+        }
+        emit(
+            tenant=mem.tenant,
+            type=type_map.get(event_type, Event.Type.WORKFLOW_STEP_COMPLETED),
+            text=f"{event_type} {symbol}".strip(),
+            payload={
+                "event_type": event_type,
+                "symbol": symbol,
+                "risk_details": risk_details or {},
+                "execution_details": execution_details or {},
+            },
         )
     except Exception as e:
         logger.warning(f"Audit write failed (non-fatal): {e}")

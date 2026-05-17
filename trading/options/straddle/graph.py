@@ -59,7 +59,7 @@ PLANNER_MODE  = os.getenv("PLANNER_MODE", "cli")
 # ──────────────────────────────────────────────
 def _audit(event_type: str, symbol: str = "", details: dict = None):
     try:
-        from trading.models import AuditLog
+        from apps.events.models import Event as AuditLog
         AuditLog.objects.create(
             event_type=event_type,
             symbol=symbol,
@@ -283,7 +283,7 @@ def _get_position_history(position_id: Optional[int]) -> str:
     if not position_id:
         return ""
     try:
-        from trading.models import StraddlePosition
+        from apps.trading.models import OptionsPosition as StraddlePosition
         pos = StraddlePosition.objects.get(id=position_id)
         log = pos.management_log or []
         if not log:
@@ -406,7 +406,7 @@ def _check_universal_cooldown(position_id: int, cooldown_minutes: int = 30) -> b
     if not position_id:
         return False
     try:
-        from trading.models import StraddlePosition as _SP
+        from apps.trading.models import OptionsPosition as StraddlePosition
         pos = _SP.objects.get(id=position_id)
         for entry in reversed(pos.management_log or []):
             act = entry.get("action", "")
@@ -514,7 +514,7 @@ def validate_action_node(state: StraddleState) -> dict:
     _pe_strike = state.get("strike", 0)
     if position_id:
         try:
-            from trading.models import StraddlePosition as _SP
+            from apps.trading.models import OptionsPosition as StraddlePosition
             _pos = _SP.objects.get(id=position_id)
             _ce_strike = _pos.ce_strike_actual
             _pe_strike = _pos.pe_strike_actual
@@ -871,7 +871,7 @@ def journal_action_node(state: StraddleState) -> dict:
     Update StraddlePosition in the database.
     Appends management event to position_log.
     """
-    from trading.models import StraddlePosition
+    from apps.trading.models import OptionsPosition as StraddlePosition
 
     position_id = state.get("position_id")
     if not position_id:
