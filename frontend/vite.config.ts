@@ -11,13 +11,11 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      // Legacy sqlite bridge runs in its own Django process on :8001.
-      // The catch-all /api rule picks up everything else and points at
-      // the v2 Postgres stack on :8000. Order matters — /api/v1/legacy/
-      // must match before the generic /api rule.
-      "/api/v1/legacy": { target: "http://localhost:8001", changeOrigin: true },
-      "/api":           { target: "http://localhost:8000", changeOrigin: true },
-      "/ws":            { target: "ws://localhost:8000",   ws: true },
+      // Phase 6 folded the legacy bridge into the v2 process on :8000 —
+      // the old separate :8001 Django process and SQLite DB are gone.
+      // Every /api/* (including /api/v1/legacy/*) now hits :8000.
+      "/api": { target: "http://localhost:8000", changeOrigin: true },
+      "/ws":  { target: "ws://localhost:8000",   ws: true },
     },
   },
   test: {
