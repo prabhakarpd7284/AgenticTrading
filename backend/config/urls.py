@@ -33,6 +33,9 @@ api_v1 = [
     path("journals/", include("apps.events.api.journal_urls")),
     path("events/", include("apps.events.api.urls")),
     path("notifications/", include("apps.notifications.api.urls")),
+    # /ops/ — owner-only dev console: list management commands + stream
+    # subprocess output over /ws/ops/ (see apps.system.consumers).
+    path("ops/", include("apps.system.api.urls")),
     # Bridge to the legacy `trading` Django app — exposes the existing
     # 700+ rows of TradeJournal / StraddlePosition / AuditLog data so
     # the React UI shows real numbers immediately.  Will be folded into

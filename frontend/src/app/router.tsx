@@ -16,6 +16,7 @@ import { BrokerLinkPage } from "@/features/broker/BrokerLinkPage";
 import { SwingScannerPage } from "@/features/swing-scanner/SwingScannerPage";
 import { BasketPage } from "@/features/basket/BasketPage";
 import PyramidPage from "@/features/pyramid/PyramidPage";
+import { OpsPage } from "@/features/ops/OpsPage";
 import { OnboardingPage } from "@/features/auth/OnboardingPage";
 import { RequireAuth } from "./guards";
 
@@ -50,6 +51,8 @@ export const router = createBrowserRouter([
       { path: "backtester", element: <BacktesterPage /> },
       { path: "pyramid", element: <PyramidPage /> },
       { path: "brokers", element: <BrokerLinkPage /> },
+      // Developer ops console — stream any manage.py command (owner-gated).
+      { path: "ops", element: <OpsPage /> },
     ],
   },
 ]);

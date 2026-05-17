@@ -2,7 +2,8 @@ import * as React from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import {
   Activity, BarChart3, Bot, Briefcase, Calendar, Gauge, Layers, Link2, LineChart,
-  ListChecks, LogOut, Moon, Search, Settings, ShoppingBag, Sun, TrendingUp, Triangle,
+  ListChecks, LogOut, Moon, Search, Settings, ShoppingBag, Sun, Terminal,
+  TrendingUp, Triangle,
 } from "lucide-react";
 import { useAuthStore } from "@/stores/auth";
 import { cn } from "@/lib/utils";
@@ -26,6 +27,7 @@ const nav = [
   { to: "/backtester", label: "Backtester",   icon: BarChart3, hint: "g b" },
   { to: "/pyramid",   label: "Pyramid",      icon: Triangle,   hint: "g y" },
   { to: "/brokers",    label: "Broker Link",  icon: Link2,     hint: "g k" },
+  { to: "/ops",        label: "Ops Console",  icon: Terminal,  hint: "g o" },
 ];
 
 type LiveStatus = "connecting" | "live" | "offline";

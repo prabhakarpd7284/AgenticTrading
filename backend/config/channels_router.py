@@ -6,6 +6,7 @@ from apps.trading.consumers import PnLConsumer
 from apps.agents_core.consumers import AgentRunConsumer
 from apps.notifications.consumers import AlertsConsumer
 from apps.events.consumers import EventsFirehoseConsumer, RunTimelineConsumer
+from apps.system.consumers import OpsConsumer
 
 websocket_urlpatterns = [
     path("ws/ticks/", TickConsumer.as_asgi()),
@@ -14,4 +15,5 @@ websocket_urlpatterns = [
     path("ws/runs/<uuid:run_id>/", RunTimelineConsumer.as_asgi()),  # workflow-vocab name
     path("ws/events/", EventsFirehoseConsumer.as_asgi()),           # system-wide firehose
     path("ws/alerts/", AlertsConsumer.as_asgi()),
+    path("ws/ops/", OpsConsumer.as_asgi()),                         # dev console (owner-only)
 ]

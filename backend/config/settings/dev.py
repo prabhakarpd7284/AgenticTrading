@@ -47,9 +47,19 @@ if str(_REPO_ROOT) not in _sys.path:
 # `apps.legacy` is the URL bridge — it has no models, just views. Keep
 # it in INSTALLED_APPS so /api/v1/legacy/* keeps resolving while the
 # frontend hasn't been migrated to /api/v1/{trades,events,...} yet.
+#
+# `trading` is the legacy package — installed with a custom AppConfig
+# (label="trading_legacy", no models) so the dev-ops console can
+# discover the operator CLIs under trading/management/commands/.
 INSTALLED_APPS = INSTALLED_APPS + [
     "apps.legacy",
+    "trading.apps.TradingLegacyConfig",
 ]
+
+# The legacy trading/migrations/ directory references the bare app label
+# 'trading' (which is now owned by apps.trading); skip them for the
+# relabeled "trading_legacy" app — its AppConfig owns no models anyway.
+MIGRATION_MODULES = {"trading_legacy": None}
 
 EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
 INTERNAL_IPS = ["127.0.0.1"]
