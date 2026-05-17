@@ -11,6 +11,7 @@ import { Badge } from "@/components/ui/Badge";
 import { CommandPalette } from "@/components/ui/CommandPalette";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/Tooltip";
 import { connect } from "@/lib/ws";
+import { useCockpitDateStore } from "@/lib/cockpit-date";
 
 const nav = [
   { to: "/pulse",      label: "Today",        icon: Gauge,      hint: "g t" },
@@ -177,6 +178,7 @@ function TopBar({
         </button>
       </div>
 
+      <AsOfPill />
       <ConnectionPill status={status} />
       <Tooltip>
         <TooltipTrigger asChild>
@@ -187,6 +189,31 @@ function TopBar({
         <TooltipContent>Toggle theme</TooltipContent>
       </Tooltip>
     </header>
+  );
+}
+
+/** Shown only when the operator has picked a historical session on the
+ * Cockpits page. Sits next to ConnectionPill so both signals coexist:
+ * the WS may be Live while the cockpit is replaying a past day. */
+function AsOfPill() {
+  const selectedDate = useCockpitDateStore((s) => s.selectedDate);
+  if (!selectedDate) return null;
+  // 2026-05-13 → "13 MAY"
+  const [, m, d] = selectedDate.split("-");
+  const month = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"][Number(m) - 1] ?? m;
+  const label = `AS-OF ${d} ${month}`;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="inline-flex">
+          <Badge tone="warning" aria-live="polite">{label}</Badge>
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>
+        Cockpit is replaying {selectedDate}. Live-only panels (Forced Flat,
+        Capital, Plan vs Actual, etc.) are blanked until you clear the date.
+      </TooltipContent>
+    </Tooltip>
   );
 }
 

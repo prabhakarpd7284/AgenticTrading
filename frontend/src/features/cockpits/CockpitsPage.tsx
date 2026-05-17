@@ -68,6 +68,32 @@ function Help({ label, text }: { label: string; text: string }) {
     </div>
   );
 }
+
+/** Renders a clean replay-mode banner instead of children when the cockpit
+ * is showing a historical date. Use for panels whose state is inherently
+ * "right now" (countdowns, live capital, current open positions) where
+ * showing today's numbers under a historical date heading would be a lie.
+ */
+function LiveOnly({ children, reason }: { children: React.ReactNode; reason: string }) {
+  const selectedDate = useCockpitDateStoreSafe();
+  if (!selectedDate) return <>{children}</>;
+  return (
+    <div className="rounded-md border border-warning/40 bg-warning/5 p-6 text-center space-y-2">
+      <div className="text-caption uppercase tracking-wider text-warning">Live-only panel</div>
+      <div className="text-body-sm text-fg">
+        Cockpit is replaying <span className="font-mono">{selectedDate}</span>.
+      </div>
+      <p className="text-caption text-fg-muted max-w-md mx-auto">{reason}</p>
+      <p className="text-caption text-fg-subtle">Clear the date in the header to return to live.</p>
+    </div>
+  );
+}
+
+/** Local accessor — selectedDate read with a stable selector so LiveOnly
+ * re-renders only when the date itself changes (not on unrelated store updates). */
+function useCockpitDateStoreSafe(): string | null {
+  return useCockpitDateStore((s) => s.selectedDate);
+}
 import { useQueryClient } from "@tanstack/react-query";
 import { useCockpitDateStore } from "@/lib/cockpit-date";
 import {
@@ -310,13 +336,13 @@ export function CockpitsPage() {
               ))}
             </TabsList>
 
-        <TabsContent value="capital"><CapitalPanel /></TabsContent>
-        <TabsContent value="plan-vs-actual"><PlanVsActualPanel /></TabsContent>
-        <TabsContent value="greeks"><GreeksPanel /></TabsContent>
+        <TabsContent value="capital"><LiveOnly reason="Capital reflects right-now portfolio state — re-run live to size today's trades."><CapitalPanel /></LiveOnly></TabsContent>
+        <TabsContent value="plan-vs-actual"><LiveOnly reason="Plan vs Actual compares today's premarket plan against today's fills — no historical view."><PlanVsActualPanel /></LiveOnly></TabsContent>
+        <TabsContent value="greeks"><LiveOnly reason="Greeks Heatmap is built from your live open options book."><GreeksPanel /></LiveOnly></TabsContent>
         <TabsContent value="signal-funnel"><SignalFunnelPanel /></TabsContent>
         <TabsContent value="risk-budget"><RiskBudgetPanel /></TabsContent>
         <TabsContent value="expiry"><ExpiryPanel /></TabsContent>
-        <TabsContent value="broker-recon"><BrokerReconPanel /></TabsContent>
+        <TabsContent value="broker-recon"><LiveOnly reason="Broker reconciliation queries the live broker — historical state isn't stored."><BrokerReconPanel /></LiveOnly></TabsContent>
         <TabsContent value="edge-decay"><EdgeDecayPanel /></TabsContent>
         <TabsContent value="theta"><ThetaPanel /></TabsContent>
         <TabsContent value="regime"><RegimePanel /></TabsContent>
@@ -326,7 +352,7 @@ export function CockpitsPage() {
         <TabsContent value="liquidity"><LiquidityPanel /></TabsContent>
         <TabsContent value="sizer"><SizerPanel /></TabsContent>
         <TabsContent value="stops"><StopsPanel /></TabsContent>
-        <TabsContent value="forced-flat"><ForcedFlatPanel /></TabsContent>
+        <TabsContent value="forced-flat"><LiveOnly reason="Forced Flat counts down to today's 15:15 IST square-off — the deadline is wall-clock-bound."><ForcedFlatPanel /></LiveOnly></TabsContent>
         <TabsContent value="slippage-edge"><SlippageEdgePanel /></TabsContent>
         <TabsContent value="orb"><ORBPanel /></TabsContent>
         <TabsContent value="vwap"><VWAPPanel /></TabsContent>
@@ -348,7 +374,7 @@ export function CockpitsPage() {
         <TabsContent value="depth"><DepthImbalancePanel /></TabsContent>
         <TabsContent value="earnings"><EarningsOverlayPanel /></TabsContent>
         <TabsContent value="stock-rrg"><StockRRGPanel /></TabsContent>
-        <TabsContent value="partial-fill"><PartialFillPanel /></TabsContent>
+        <TabsContent value="partial-fill"><LiveOnly reason="Partial Fill tracks pending orders right now — no historical equivalent."><PartialFillPanel /></LiveOnly></TabsContent>
         <TabsContent value="isector"><IntradaySectorHeatmapPanel /></TabsContent>
         <TabsContent value="simulator"><BacktesterSimPanel /></TabsContent>
         <TabsContent value="reset"><ResetPanel /></TabsContent>
