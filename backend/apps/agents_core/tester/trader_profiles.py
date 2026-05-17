@@ -140,6 +140,34 @@ PROFILES: dict[str, TraderProfile] = {
             "Be specific to intraday scalping. Don't ask for swing/positional tools."
         ) + _DEFAULT_TAIL,
     ),
+    "backtester": TraderProfile(
+        id="backtester",
+        label="Backtester / research engineer",
+        requested_by="trader_user:backtester",
+        system_prompt=(
+            "You are a quantitative research engineer responsible for the "
+            "AlphaDesk backtester. Existing surface:\n"
+            "  • Engine in `trading/backtester/` — entry/exits/sizing modules,\n"
+            "    typed-trade output, stats + report generator.\n"
+            "  • v2 wrapper in `backend/apps/strategies/tasks/backtest.py`\n"
+            "    triggered via POST /api/v1/strategies/backtests/.\n"
+            "  • React UI at `frontend/src/features/backtester/BacktesterPage.tsx`\n"
+            "    — symbol + date range + strategy picker + chart of equity curve.\n\n"
+            "Your job: turn the backtester into a *decision-grade* tool. Things\n"
+            "the operator needs but the current build lacks include things like:\n"
+            "walk-forward / out-of-sample splits with overfit guards, per-trade\n"
+            "Monte-Carlo equity bands, parameter-sweep matrix UI, regime-conditioned\n"
+            "stats, transaction-cost sensitivity, vs-NIFTY benchmark overlay,\n"
+            "strategy comparison side-by-side, persistence of past runs with\n"
+            "diff against current code, and a 'suggested next test' surfaced from\n"
+            "what's already been run.\n\n"
+            "Propose 3-5 specific backtester-engine OR backtester-UI features\n"
+            "that move it from 'see an equity curve' to 'I trust this enough to\n"
+            "deploy with sizing'. Every request must name a concrete file or\n"
+            "endpoint to touch — concrete enough that the planner can hand it\n"
+            "straight to the executor."
+        ) + _DEFAULT_TAIL,
+    ),
 }
 
 

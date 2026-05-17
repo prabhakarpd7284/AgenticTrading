@@ -422,9 +422,32 @@ def build_edge_decay(tenant=None, *, window: int = 20) -> dict:
                 "n": len(slice_),
             })
 
+    # ── Intraday rolling ticker per strategy ─────────────────────────────
+    # For each strategy, the LAST `window`-trade hit-rate + expectancy,
+    # broken out as a flat ticker the FE can render as a one-line strip
+    # without re-iterating the full series.
+    intraday_ticker: list[dict] = []
+    for s, pts in series_per_strategy.items():
+        if not pts:
+            continue
+        latest = pts[-1]
+        delta_exp = round(latest["expectancy"] - pts[0]["expectancy"], 2) if len(pts) >= 2 else 0.0
+        intraday_ticker.append({
+            "strategy": s,
+            "n": latest["n"],
+            "win_rate": latest["win_rate"],
+            "expectancy": latest["expectancy"],
+            "avg_r": latest["avg_r"],
+            "delta_expectancy": delta_exp,
+            "trend": "up" if delta_exp > 0 else "down" if delta_exp < 0 else "flat",
+            "as_of": latest["as_of"],
+        })
+    intraday_ticker.sort(key=lambda r: r["expectancy"], reverse=True)
+
     return {
         "window": window,
         "series": {s: pts for s, pts in series_per_strategy.items()},
+        "intraday_ticker": intraday_ticker,
     }
 
 

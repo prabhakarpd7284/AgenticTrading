@@ -37,6 +37,7 @@ with its own system prompt and `requested_by` tag on every request:
 | `futures` | Index / single-stock futures — basis, OI, rolls, SPAN margin |
 | `equity` | Swing / positional equities — RS, sector rotation, breakouts |
 | `intraday` | Equity intraday scalper — ORB, VWAP, tape speed |
+| `backtester` | Research engineer — engine + UI improvements to make backtests decision-grade |
 
 ```bash
 python manage.py run_ai_trader_user --profile options    # one persona

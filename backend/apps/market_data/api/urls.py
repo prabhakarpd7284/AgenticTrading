@@ -6,6 +6,7 @@ from apps.market_data.api.views import (
     FIIDIIFlowView,
     First5MinView,
     IntradaySectorHeatmapView,
+    MarketHealthView,
     GapFillView,
     LiquidityMapView,
     MarketPulseView,
@@ -21,6 +22,7 @@ from apps.market_data.api.views import (
     SectorRRGView,
     Second5MinView,
     StockRRGView,
+    StopHuntView,
     SetupPreviewView,
     ShortlistView,
     SwingScannerView,
@@ -59,4 +61,6 @@ urlpatterns = [
     path("depth-imbalance/", DepthImbalanceView.as_view(), name="depth-imbalance"),
     path("stock-rrg/",      StockRRGView.as_view(),       name="stock-rrg"),
     path("intraday-sector-heatmap/", IntradaySectorHeatmapView.as_view(), name="intraday-sector-heatmap"),
+    path("stop-hunt/",      StopHuntView.as_view(),       name="stop-hunt"),
+    path("market-health/",  MarketHealthView.as_view(),   name="market-health"),
 ]

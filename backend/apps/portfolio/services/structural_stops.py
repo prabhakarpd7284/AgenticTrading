@@ -162,9 +162,44 @@ def build_structural_stops(tenant=None) -> dict[str, Any]:
             "ledger": history,
         })
 
+    # ── Portfolio-aggregated open-risk ladder ────────────────────────────
+    # Total ₹ on the line if every position hit its recommended stop, plus
+    # a per-position rank-ordered "heat" list (biggest loss-at-stop first).
+    capital = 0.0
+    try:
+        from trading.models import PortfolioSnapshot
+        capital = float(PortfolioSnapshot.objects.latest().capital)
+    except Exception:  # noqa: BLE001
+        capital = 0.0
+    total_loss = sum((r.get("loss_at_stop_inr") or 0.0) for r in rows)
+    heat_list = sorted(
+        [r for r in rows if (r.get("loss_at_stop_inr") or 0) > 0],
+        key=lambda r: r["loss_at_stop_inr"], reverse=True,
+    )
+    ladder = [
+        {
+            "rank": i + 1,
+            "symbol": r["symbol"],
+            "loss_at_stop_inr": r["loss_at_stop_inr"],
+            "pct_of_capital": round((r["loss_at_stop_inr"] / capital) * 100, 2) if capital > 0 else 0.0,
+            "pct_loss_per_share": r["pct_loss"],
+            "recommended": r.get("recommended"),
+        }
+        for i, r in enumerate(heat_list[:20])
+    ]
+
     return {
         "count": len(rows),
         "rows": rows,
         "as_of": datetime.now(timezone.utc).isoformat(),
-        "note": "Stops are suggestions from 80 daily bars. Always sanity-check against your own structural read.",
+        "open_risk_ladder": ladder,
+        "total_loss_at_stop_inr": round(total_loss, 2),
+        "total_loss_pct_of_capital": round((total_loss / capital) * 100, 2) if capital > 0 else 0.0,
+        "capital": capital,
+        "note": (
+            "Stops are suggestions from 80 daily bars. The open-risk ladder "
+            "ranks positions by ₹-at-stop so you can see which single name "
+            "carries the most heat. total_loss_pct_of_capital > 3% means "
+            "you're at the daily cap if everything goes wrong at once."
+        ),
     }

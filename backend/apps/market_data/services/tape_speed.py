@@ -96,6 +96,7 @@ def build_tape_speed(symbol: str) -> dict[str, Any]:
     if not bars:
         return {"symbol": sym, "series": [], "current_state": "no_data",
                 "baseline_rupees_per_min": 0.0, "bar_count": 0,
+                "current_cum_delta": 0,
                 "note": "No 1-min bars yet."}
 
     baseline = _baseline_turnover(sym)
@@ -107,6 +108,10 @@ def build_tape_speed(symbol: str) -> dict[str, Any]:
     alpha = 1.0 / 6.0
     ema_tps = 0.0
     ema_ratio = 0.0
+    # Cumulative delta proxy: sign(close-prev_close) × volume per bar,
+    # then running sum. True aggressor delta needs tick data we don't get
+    # from the SDK; bar-direction × volume is the standard cheap proxy.
+    cum_delta = 0
     series: list[dict] = []
     for i, b in enumerate(bars):
         tps = round(b["v"] / 60.0, 1)
@@ -117,6 +122,12 @@ def build_tape_speed(symbol: str) -> dict[str, Any]:
         ratio = (rupees_pm / baseline) if baseline > 0 else 0.0
         ema_tps = alpha * tps + (1 - alpha) * ema_tps if i else tps
         ema_ratio = alpha * ratio + (1 - alpha) * ema_ratio if i else ratio
+        # Bar-direction × bar-volume → signed aggressor proxy
+        bar_delta = 0
+        if i > 0:
+            sign = 1 if b["c"] > closes[i - 1] else -1 if b["c"] < closes[i - 1] else 0
+            bar_delta = sign * b["v"]
+            cum_delta += bar_delta
         if ratio == 0:
             state = "cold"
         elif ratio > 2.5:
@@ -135,6 +146,8 @@ def build_tape_speed(symbol: str) -> dict[str, Any]:
             "ratio_to_baseline": round(ratio, 2),
             "ratio_ema10s": round(ema_ratio, 2),
             "realised_vol_pm": realised_vol_pm,
+            "bar_delta": bar_delta,
+            "cum_delta": cum_delta,
             "state": state,
         })
 
@@ -147,6 +160,7 @@ def build_tape_speed(symbol: str) -> dict[str, Any]:
         "current_tps": last.get("trades_per_sec", 0.0),
         "current_rupees_per_min": last.get("rupees_per_min", 0.0),
         "current_realised_vol_pm": last.get("realised_vol_pm", 0.0),
+        "current_cum_delta": last.get("cum_delta", 0),
         "series": series[-180:],
         "note": (
             "Hot tape ≥ 1.5× baseline turnover = institutional flow active; "

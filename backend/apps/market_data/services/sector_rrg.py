@@ -116,15 +116,48 @@ def build_sector_rrg(tenant=None, *, weekly: bool = False) -> dict[str, Any]:
 
     quadrant_order = {"LEADING": 0, "IMPROVING": 1, "WEAKENING": 2, "LAGGING": 3, "no_data": 4}
     rows.sort(key=lambda r: (quadrant_order.get(r["quadrant"], 4), -r.get("rs_ratio", 0)))
+
+    # ── Group-leadership map: top-3 + bottom-2 constituents per sector ──
+    # Pulls today's % change for each sector's known constituents and
+    # surfaces the names that are pulling the sector up or down. Cheap
+    # because dispersion's batch-quote cache covers the same symbols.
+    leadership: list[dict] = []
+    try:
+        from apps.market_data.services.rotation_service import SECTOR_CONSTITUENTS
+        from apps.market_data.services.sector_dispersion import _batch_changes
+        all_syms: list[str] = []
+        seen: set[str] = set()
+        for ssyms in SECTOR_CONSTITUENTS.values():
+            for s in ssyms:
+                if s not in seen:
+                    seen.add(s); all_syms.append(s)
+        pct_today = _batch_changes(all_syms)
+        for sector_key, ssyms in SECTOR_CONSTITUENTS.items():
+            cohort = sorted(
+                [(s, pct_today.get(s, 0.0)) for s in ssyms if s in pct_today],
+                key=lambda kv: kv[1], reverse=True,
+            )
+            if not cohort:
+                continue
+            leadership.append({
+                "sector": sector_key,
+                "leaders":  [{"symbol": s, "pct": round(v, 2)} for s, v in cohort[:3]],
+                "laggards": [{"symbol": s, "pct": round(v, 2)} for s, v in cohort[-2:][::-1]],
+            })
+    except Exception:  # noqa: BLE001
+        leadership = []
+
     return {
         "count": len(rows),
         "mode": "weekly" if weekly else "daily",
         "tail_length": tail_len,
         "rows": rows,
+        "leadership": leadership,
         "note": (
             "LEADING (top-right) sectors are outperforming and accelerating — "
             "trade their constituents long. IMPROVING (bottom-right) are early "
             "rotation candidates. LAGGING/WEAKENING = avoid or short the "
-            "weakest names. " + ("Weekly mode with 13-week tail." if weekly else "Daily mode with 10-day tail.")
+            "weakest names. " + ("Weekly mode with 13-week tail." if weekly else "Daily mode with 10-day tail.") +
+            " Leadership map shows today's top-3 + bottom-2 constituents per sector."
         ),
     }

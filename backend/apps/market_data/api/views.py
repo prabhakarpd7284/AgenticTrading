@@ -27,6 +27,8 @@ from apps.market_data.services.orb_failure import build_orb_failure
 from apps.market_data.services.orb_tracker import build_orb
 from apps.market_data.services.second_5min import build_second_5min
 from apps.market_data.services.intraday_sector_heatmap import build_intraday_sector_heatmap
+from apps.market_data.services.market_health import build_market_health
+from apps.market_data.services.stop_hunt import build_stop_hunt
 from apps.market_data.services.sector_dispersion import build_sector_dispersion
 from apps.market_data.services.sector_rrg import build_sector_rrg
 from apps.market_data.services.stock_rrg import build_stock_rrg
@@ -613,3 +615,17 @@ class IntradaySectorHeatmapView(APIView):
     permission_classes = [IsAuthenticated]
     def get(self, request):
         return Response(build_intraday_sector_heatmap(getattr(request, "tenant", None)))
+
+
+class StopHuntView(APIView):
+    """GET /api/v1/market-data/stop-hunt/"""
+    permission_classes = [IsAuthenticated]
+    def get(self, request):
+        return Response(build_stop_hunt(getattr(request, "tenant", None)))
+
+
+class MarketHealthView(APIView):
+    """GET /api/v1/market-data/market-health/"""
+    permission_classes = [IsAuthenticated]
+    def get(self, request):
+        return Response(build_market_health(getattr(request, "tenant", None)))

@@ -37,6 +37,7 @@ from apps.portfolio.services.edge_ledger import build_edge_ledger
 from apps.portfolio.services.forced_flat import build_forced_flat, flatten_all
 from apps.portfolio.services.intraday_rotation import build_intraday_rotation
 from apps.portfolio.services.partial_fill import build_partial_fill_report
+from apps.portfolio.services.pyramid_triggers import build_pyramid_triggers
 from apps.portfolio.services.gap_risk import build_gap_risk_report
 from apps.portfolio.services.post_mortem import build_post_mortem_report
 from apps.portfolio.services.sizer_simulator import simulate as simulate_sizer
@@ -341,3 +342,9 @@ class PartialFillView(_BaseCockpitView):
         return Response(build_partial_fill_report(
             getattr(request, "tenant", None), limit=limit,
         ))
+
+
+class PyramidTriggersView(_BaseCockpitView):
+    """GET /api/v1/portfolios/pyramid-triggers/"""
+    def get(self, request):
+        return Response(build_pyramid_triggers(getattr(request, "tenant", None)))

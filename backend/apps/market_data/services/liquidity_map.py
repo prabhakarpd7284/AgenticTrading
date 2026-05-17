@@ -86,6 +86,40 @@ def _historical_slippage_bps(symbol: str) -> float:
         return 0.0
 
 
+# Standard intraday buckets used by the time-of-day heatmap.
+_TOD_BUCKETS = [
+    ("open",    9, 15, 10, 0),
+    ("morning", 10, 0, 12, 0),
+    ("midday",  12, 0, 13, 30),
+    ("afternoon", 13, 30, 14, 45),
+    ("close",   14, 45, 15, 30),
+]
+
+
+def _slippage_by_time_of_day(symbol: str) -> dict[str, float]:
+    """Mean |slippage| in bps bucketed by intraday time-of-day."""
+    from trading.models import TradeJournal
+    out: dict[str, list[float]] = {b[0]: [] for b in _TOD_BUCKETS}
+    try:
+        rows = TradeJournal.objects.filter(symbol=symbol).exclude(
+            fill_price__isnull=True
+        ).values_list("entry_price", "fill_price", "created_at")[:200]
+        for entry, fill, ts in rows:
+            if not (entry and fill and ts and entry > 0):
+                continue
+            bps = abs((float(fill) - float(entry)) / float(entry)) * 10_000.0
+            t = ts.timetz()
+            for name, h1, m1, h2, m2 in _TOD_BUCKETS:
+                if (h1, m1) <= (t.hour, t.minute) < (h2, m2):
+                    out[name].append(bps); break
+        return {
+            name: round(statistics.mean(vals), 2) if vals else 0.0
+            for name, vals in out.items()
+        }
+    except Exception:  # noqa: BLE001
+        return {name: 0.0 for name, *_ in _TOD_BUCKETS}
+
+
 def _collect_symbols(tenant=None) -> list[str]:
     symbols: set[str] = set()
     try:
@@ -121,6 +155,7 @@ def build_liquidity_map(tenant=None) -> dict[str, Any]:
             "spread_bps": round(spread_bps, 2),
             "depth_imbalance": 0.0,
             "avg_historical_slippage_bps": _historical_slippage_bps(sym),
+            "slippage_by_tod": _slippage_by_time_of_day(sym),
         })
     return {
         "count": len(rows),
