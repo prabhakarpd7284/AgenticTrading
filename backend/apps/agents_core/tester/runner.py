@@ -333,6 +333,57 @@ def t_ui_renders_pyramid_chart(ctx: Ctx) -> None:
            f"references them in AgentConsolePage.tsx. The intraday + entries chart is missing.")
 
 
+def t_ui_chart_containers_clipped(ctx: Ctx) -> None:
+    """Static render-invariant: every <CardContent> that hosts a chart
+    container (height in pixels) must have `overflow-hidden` so any
+    absolutely-positioned chart canvas can't overlay the next card.
+
+    This is exactly the bug pattern that hit the pyramid + vertical-spread
+    overviews — lightweight-charts canvases bleeding over the headline KPI
+    card below. A deterministic check beats waiting for a screenshot.
+    """
+    src = _read_repo_file("frontend/src/features/agents/AgentConsolePage.tsx")
+    if not src:
+        return
+    pattern = re.compile(r'<CardContent className="h-\[(\d+)px\]([^"]*)">')
+    violators: list[str] = []
+    for m in pattern.finditer(src):
+        height, rest = m.group(1), m.group(2)
+        if "overflow-hidden" not in rest:
+            violators.append(f"h-[{height}px] missing overflow-hidden ({rest.strip() or 'no other classes'})")
+    expect(not violators,
+           "Chart CardContent wrappers need `overflow-hidden` to clip absolutely-positioned chart "
+           f"canvases (lightweight-charts especially). Violations: {violators}")
+
+
+def t_ui_lightweight_charts_measure_before_init(ctx: Ctx) -> None:
+    """Static render-invariant: every lightweight-charts createChart call
+    must pass explicit width + height and set up a ResizeObserver,
+    otherwise the chart can render at 0×0 (invisible) or overflow its
+    parent (overlay)."""
+    src = _read_repo_file("frontend/src/features/agents/AgentConsolePage.tsx")
+    if not src:
+        return
+    # Each createChart() block must include width:, height:, and ResizeObserver.
+    blocks: list[str] = []
+    for m in re.finditer(r"mod\.createChart\([^)]*\{(.+?)\}\s*\)", src, flags=re.DOTALL):
+        blocks.append(m.group(1))
+    if not blocks:
+        return
+    bad: list[int] = []
+    for i, b in enumerate(blocks, start=1):
+        if not ("width:" in b and "height:" in b):
+            bad.append(i)
+    expect(not bad,
+           f"createChart() calls #{bad} are missing explicit width/height — without it lightweight-charts "
+           "can paint outside its container. Wrap with `const {width, height} = el.getBoundingClientRect()` "
+           "and pass them in.")
+    # ResizeObserver presence (anywhere in the file is fine — global belt).
+    expect("new ResizeObserver" in src,
+           "AgentConsolePage uses lightweight-charts but has no ResizeObserver — charts won't reflow "
+           "when the sidebar collapses or the window resizes.")
+
+
 def t_ui_renders_vertical_spread_chart(ctx: Ctx) -> None:
     run_id = ctx.facts.get("vertical_spread_run_id")
     if not run_id:
@@ -366,6 +417,8 @@ SUITES: list[TestCase] = [
     TestCase("ui.pyramid_plan_rendered",   "ui_plumbing",     "PyramidOverview references all plan fields the API returns",   t_ui_renders_pyramid_plan),
     TestCase("ui.pyramid_chart_present",   "ui_plumbing",     "Pyramid intraday chart component exists (with entries markers)", t_ui_renders_pyramid_chart),
     TestCase("ui.vs_payoff_present",       "ui_plumbing",     "Vertical-spread payoff diagram component exists",              t_ui_renders_vertical_spread_chart),
+    TestCase("ui.chart_containers_clipped","ui_rendering",    "Chart CardContent wrappers clip absolute children (overflow-hidden)", t_ui_chart_containers_clipped),
+    TestCase("ui.charts_measure_before_init","ui_rendering",  "lightweight-charts createChart calls pass explicit width/height + ResizeObserver", t_ui_lightweight_charts_measure_before_init),
 ]
 
 
