@@ -804,7 +804,7 @@ function RagContextPanel({ text }: { text: string }) {
 function DirectionalChart({ result }: { result: RunResult }) {
   const containerRef = React.useRef<HTMLDivElement>(null);
   const md = result.market_data ?? {};
-  const plan = result.plan ?? {};
+  const plan = (result.plan ?? {}) as DirectionalPlan;
   const candles = md.candles ?? [];
 
   React.useEffect(() => {
@@ -815,14 +815,30 @@ function DirectionalChart({ result }: { result: RunResult }) {
 
     (async () => {
       const mod = await import("lightweight-charts");
-      chart = mod.createChart(containerRef.current!, {
+      // Wait until the container has actually been measured. lightweight-charts
+      // with autoSize=true can render outside its parent's box if it
+      // initialises before the layout settles, which causes the canvas to
+      // overlay the next card below.
+      const el = containerRef.current!;
+      const { width, height } = el.getBoundingClientRect();
+      chart = mod.createChart(el, {
+        width: Math.max(1, Math.floor(width)),
+        height: Math.max(1, Math.floor(height)),
         layout: { background: { color: "transparent" }, textColor: "#8b949e" },
         grid: { vertLines: { color: "#161b22" }, horzLines: { color: "#161b22" } },
-        timeScale: { timeVisible: true, secondsVisible: false },
-        rightPriceScale: { borderColor: "#30363d" },
+        timeScale: { timeVisible: true, secondsVisible: false, timeVisible: true },
+        rightPriceScale: { borderColor: "#30363d", autoScale: true },
         crosshair: { mode: 0 },
         autoSize: true,
       });
+
+      // Keep chart sized to its container on window resize / sidebar toggle.
+      const ro = new ResizeObserver(() => {
+        const r = el.getBoundingClientRect();
+        chart.applyOptions({ width: Math.floor(r.width), height: Math.floor(r.height) });
+      });
+      ro.observe(el);
+      cleanup = () => { ro.disconnect(); chart.remove(); };
       const series = chart.addCandlestickSeries({
         upColor: "#3fb950", downColor: "#f85149",
         wickUpColor: "#3fb950", wickDownColor: "#f85149",
@@ -854,7 +870,6 @@ function DirectionalChart({ result }: { result: RunResult }) {
       });
 
       chart.timeScale().fitContent();
-      cleanup = () => chart.remove();
     })();
 
     return () => cleanup();
@@ -878,8 +893,8 @@ function DirectionalChart({ result }: { result: RunResult }) {
           Plan overlay — entry (blue) · stop (red, dashed) · target (green, dashed).
         </CardDescription>
       </CardHeader>
-      <CardContent className="h-[480px]">
-        <div ref={containerRef} className="h-full w-full" />
+      <CardContent className="h-[480px] relative overflow-hidden">
+        <div ref={containerRef} className="absolute inset-0" />
       </CardContent>
     </Card>
   );
@@ -910,7 +925,7 @@ function PyramidOverview({ result }: { result: RunResult }) {
               SL-at-entry as dashed lines, exit price as a horizontal reference.
             </CardDescription>
           </CardHeader>
-          <CardContent className="h-[420px]">
+          <CardContent className="h-[420px] relative overflow-hidden">
             <PyramidIntradayChart candles={candles} entries={entries} exitPrice={plan.exit_price} />
           </CardContent>
         </Card>
@@ -1067,7 +1082,7 @@ function VerticalSpreadOverview({ result }: { result: RunResult }) {
               Green region = profit · red region = loss.
             </CardDescription>
           </CardHeader>
-          <CardContent className="h-[320px]">
+          <CardContent className="h-[320px] relative overflow-hidden">
             <VerticalSpreadPayoffChart plan={plan} />
           </CardContent>
         </Card>
@@ -1234,7 +1249,7 @@ function StraddleOverview({ result }: { result: RunResult }) {
               Crossings of zero are the breakeven points.
             </CardDescription>
           </CardHeader>
-          <CardContent className="h-[280px]">
+          <CardContent className="h-[280px] relative overflow-hidden">
             <ScenariosChart scenarios={an.scenarios} currentSpot={an.nifty_spot} />
           </CardContent>
         </Card>
@@ -1253,7 +1268,7 @@ function StraddleOverview({ result }: { result: RunResult }) {
               )}
             </CardDescription>
           </CardHeader>
-          <CardContent className="h-[420px]">
+          <CardContent className="h-[420px] relative overflow-hidden">
             <IntradayClosesChart
               ceCandles={snap.ce_candles ?? []}
               peCandles={snap.pe_candles ?? []}
@@ -1427,14 +1442,25 @@ function PyramidIntradayChart({
 
     (async () => {
       const mod = await import("lightweight-charts");
-      const chart = mod.createChart(containerRef.current!, {
+      const el = containerRef.current!;
+      const { width, height } = el.getBoundingClientRect();
+      const chart = mod.createChart(el, {
+        width: Math.max(1, Math.floor(width)),
+        height: Math.max(1, Math.floor(height)),
         layout: { background: { color: "transparent" }, textColor: "#8b949e" },
         grid:   { vertLines: { color: "#161b22" }, horzLines: { color: "#161b22" } },
         timeScale: { timeVisible: true, secondsVisible: false, borderColor: "#30363d" },
-        rightPriceScale: { borderColor: "#30363d" },
+        rightPriceScale: { borderColor: "#30363d", autoScale: true },
         crosshair: { mode: 0 },
         autoSize: true,
       });
+      const ro = new ResizeObserver(() => {
+        const r = el.getBoundingClientRect();
+        chart.applyOptions({ width: Math.floor(r.width), height: Math.floor(r.height) });
+      });
+      ro.observe(el);
+      cleanup = () => { ro.disconnect(); chart.remove(); };
+
       const series = chart.addCandlestickSeries({
         upColor: "#3fb950", downColor: "#f85149",
         wickUpColor: "#3fb950", wickDownColor: "#f85149",
@@ -1449,8 +1475,6 @@ function PyramidIntradayChart({
         .sort((a, b) => a.time - b.time);
       series.setData(data);
 
-      // Mark entries on the candle series with up arrows (initial) / down
-      // arrows (no — they're always BUYs in pyramid), each annotated with lots.
       if (entries.length > 0) {
         series.setMarkers(entries.map((e, i) => ({
           time: Math.floor(new Date(e.timestamp).getTime() / 1000) as any,
@@ -1461,9 +1485,6 @@ function PyramidIntradayChart({
           size: 1,
         })));
       }
-
-      // SL-at-entry as a horizontal price line per entry (initial only — the
-      // pyramid trails its SL between bars; legacy log captures every raise).
       if (entries.length > 0 && entries[0].sl_at_entry) {
         series.createPriceLine({
           price: entries[0].sl_at_entry, color: "#f85149",
@@ -1471,8 +1492,6 @@ function PyramidIntradayChart({
           title: `SL ${entries[0].sl_at_entry.toFixed(1)}`,
         });
       }
-
-      // Exit price reference.
       if (exitPrice) {
         series.createPriceLine({
           price: exitPrice, color: "#d29922",
@@ -1480,15 +1499,16 @@ function PyramidIntradayChart({
           title: `EXIT ${exitPrice.toFixed(1)}`,
         });
       }
-
       chart.timeScale().fitContent();
-      cleanup = () => chart.remove();
     })();
 
     return () => cleanup();
   }, [candles, entries, exitPrice]);
 
-  return <div ref={containerRef} className="h-full w-full" />;
+  // absolute positioning makes the chart canvas honour the parent's clipping
+  // (overflow-hidden on CardContent) — belt-and-braces with the explicit
+  // size pass above.
+  return <div ref={containerRef} className="absolute inset-0" />;
 }
 
 
