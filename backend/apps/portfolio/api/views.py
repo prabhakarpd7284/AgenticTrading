@@ -63,6 +63,16 @@ class MonthlyReportView(APIView):
         force = request.query_params.get("force") in ("1", "true")
         portfolio_id = request.query_params.get("portfolio")
 
+        # Without a tenant we can't scope or auto-create a portfolio — the
+        # create blows up on the NOT-NULL tenant_id FK. Surface a clean 400
+        # instead of leaking an IntegrityError (happens to JWTs minted before
+        # onboarding finished).
+        if request.tenant is None:
+            return Response(
+                {"detail": "Workspace not selected. Finish onboarding to load monthly report."},
+                status=400,
+            )
+
         qs = Portfolio.objects.filter(tenant=request.tenant)
         if portfolio_id:
             qs = qs.filter(id=portfolio_id)

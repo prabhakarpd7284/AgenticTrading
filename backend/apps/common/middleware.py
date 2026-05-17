@@ -64,3 +64,31 @@ class StructlogContextMiddleware:
             user_id=getattr(getattr(request, "user", None), "id", None),
         )
         return self.get_response(request)
+
+
+class IntradayAsOfMiddleware:
+    """Read ?date=YYYY-MM-DD from the query string and scope it as the
+    intraday session override for the request.
+
+    Any service that calls trading.utils.time_utils.intraday_session_date()
+    transparently returns the picked date — so cockpit time-travel works
+    without editing each view. Invalid or missing param = no override.
+    """
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request: HttpRequest) -> HttpResponse:
+        from datetime import date
+        from trading.utils.time_utils import use_session_date
+
+        raw = request.GET.get("date") or request.GET.get("as_of")
+        target = None
+        if raw:
+            try:
+                target = date.fromisoformat(raw.strip())
+            except (ValueError, TypeError):
+                target = None
+
+        with use_session_date(target):
+            return self.get_response(request)

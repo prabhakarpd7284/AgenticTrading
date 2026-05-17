@@ -4,7 +4,35 @@ Time utilities — single source of truth for market hours, session phases.
 Every file that checks "is market open?" should use these functions
 instead of inline hour/minute comparisons.
 """
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import datetime, date, time as dt_time, timedelta
+from typing import Optional
+
+
+# Per-request override for "what session date should panels render?".
+# Set by the cockpit time-travel `?date=` query param (see views).
+# When set, intraday_session_date() returns this instead of computing.
+_AS_OF_OVERRIDE: ContextVar[Optional[date]] = ContextVar(
+    "intraday_as_of", default=None,
+)
+
+
+@contextmanager
+def use_session_date(d: Optional[date]):
+    """Scope an intraday session-date override for the duration of a block.
+
+    Used by cockpit views so any service that calls intraday_session_date()
+    transparently returns the user-picked historical date, including for
+    cache-key construction. Pass None to no-op (live behaviour)."""
+    if d is None:
+        yield
+        return
+    tok = _AS_OF_OVERRIDE.set(d)
+    try:
+        yield
+    finally:
+        _AS_OF_OVERRIDE.reset(tok)
 
 
 # ── Market schedule (IST) ──
@@ -69,6 +97,26 @@ def get_session_phase(now: datetime = None) -> str:
     if t <= MARKET_CLOSE:
         return "CLOSING"
     return "POST_MARKET"
+
+
+def intraday_session_date(now: datetime = None) -> date:
+    """The date whose intraday bars the operator should see right now.
+
+    - Weekday after 9:16 IST → today (live or just-completed session).
+    - Weekend, holiday, or pre-9:16 weekday → the previous trading day.
+
+    Use this in cockpit panels so weekends and pre-market don't blank out
+    every intraday card — operators still want to see the last session's
+    VWAP / tape / ORB while they plan the next day.
+    """
+    override = _AS_OF_OVERRIDE.get()
+    if override is not None:
+        return override
+    if now is None:
+        now = datetime.now()
+    if can_fetch_candles(now):
+        return now.date()
+    return last_trading_day(now)
 
 
 def last_trading_day(now: datetime = None) -> date:

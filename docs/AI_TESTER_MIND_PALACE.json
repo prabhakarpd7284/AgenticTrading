@@ -1,7 +1,7 @@
 {
   "context_version": 3,
-  "fingerprint": "16440204a7bfb31e",
-  "last_run_at": "2026-05-17T16:15:08Z",
+  "fingerprint": "9f01244f7bb40239",
+  "last_run_at": "2026-05-17T18:37:14Z",
   "open_bugs": [],
   "fixed_bugs": [
     {
@@ -26,6 +26,18 @@
       "first_seen": "2026-05-17T11:19:40Z",
       "last_seen": "2026-05-17T11:19:40Z",
       "occurrences": 1,
+      "status": "fixed"
+    },
+    {
+      "id": "pyramid-pyramid-nifty-weekly-fetches-50-candles",
+      "title": "[pyramid] pyramid NIFTY weekly fetches >= 50 candles",
+      "severity": "high",
+      "suite": "pyramid",
+      "evidence": "run create 401: {\"type\":\"about:blank\",\"title\":\"NotAuthenticated\",\"status\":401,\"detail\":{\"detail\":\"Authentication credentials were not provided.\"}}",
+      "suggested_fix": null,
+      "first_seen": "2026-05-17T18:36:12Z",
+      "last_seen": "2026-05-17T18:37:02Z",
+      "occurrences": 2,
       "status": "fixed"
     }
   ],
@@ -163,6 +175,37 @@
       "id": "df1295c34871",
       "started_at": "2026-05-17T16:12:37Z",
       "ended_at": "2026-05-17T16:12:45Z",
+      "total": 15,
+      "passed": 15,
+      "failed": 0,
+      "finding_ids": []
+    },
+    {
+      "id": "d5ac4824dd9b",
+      "started_at": "2026-05-17T18:36:00Z",
+      "ended_at": "2026-05-17T18:36:12Z",
+      "total": 15,
+      "passed": 14,
+      "failed": 1,
+      "finding_ids": [
+        "pyramid-pyramid-nifty-weekly-fetches-50-candles"
+      ]
+    },
+    {
+      "id": "68f5f572a884",
+      "started_at": "2026-05-17T18:37:02Z",
+      "ended_at": "2026-05-17T18:37:02Z",
+      "total": 1,
+      "passed": 0,
+      "failed": 1,
+      "finding_ids": [
+        "pyramid-pyramid-nifty-weekly-fetches-50-candles"
+      ]
+    },
+    {
+      "id": "a24051538ac7",
+      "started_at": "2026-05-17T18:37:06Z",
+      "ended_at": "2026-05-17T18:37:14Z",
       "total": 15,
       "passed": 15,
       "failed": 0,

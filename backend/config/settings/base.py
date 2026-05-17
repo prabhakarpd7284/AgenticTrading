@@ -72,6 +72,7 @@ MIDDLEWARE = [
     "apps.common.middleware.RequestIdMiddleware",
     "apps.common.middleware.TenantMiddleware",
     "apps.common.middleware.StructlogContextMiddleware",
+    "apps.common.middleware.IntradayAsOfMiddleware",
 ]
 
 ROOT_URLCONF = "config.urls"
@@ -165,6 +166,10 @@ CELERY_RESULT_BACKEND = env("CELERY_RESULT_BACKEND", default=REDIS_URL)
 CELERY_TASK_ACKS_LATE = True
 CELERY_TASK_REJECT_ON_WORKER_LOST = True
 CELERY_WORKER_PREFETCH_MULTIPLIER = 1
+# Workers consume "default,agents,orders". Celery's built-in default queue
+# name is "celery"; without this override any @shared_task that doesn't
+# specify queue= lands in "celery" and is never consumed.
+CELERY_TASK_DEFAULT_QUEUE = "default"
 CELERY_BEAT_SCHEDULE = {
     "process-order-outbox": {
         "task": "apps.orders.tasks.outbox.process_outbox",
@@ -177,6 +182,17 @@ CELERY_BEAT_SCHEDULE = {
     "expire-old-agent-runs": {
         "task": "apps.agents_core.tasks.housekeeping.expire_runs",
         "schedule": 300.0,
+    },
+    # Keep Pulse + Rotation caches continuously warm so the dashboard never
+    # pays the 9-17s cold-rebuild cost. Cadence sits just under each TTL
+    # (pulse 30s, rotation 60s) so the cache is replaced before it expires.
+    "warm-pulse-cache": {
+        "task": "apps.market_data.tasks.warmers.warm_pulse",
+        "schedule": 25.0,
+    },
+    "warm-rotation-cache": {
+        "task": "apps.market_data.tasks.warmers.warm_rotation",
+        "schedule": 55.0,
     },
 }
 

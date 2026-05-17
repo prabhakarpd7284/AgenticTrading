@@ -21,6 +21,8 @@ from typing import Any
 
 from django.core.cache import cache
 
+from trading.utils.time_utils import intraday_session_date
+
 from apps.market_data.services.orb_tracker import (
     _fetch_1m, _watchlist_symbols, _parse_minute,
 )
@@ -47,7 +49,7 @@ def _empirical_reversal_p(symbol: str) -> float:
         token = ticker_service.get_token(symbol)
         if not token:
             cache.set(key, 0.35, 3600); return 0.35
-        today = date.today()
+        today = intraday_session_date()
         start = (today - timedelta(days=90)).strftime("%Y-%m-%d 09:15")
         end = today.strftime("%Y-%m-%d 15:30")
         try:
@@ -114,14 +116,17 @@ def _classify_failure(candles: list[dict]) -> dict:
 
 
 def build_orb_failure(tenant=None) -> dict[str, Any]:
+    from apps.market_data.services._parallel import parallel_symbols
     symbols = _watchlist_symbols()[:30]
-    rows: list[dict] = []
-    for sym in symbols:
+
+    def _row(sym: str) -> dict:
         candles = _fetch_1m(sym)
         cl = _classify_failure(candles)
         cl["symbol"] = sym
         cl["reversal_p"] = _empirical_reversal_p(sym) if cl["failure_flag"] else 0.0
-        rows.append(cl)
+        return cl
+
+    rows = parallel_symbols(symbols, _row)
     # most-actionable rows first: failures with high reversal_p
     rows.sort(key=lambda r: (
         0 if r["failure_flag"] else 1,

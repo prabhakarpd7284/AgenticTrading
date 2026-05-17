@@ -23,12 +23,14 @@ from typing import Any
 
 from django.core.cache import cache
 
+from trading.utils.time_utils import intraday_session_date
+
 
 _TTL = 30
 
 
 def _fetch_1m_today(symbol: str) -> list[dict]:
-    key = f"tape:1m:{symbol}:{date.today().isoformat()}"
+    key = f"tape:1m:{symbol}:{intraday_session_date().isoformat()}"
     cached = cache.get(key)
     if cached is not None:
         return cached
@@ -39,7 +41,7 @@ def _fetch_1m_today(symbol: str) -> list[dict]:
         token = ticker_service.get_token(symbol)
         if not token:
             cache.set(key, [], _TTL); return []
-        today = date.today()
+        today = intraday_session_date()
         start = today.strftime("%Y-%m-%d 09:15")
         end = today.strftime("%Y-%m-%d 15:30")
         try:
@@ -68,7 +70,7 @@ def _baseline_turnover(symbol: str, days: int = 20) -> float:
         token = ticker_service.get_token(symbol)
         if not token:
             cache.set(key, 0.0, 3600); return 0.0
-        today = date.today()
+        today = intraday_session_date()
         start = (today - timedelta(days=days + 2)).strftime("%Y-%m-%d 09:15")
         end = today.strftime("%Y-%m-%d 15:30")
         try:

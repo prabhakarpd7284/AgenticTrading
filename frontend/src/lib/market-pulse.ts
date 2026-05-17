@@ -618,10 +618,12 @@ export function useOKBacktest(params: {
   return useQuery<OKBacktestPayload>({
     queryKey: ["ok-backtest", params.mode, params.from_date, params.to_date],
     queryFn: async () => {
-      // Backtests are slow (daily ~30s, intraday ~120s) — use a long timeout
+      // Cold-cache backtests are slow — daily ~30s, intraday ~200s+ (98-stock
+      // NIFTY 100 scan + multi-TF grid). Result is cached server-side for 1h,
+      // so the second call is sub-second. 300s gives the cold path headroom.
       const r = await api.get<OKBacktestPayload>("/market-data/ok-backtest/", {
         params: { mode: params.mode, from_date: params.from_date, to_date: params.to_date },
-        timeout: 180_000,
+        timeout: 300_000,
       });
       return r.data;
     },

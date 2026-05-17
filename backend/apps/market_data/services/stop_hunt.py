@@ -20,12 +20,14 @@ from typing import Any
 
 from django.core.cache import cache
 
+from trading.utils.time_utils import intraday_session_date
+
 
 _TTL = 60
 
 
 def _today_1m(symbol: str) -> list[dict]:
-    key = f"sweep:1m:{symbol}:{date.today().isoformat()}"
+    key = f"sweep:1m:{symbol}:{intraday_session_date().isoformat()}"
     cached = cache.get(key)
     if cached is not None:
         return cached
@@ -36,7 +38,7 @@ def _today_1m(symbol: str) -> list[dict]:
         token = ticker_service.get_token(symbol)
         if not token:
             cache.set(key, [], _TTL); return []
-        today = date.today()
+        today = intraday_session_date()
         start = today.strftime("%Y-%m-%d 09:15")
         end = today.strftime("%Y-%m-%d 15:30")
         try:
@@ -66,7 +68,7 @@ def _prev_day_hi_lo(symbol: str) -> tuple[float, float]:
         token = ticker_service.get_token(symbol)
         if not token:
             cache.set(key, (0.0, 0.0), 3600); return (0.0, 0.0)
-        today = date.today()
+        today = intraday_session_date()
         start = (today - timedelta(days=5)).strftime("%Y-%m-%d 09:15")
         end = today.strftime("%Y-%m-%d 15:30")
         try:
@@ -144,33 +146,32 @@ def _watchlist() -> list[str]:
 
 
 def build_stop_hunt(tenant=None) -> dict[str, Any]:
+    from apps.market_data.services._parallel import parallel_symbols
     symbols = _watchlist()[:25]
-    rows: list[dict] = []
-    for sym in symbols:
+
+    def _row(sym: str) -> dict:
         bars = _today_1m(sym)
         if not bars:
-            rows.append({"symbol": sym, "events": [], "event_count": 0, "note": "no_bars"})
-            continue
+            return {"symbol": sym, "events": [], "event_count": 0, "note": "no_bars"}
         pdh, pdl = _prev_day_hi_lo(sym)
         orh, orl = _opening_range_hi_lo(bars)
         last_close = bars[-1]["c"]
         round_lvls = _round_levels_near(last_close)
-
         levels: list[tuple[str, float]] = [
             ("PDH", pdh), ("PDL", pdl), ("ORH", orh), ("ORL", orl),
         ] + [(f"ROUND_{int(x)}", x) for x in round_lvls]
         events = _detect_sweeps(bars, levels)
-        # Sort strongest reversals first
         events.sort(key=lambda e: -abs(e["reversal_strength_pct"]))
-        rows.append({
+        return {
             "symbol": sym,
             "pdh": round(pdh, 2), "pdl": round(pdl, 2),
             "orh": round(orh, 2), "orl": round(orl, 2),
             "last_close": round(last_close, 2),
-            "events": events[:5],   # top-5 cleanest reversals per symbol
+            "events": events[:5],
             "event_count": len(events),
-        })
+        }
 
+    rows = parallel_symbols(symbols, _row)
     rows.sort(key=lambda r: -r["event_count"])
     total_events = sum(r["event_count"] for r in rows)
     return {

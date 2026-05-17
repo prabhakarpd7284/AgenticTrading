@@ -17,6 +17,8 @@ from typing import Any
 
 from django.core.cache import cache
 
+from trading.utils.time_utils import intraday_session_date
+
 _TTL = 60
 _FIRST_END = time(9, 20)
 _SECOND_END = time(9, 25)
@@ -31,7 +33,7 @@ def _watchlist() -> list[str]:
 
 
 def _fetch_first_two(symbol: str) -> list[dict]:
-    key = f"second5:bars:{symbol}:{date.today().isoformat()}"
+    key = f"second5:bars:{symbol}:{intraday_session_date().isoformat()}"
     cached = cache.get(key)
     if cached is not None:
         return cached
@@ -42,7 +44,7 @@ def _fetch_first_two(symbol: str) -> list[dict]:
         token = ticker_service.get_token(symbol)
         if not token:
             cache.set(key, [], _TTL); return []
-        today = date.today()
+        today = intraday_session_date()
         start = today.strftime("%Y-%m-%d 09:15")
         end = today.strftime("%Y-%m-%d 09:25")
         try:
@@ -80,27 +82,29 @@ def _classify(first: dict, second: dict) -> tuple[str, str]:
 
 
 def build_second_5min(tenant=None) -> dict[str, Any]:
+    from apps.market_data.services._parallel import parallel_symbols
     symbols = _watchlist()[:30]
-    rows: list[dict] = []
-    for sym in symbols:
+
+    def _row(sym: str) -> dict:
         bars = _fetch_first_two(sym)
         if len(bars) < 2:
-            rows.append({"symbol": sym, "classification": "no_data",
-                         "day_type_tag": "UNKNOWN",
-                         "first_bar": None, "second_bar": None,
-                         "vol_ratio": 0.0})
-            continue
+            return {"symbol": sym, "classification": "no_data",
+                    "day_type_tag": "UNKNOWN",
+                    "first_bar": None, "second_bar": None,
+                    "vol_ratio": 0.0}
         first, second = bars[0], bars[1]
         cls, tag = _classify(first, second)
         vol_ratio = (second["v"] / first["v"]) if first["v"] > 0 else 0.0
-        rows.append({
+        return {
             "symbol": sym,
             "first_bar": {"o": first["o"], "h": first["h"], "l": first["l"], "c": first["c"], "v": first["v"]},
             "second_bar": {"o": second["o"], "h": second["h"], "l": second["l"], "c": second["c"], "v": second["v"]},
             "classification": cls,
             "day_type_tag": tag,
             "vol_ratio": round(vol_ratio, 2),
-        })
+        }
+
+    rows = parallel_symbols(symbols, _row)
     return {
         "count": len(rows),
         "rows": rows,

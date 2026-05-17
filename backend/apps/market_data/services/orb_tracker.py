@@ -19,6 +19,8 @@ from typing import Any
 
 from django.core.cache import cache
 
+from trading.utils.time_utils import intraday_session_date
+
 _TTL = 60
 _OR_END = time(9, 30)
 
@@ -42,7 +44,7 @@ def _watchlist_symbols() -> list[str]:
 
 def _fetch_1m(symbol: str) -> list[dict]:
     """Today's 1-min candles. Caller deals with empty lists."""
-    key = f"orb:1m:{symbol}:{date.today().isoformat()}"
+    key = f"orb:1m:{symbol}:{intraday_session_date().isoformat()}"
     cached = cache.get(key)
     if cached is not None:
         return cached
@@ -55,7 +57,7 @@ def _fetch_1m(symbol: str) -> list[dict]:
         if not token:
             cache.set(key, [], _TTL); return []
 
-        today = date.today()
+        today = intraday_session_date()
         start = today.strftime("%Y-%m-%d 09:15")
         end = today.strftime("%Y-%m-%d 15:30")
         try:
@@ -98,7 +100,7 @@ def _atr14_daily(symbol: str) -> float:
         token = ticker_service.get_token(symbol)
         if not token:
             cache.set(key, 0.0, 600); return 0.0
-        today = date.today()
+        today = intraday_session_date()
         start = (today - timedelta(days=25)).strftime("%Y-%m-%d 09:15")
         end = today.strftime("%Y-%m-%d 15:30")
         try:
@@ -172,16 +174,19 @@ def _classify(candles: list[dict]) -> dict:
 
 
 def build_orb(tenant=None) -> dict[str, Any]:
+    from apps.market_data.services._parallel import parallel_symbols
     symbols = _watchlist_symbols()[:30]
-    rows: list[dict] = []
-    for sym in symbols:
+
+    def _row(sym: str) -> dict:
         c = _fetch_1m(sym)
         cl = _classify(c)
         atr = _atr14_daily(sym)
         cl["or_width_atr"] = round(cl["or_width"] / atr, 2) if atr > 0 else 0.0
         cl["atr14"] = atr
         cl["symbol"] = sym
-        rows.append(cl)
+        return cl
+
+    rows = parallel_symbols(symbols, _row)
     return {
         "count": len(rows),
         "rows": rows,

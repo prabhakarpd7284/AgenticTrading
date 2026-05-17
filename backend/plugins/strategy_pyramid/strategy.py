@@ -85,21 +85,43 @@ class PyramidStrategy:
                     strike = int(round(spot / 50) * 50) if spot else 0
 
             symbol_token = await asyncio.to_thread(_resolve_option_token, underlying, int(strike), opt_type, expiry)
+            # If the resolver snapped to a nearby strike, use that as the
+            # authoritative strike going forward.
+            resolved_strike = int(symbol_token.get("strike_used") or strike)
+            snapped_from = symbol_token.get("strike_snapped_from")
             state.update({
-                "underlying": underlying, "strike": int(strike),
+                "underlying": underlying, "strike": resolved_strike,
                 "option_type": opt_type, "expiry": expiry, "spot": spot,
                 "symbol": symbol_token.get("symbol", ""),
                 "token": symbol_token.get("token", ""),
+                "strike_snapped_from": snapped_from,
             })
 
             if not state["token"]:
+                available = await asyncio.to_thread(_available_strikes, underlying, expiry)
+                near = sorted(available, key=lambda s: abs(s - int(strike)))[:5] if available else []
+                hint = (
+                    f"Nearest listed strikes: {near}. Pick one of these."
+                    if near
+                    else "No listed strikes at all for this expiry — try `next weekly` or check the expiry format."
+                )
                 state["candles_raw"] = []
-                state["fetch_error"] = f"No option token found for {underlying} {strike} {opt_type} {expiry}"
+                state["fetch_error"] = (
+                    f"No option token found for {underlying} {strike} {opt_type} {expiry}. {hint}"
+                )
                 ctx.publisher.emit(AgentEvent(
                     seq=_next(state), node="fetch_data", type="error",
-                    payload={"detail": state["fetch_error"], "strike": strike, "spot": spot},
+                    payload={"detail": state["fetch_error"], "strike": strike,
+                              "spot": spot, "nearest_strikes": near},
                 ))
                 return state
+
+            if snapped_from and snapped_from != resolved_strike:
+                ctx.publisher.emit(AgentEvent(
+                    seq=_next(state), node="fetch_data", type="info",
+                    payload={"detail": f"Strike {snapped_from} not listed — snapped to nearest {resolved_strike}.",
+                              "strike_snapped_from": snapped_from, "strike": resolved_strike},
+                ))
 
             lookback_days = int(cfg.get("lookback_days", 3))
             candles = await asyncio.to_thread(_fetch_option_candles, state["token"], lookback_days)
@@ -226,25 +248,60 @@ def _default_weekly_expiry(underlying: str) -> str:
 
 
 def _fetch_spot(underlying: str) -> float:
-    """Spot LTP for an index OR an equity stock."""
+    """Spot LTP for an index or equity stock.
+
+    Falls back to the last daily close when live LTP returns 0 — happens
+    on weekends, holidays, or pre-market when the broker quote endpoint
+    has no fresh tick. Without the fallback, the strike picker thinks
+    spot=0, picks the smallest available strike (deep OTM), and the
+    option has 0 volume → empty plan.
+    """
+    from trading.services.ticker_service import ticker_service
+
+    # 1) Live LTP path
     try:
         if underlying in ("NIFTY", "BANKNIFTY", "SENSEX"):
             from trading.options.data_service import OptionsDataService
             ods = OptionsDataService()
             if underlying == "BANKNIFTY":
-                return float(ods.fetch_banknifty_spot().get("ltp", 0))
-            return float(ods.fetch_nifty_spot().get("ltp", 0))
-        # Equity stock → use the broker's equity LTP endpoint
+                ltp = float(ods.fetch_banknifty_spot().get("ltp", 0))
+            else:
+                ltp = float(ods.fetch_nifty_spot().get("ltp", 0))
+        else:
+            from trading.services.data_service import BrokerClient
+            broker = BrokerClient.get_instance(); broker.ensure_login()
+            token = ticker_service.get_token(underlying)
+            if not token:
+                return 0.0
+            r = broker.ltp(ticker_service.resolve_exchange(underlying), underlying, token)
+            ltp = float(r.get("ltp", 0) if isinstance(r, dict) else 0)
+        if ltp > 0:
+            return ltp
+    except Exception:  # noqa: BLE001
+        pass
+
+    # 2) Fallback — last daily close from the broker's historical endpoint.
+    # Always returns the most recent trading day even when today is a
+    # weekend/holiday, so strike selection stays sane.
+    try:
         from trading.services.data_service import BrokerClient
-        from trading.services.ticker_service import ticker_service
+        from trading.utils.time_utils import intraday_session_date
         broker = BrokerClient.get_instance(); broker.ensure_login()
         token = ticker_service.get_token(underlying)
         if not token:
             return 0.0
-        r = broker.ltp("NSE", underlying, token)
-        return float(r.get("ltp", 0) if isinstance(r, dict) else 0)
+        end = intraday_session_date().strftime("%Y-%m-%d 15:30")
+        start = (intraday_session_date() - timedelta(days=10)).strftime("%Y-%m-%d 09:15")
+        exch = ticker_service.resolve_exchange(underlying)
+        try:
+            raw = broker.fetch_candles(token, start, end, "ONE_DAY", exchange=exch) or []
+        except TypeError:
+            raw = broker.fetch_candles(token, start, end, "ONE_DAY") or []
+        if raw:
+            return float(raw[-1][4])  # last day's close
     except Exception:  # noqa: BLE001
-        return 0.0
+        pass
+    return 0.0
 
 
 def _available_strikes(underlying: str, expiry: str) -> list[int]:
@@ -253,6 +310,9 @@ def _available_strikes(underlying: str, expiry: str) -> list[int]:
     from trading.services.ticker_service import ticker_service
 
     ticker_service._ensure_loaded()
+    # Normalise the caller-supplied underlying (NIFTY50 → NIFTY, …) so
+    # the lookup hits Angel One's canonical scrip-master name.
+    underlying = ticker_service.normalize_underlying(underlying)
     try:
         target = datetime.strptime(expiry, "%d%b%y").date()
     except Exception:  # noqa: BLE001
@@ -280,12 +340,36 @@ def _available_strikes(underlying: str, expiry: str) -> list[int]:
 
 
 def _resolve_option_token(underlying: str, strike: int, option_type: str, expiry: str) -> dict:
+    """Look up an option contract; auto-snap to the nearest valid strike
+    when the requested one doesn't exist in the scrip master.
+
+    The snap is the safety net for callers (UI / planner) that pass a
+    spot-rounded number that isn't a real listed strike. Without this
+    we returned an empty result and the operator saw "No option token
+    found for NIFTY 23668 CE …" — true but unhelpful when 23650 and
+    23700 are both available a few rupees away.
+    """
+    from trading.services.ticker_service import ticker_service
     try:
-        from trading.services.ticker_service import ticker_service
+        underlying = ticker_service.normalize_underlying(underlying)
         opts = ticker_service.get_nfo_options(underlying, strike, expiry)
         if option_type in opts:
             sym, tok = opts[option_type]
-            return {"symbol": sym, "token": tok}
+            return {"symbol": sym, "token": tok, "strike_used": strike}
+
+        # Auto-snap — find the closest LISTED strike and retry.
+        listed = _available_strikes(underlying, expiry)
+        if listed:
+            nearest = min(listed, key=lambda s: abs(s - strike))
+            if nearest != strike:
+                opts = ticker_service.get_nfo_options(underlying, nearest, expiry)
+                if option_type in opts:
+                    sym, tok = opts[option_type]
+                    return {
+                        "symbol": sym, "token": tok,
+                        "strike_used": nearest,
+                        "strike_snapped_from": strike,
+                    }
     except Exception:  # noqa: BLE001
         pass
     return {"symbol": "", "token": ""}

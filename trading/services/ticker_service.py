@@ -225,6 +225,77 @@ class TickerService:
         "BSE BANKEX":       "BANKEX",
     }
 
+    # Common stock names users / LLMs type → Angel One scrip-master ticker.
+    # Same shape as UNDERLYING_ALIASES: case-insensitive after collapse.
+    # Without this map the planner gets "INFOSYS" → no token → empty market
+    # data → @DirectionalTrader correctly refuses to plan, which feels like
+    # a bug. Add entries here whenever you see "No token for X" in audit logs.
+    STOCK_ALIASES: dict[str, str] = {
+        "INFOSYS":            "INFY",
+        "INFOSYS LTD":        "INFY",
+        "HDFC BANK":          "HDFCBANK",
+        "ICICI BANK":         "ICICIBANK",
+        "KOTAK BANK":         "KOTAKBANK",
+        "AXIS BANK":          "AXISBANK",
+        "INDUSIND BANK":      "INDUSINDBK",
+        "STATE BANK":         "SBIN",
+        "SBI":                "SBIN",
+        "TATA STEEL":         "TATASTEEL",
+        "TATA MOTORS":        "TATAMOTORS",
+        "TATA CONSUMER":      "TATACONSUM",
+        "TATA CONSULTANCY":   "TCS",
+        "RELIANCE INDUSTRIES":"RELIANCE",
+        "BAJAJ FINANCE":      "BAJFINANCE",
+        "BAJAJ FINSERV":      "BAJAJFINSV",
+        "BAJAJ AUTO":         "BAJAJ-AUTO",
+        "MAHINDRA":           "M&M",
+        "MAHINDRA & MAHINDRA":"M&M",
+        "NESTLE INDIA":       "NESTLEIND",
+        "NESTLE":             "NESTLEIND",
+        "HINDUSTAN UNILEVER": "HINDUNILVR",
+        "HUL":                "HINDUNILVR",
+        "BHARTI AIRTEL":      "BHARTIARTL",
+        "AIRTEL":             "BHARTIARTL",
+        "LARSEN":             "LT",
+        "LARSEN & TOUBRO":    "LT",
+        "ASIAN PAINTS":       "ASIANPAINT",
+        "POWER GRID":         "POWERGRID",
+        "COAL INDIA":         "COALINDIA",
+        "BHARAT PETROLEUM":   "BPCL",
+        "INDIAN OIL":         "IOC",
+        "SUN PHARMA":         "SUNPHARMA",
+        "DR REDDY":           "DRREDDY",
+        "DR REDDY'S":         "DRREDDY",
+        "DIVI'S LAB":         "DIVISLAB",
+        "DIVIS":              "DIVISLAB",
+        "APOLLO HOSPITAL":    "APOLLOHOSP",
+        "APOLLO HOSPITALS":   "APOLLOHOSP",
+        "HDFC LIFE":          "HDFCLIFE",
+        "SBI LIFE":           "SBILIFE",
+        "ULTRATECH CEMENT":   "ULTRACEMCO",
+        "TECH MAHINDRA":      "TECHM",
+        "ADANI ENTERPRISES":  "ADANIENT",
+        "ADANI PORTS":        "ADANIPORTS",
+        "HERO MOTOCORP":      "HEROMOTOCO",
+        "EICHER MOTORS":      "EICHERMOT",
+        "JSW STEEL":          "JSWSTEEL",
+        "HINDALCO INDUSTRIES":"HINDALCO",
+        "LTI MINDTREE":       "LTIM",
+    }
+
+    @classmethod
+    def normalize_stock(cls, name: str) -> str:
+        """User-facing name → Angel One equity ticker (or passthrough).
+
+        "INFOSYS" → "INFY", "Tata Motors" → "TATAMOTORS", "HDFCBANK" → "HDFCBANK".
+        Strips, uppercases, collapses whitespace; falls back to the cleaned
+        input so existing tickers pass through unchanged.
+        """
+        if not name:
+            return ""
+        s = " ".join(str(name).upper().split())
+        return cls.STOCK_ALIASES.get(s, s)
+
     @classmethod
     def normalize_underlying(cls, name: str) -> str:
         """User input → canonical underlying name used by Angel One.
@@ -260,8 +331,12 @@ class TickerService:
         # Index options / futures — NFO
         if s.startswith(("NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY")) and any(c.isdigit() for c in s):
             return "NFO"
-        # Stock futures / options — name + numeric strike → NFO
-        if s.endswith(("FUT", "CE", "PE")):
+        # Stock futures / options — must have BOTH a strike (digits) AND the
+        # CE/PE/FUT suffix. Without the digit guard, an equity like
+        # "RELIANCE" (ends in "CE") gets misrouted to NFO and the broker
+        # returns 0 candles. Real option symbols look like
+        # "RELIANCE26MAY261240CE" — name + expiry + strike + suffix.
+        if s.endswith(("FUT", "CE", "PE")) and any(c.isdigit() for c in s):
             return "NFO"
         return "NSE"
 
@@ -287,9 +362,15 @@ class TickerService:
 
         # 1) Index spot fallback — index names don't live in the -EQ
         # name-index, but every caller (planner / cockpit / screener)
-        # expects get_token("NIFTY") to "just work".
-        if t in self.INDEX_SPOT_TOKENS:
-            return self.INDEX_SPOT_TOKENS[t][0]
+        # expects get_token("NIFTY") to "just work". Apply index alias
+        # normalisation here too so "NIFTY 50" / "NSEI" resolve.
+        idx_norm = self.normalize_underlying(t)
+        if idx_norm in self.INDEX_SPOT_TOKENS:
+            return self.INDEX_SPOT_TOKENS[idx_norm][0]
+
+        # 2) Equity alias — "INFOSYS" → "INFY", "TATA MOTORS" → "TATAMOTORS".
+        # Always apply before scrip-master lookup so user-facing names work.
+        t = self.normalize_stock(t)
 
         if exchange == "NSE":
             info = self._nse_by_name.get(t)

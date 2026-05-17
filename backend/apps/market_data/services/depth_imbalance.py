@@ -21,12 +21,14 @@ from typing import Any
 
 from django.core.cache import cache
 
+from trading.utils.time_utils import intraday_session_date
+
 
 _TTL = 60
 
 
 def _today_volume(symbol: str) -> int:
-    key = f"depth:vol:{symbol}:{date.today().isoformat()}"
+    key = f"depth:vol:{symbol}:{intraday_session_date().isoformat()}"
     cached = cache.get(key)
     if cached is not None:
         return cached
@@ -37,7 +39,7 @@ def _today_volume(symbol: str) -> int:
         token = ticker_service.get_token(symbol)
         if not token:
             cache.set(key, 0, _TTL); return 0
-        today = date.today()
+        today = intraday_session_date()
         start = today.strftime("%Y-%m-%d 09:15")
         end = today.strftime("%Y-%m-%d 15:30")
         try:
@@ -62,7 +64,7 @@ def _baseline_volume(symbol: str, days: int = 20) -> float:
         token = ticker_service.get_token(symbol)
         if not token:
             cache.set(key, 0.0, 3600); return 0.0
-        today = date.today()
+        today = intraday_session_date()
         start = (today - timedelta(days=days + 2)).strftime("%Y-%m-%d 09:15")
         end = today.strftime("%Y-%m-%d 15:30")
         try:
@@ -92,23 +94,25 @@ def _watchlist() -> list[str]:
 
 
 def build_depth_imbalance(tenant=None) -> dict[str, Any]:
+    from apps.market_data.services._parallel import parallel_symbols
     symbols = _watchlist()[:25]
-    rows: list[dict] = []
-    for sym in symbols:
+
+    def _row(sym: str) -> dict:
         today_v = _today_volume(sym)
         base_v = _baseline_volume(sym)
         ratio = (today_v / base_v) if base_v > 0 else 0.0
         iceberg = ratio >= 5.0
-        # Without true L2 we represent depth_imbalance as 0 ± a heuristic.
-        imbalance = 0.0
-        rows.append({
+        imbalance = 0.0  # without true L2 we leave depth_imbalance as proxy=0
+        return {
             "symbol": sym,
             "today_volume": today_v,
             "baseline_volume": base_v,
             "volume_ratio": round(ratio, 2),
             "depth_imbalance": imbalance,
             "iceberg_flag": iceberg,
-        })
+        }
+
+    rows = parallel_symbols(symbols, _row)
     rows.sort(key=lambda r: -r["volume_ratio"])
     return {
         "count": len(rows),

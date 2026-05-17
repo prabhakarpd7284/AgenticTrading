@@ -17,12 +17,22 @@ from typing import Any
 
 from django.core.cache import cache
 
+from trading.utils.time_utils import intraday_session_date
+
 _TTL = 30
 
 
 def _fetch_1m_today(symbol: str) -> list[dict]:
-    """Today's 1-min OHLCV bars. Cached 30s so a 10-symbol scan stays cheap."""
-    key = f"vwap:1m:{symbol}:{date.today().isoformat()}"
+    """1-min OHLCV bars for the active intraday session.
+
+    "Active" = today on a weekday after 9:16 IST, otherwise the last
+    completed trading day — so weekends and pre-market still render
+    yesterday's tape instead of blanking the panel.
+
+    Cached 30s so a 10-symbol scan stays cheap.
+    """
+    session = intraday_session_date()
+    key = f"vwap:1m:{symbol}:{session.isoformat()}"
     cached = cache.get(key)
     if cached is not None:
         return cached
@@ -35,9 +45,8 @@ def _fetch_1m_today(symbol: str) -> list[dict]:
         if not token:
             cache.set(key, [], _TTL); return []
 
-        today = date.today()
-        start = today.strftime("%Y-%m-%d 09:15")
-        end = today.strftime("%Y-%m-%d 15:30")
+        start = session.strftime("%Y-%m-%d 09:15")
+        end = session.strftime("%Y-%m-%d 15:30")
         try:
             raw = broker.fetch_candles(token, start, end, "ONE_MINUTE", exchange=ticker_service.resolve_exchange(symbol)) or []
         except TypeError:
@@ -98,7 +107,10 @@ def build_vwap_bands(symbol: str) -> dict[str, Any]:
             "sigma1_up": 0.0, "sigma1_dn": 0.0,
             "sigma2_up": 0.0, "sigma2_dn": 0.0,
             "dist_sigma": 0.0, "state": "no_data",
-            "note": "No 1-min bars yet (market closed or symbol unknown).",
+            "note": (
+                f"No 1-min bars for {sym} on {intraday_session_date().isoformat()} "
+                "— symbol may be unknown or the session had no trades."
+            ),
         }
 
     last = series[-1]

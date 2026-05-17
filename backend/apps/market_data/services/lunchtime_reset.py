@@ -24,6 +24,8 @@ from typing import Any
 
 from django.core.cache import cache
 
+from trading.utils.time_utils import intraday_session_date
+
 try:
     from zoneinfo import ZoneInfo
     _IST = ZoneInfo("Asia/Kolkata")
@@ -37,7 +39,7 @@ _LUNCH_END = time(13, 15)
 
 
 def _fetch_today_5m(symbol: str) -> list[dict]:
-    key = f"lunch:5m:{symbol}:{date.today().isoformat()}"
+    key = f"lunch:5m:{symbol}:{intraday_session_date().isoformat()}"
     cached = cache.get(key)
     if cached is not None:
         return cached
@@ -48,7 +50,7 @@ def _fetch_today_5m(symbol: str) -> list[dict]:
         token = ticker_service.get_token(symbol)
         if not token:
             cache.set(key, [], _TTL); return []
-        today = date.today()
+        today = intraday_session_date()
         start = today.strftime("%Y-%m-%d 09:15")
         end = today.strftime("%Y-%m-%d 15:30")
         try:

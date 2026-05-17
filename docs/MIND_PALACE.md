@@ -723,3 +723,117 @@ _You take the elevator down, walk past the vault. The daily loss is within 3%. T
 ---
 
 _"The purpose of this building is not to be right. It is to survive being wrong — and to compound the days when you are right."_
+
+---
+
+## Cycle 10 — Plumbing Audit & Time Travel (2026-05-17 → 2026-05-18)
+
+A long Sunday session that pulled the floorboards up. The building was running fine on the surface, but several pipes underneath were misconnected or never opened.
+
+### What was actually broken (and is now fixed)
+
+| Bug | Symptom the user saw | Root cause | File |
+|---|---|---|---|
+| `INFOSYS` had no token | @DirectionalTrader refused to plan: "no OHLCV, no pivot, no structure" | scrip-master only knows `INFY`; no alias map for friendly names | `trading/services/ticker_service.py` — added `STOCK_ALIASES` |
+| `resolve_exchange("RELIANCE")` returned `NFO` | RELIANCE & BAJFINANCE silently showed "no data" in every cockpit panel | suffix check `endswith(("CE","PE","FUT"))` matched the last two chars of "RELIAN**CE**" | same file — added `any(c.isdigit() for c in s)` guard |
+| Pyramid on a Sunday picked strike 21100 (deep OTM) | `pyramid.nifty` tester case: "0 candles — auto-widen not engaging" | spot=0 on weekend → strike-picker did `min(strikes, key=abs(s-0))` → smallest strike | `backend/plugins/strategy_pyramid/strategy.py` — `_fetch_spot` now falls back to last daily close |
+| Celery `process-outbox` / `refresh-snapshots` / `expire-runs` dispatched but never executed | Background work appeared dead — no portfolio snapshots, no order drains | `CELERY_TASK_DEFAULT_QUEUE` was unset → tasks landed in the `"celery"` queue but workers consume `"default,agents,orders"` | `backend/config/settings/base.py` |
+| Celery beat was not running at all | None of the above was scheduled in the first place | not in run instructions | now lives in this doc and run instructions — `celery -A config beat` |
+| All cockpit panels blank on weekends | "No 1-min bars yet (market closed)" everywhere | every service hardcoded `date.today()` | added `intraday_session_date()` helper + swept 11 services |
+| MonthlyReportView 500 IntegrityError | dashboard crashed on JWTs without tenant claim | auto-create did `Portfolio.objects.create(tenant=None)` | now a clean 400 |
+| Backtester FE timed out at 180s | Server took 203s; axios bailed before data arrived | docstring said "intraday ~120s" but cold path is 200s+ on NIFTY 100 | `frontend/src/lib/market-pulse.ts` → 300s |
+
+### New blueprints
+
+**`trading/utils/time_utils.py`**
+- `intraday_session_date()` — returns *today* if markets are open or post-market on a weekday, else the **last completed trading day**. Use this anywhere you used to write `date.today()` for an intraday window.
+- `use_session_date(d)` context manager — pushes an as-of override onto a `ContextVar`. Any service inside the block transparently sees the override; cache keys include it.
+- The override is the mechanism for **cockpit time-travel** — pick any historical session, every panel re-renders for that date.
+
+**Pre-warming the slow cards**
+- New `apps/market_data/tasks/warmers.py` — Celery tasks `warm_pulse` (25s cadence) and `warm_rotation` (55s cadence) keep the Pulse and Rotation caches continuously fresh.
+- Before: cold pulse = 9s, cold rotation = 16s.
+- After: cache hits ~25ms (≈400× speedup).
+
+### The new operating ritual
+
+Both must run alongside the v2 backend:
+
+```bash
+celery -A config worker -Q default,agents,orders -l info
+celery -A config beat -l info             # ← previously missing
+```
+
+Without **beat**, the scheduled tasks are silent. Without **the queue fix**, the worker is silent on them too. Both had to be true for anything to actually execute.
+
+### How to time-travel the cockpit (Option A — backend ready, frontend pending)
+
+Any market-data endpoint now accepts `?date=YYYY-MM-DD`:
+
+```
+GET /api/v1/market-data/vwap-bands/?symbol=ADANIPORTS&date=2026-05-14
+GET /api/v1/market-data/tape-speed/?symbol=NIFTY&date=2026-04-22
+GET /api/v1/market-data/first-5min/?date=2026-05-13
+```
+
+The `IntradayAsOfMiddleware` parses the date and scopes it; services do not need to be edited individually. Invalid dates silently fall through to live behaviour.
+
+The frontend now has it too — a `<input type="date">` at the top of `CockpitsPage` writes to a zustand store; a URL-scoped axios interceptor appends `?date=` to every `/market-data/` and `/strategies/` call. On date change the page invalidates the React Query cache so panels refetch. Leaving the page clears the override so other pages aren't contaminated by a leaked historical date.
+
+The plumbing pieces:
+
+```
+frontend/src/lib/cockpit-date.ts          ← zustand store + isCockpitUrl() guard
+frontend/src/lib/api.ts                   ← attachCockpitDate() interceptor
+frontend/src/features/cockpits/CockpitsPage.tsx ← date picker + invalidate-on-change
+backend/apps/common/middleware.py         ← IntradayAsOfMiddleware reads ?date=
+trading/utils/time_utils.py               ← use_session_date(d) ContextVar
+```
+
+### Cockpit panels went parallel — but the broker has a 400ms rate-limit floor
+
+The 8 universe-scoped panels (ORB, first-5min, orb-failure, second-5min, gap-fill, stop-hunt, depth-imbalance, intraday-sector-heatmap) used to iterate 30 watchlist symbols serially. Wrapped each in `apps/market_data/services/_parallel.py::parallel_symbols` (ThreadPoolExecutor at 8 workers, snapshot-and-reapply of the as-of ContextVar so time-travel still works in worker threads).
+
+Measured wins (cold cache):
+
+| Panel | Before | After | Win | Note |
+|---|---|---|---|---|
+| orb-failure | 18.2s | 9.6s | **-47%** | 1 broker call per symbol |
+| stop-hunt | 34.3s | 20.2s | **-41%** | 2 broker calls per symbol |
+| depth-imbalance | 41.6s | 20.3s | **-52%** | 2 calls per symbol |
+| intraday-sector-heatmap | 9.8s | 6.8s | -32% | ~20 syms × 1 call |
+| orb | 31.9s | 28.5s | -11% | 2 calls + ATR |
+| gap-fill | 12.7s | 12.1s | -5% | rate-floor dominates |
+| second-5min | 12.1s | 12.0s | 0% | rate-floor dominates |
+| **first-5min** | 36.3s | 36.3s | **0%** | 3 calls × 30 syms × 0.4s = **36s floor** |
+
+The ceiling is the **400 ms throttle in `trading/services/data_service.py:121` (`self._min_interval = 0.4`)**. Every broker call grabs `_rate_lock` then sleeps until the floor has elapsed. With 8 threads but serial broker access, the floor is `(broker_calls_per_symbol × num_symbols × 0.4s)` — first-5min has 3 calls × 30 syms = 90 × 0.4 = 36s. Parallelisation can't win below the floor.
+
+### What's next — persistent candle store (backlog #136)
+
+The real perf fix isn't more threads; it's not fetching the same bars twice. **Yesterday's 1-min bars don't change.** Persist them to Redis (or DB) with multi-day TTL, pre-warm via a Celery task at 15:35 IST after market close, and cold-cache cost goes near-zero for any historical date — regardless of the broker's rate limit.
+
+This is the natural pair with cockpit time-travel: as soon as you start jumping back in history, you'll hit cold cache repeatedly. A persistent store amortises the broker pain into one nightly warm-up.
+
+### Newly etched on the wall
+
+| Old symbol | New addition |
+|---|---|
+| The **scrip master** (a card catalog in the library) | …with a **friendly-names index** in front for "INFOSYS" → "INFY", "HDFC BANK" → "HDFCBANK", "Tata Motors" → "TATAMOTORS" |
+| The **resolve_exchange** signpost | …with a **digit guard** so RELIAN**CE** isn't sent to the options floor |
+| The **fetch_spot** instrument | …with a **fallback to last daily close** for weekends/holidays |
+| The **Celery scheduler** (used to be silent) | …now **audibly ticking** — beat + worker + a default-queue label so messages don't fall behind the desk |
+| The **session-date stamp** on every intraday card | …no longer reads "TODAY" blindly — reads **the most recent trading day**, and any caller can rewind it with `use_session_date(d)` |
+| The **cockpit header** | …has a **time dial** next to the search box — pick a date, the whole floor rewinds; "Live" puts you back on the wall clock |
+| The **broker desk** (old metaphor: a single phone with one operator) | …still has only one phone, but now **8 traders queue calls in parallel** — the floor is the 400 ms operator pause, not the queue length |
+| The **library archive** (the dream) | …an indexed shelf of every closed session's 1-min bars, never re-fetched, opened in <50 ms — pencilled on the build sheet as `Backlog #136` |
+
+### Cycle 10 final tally
+
+- 4 latent bugs fixed (INFOSYS aliasing, RELIANCE/BAJFINANCE wrong-exchange, pyramid spot-0 fallback, monthly NULL-tenant)
+- 1 missing piece of infra wired (Celery beat + default queue) — unblocked outbox processing, snapshot refresh, run housekeeping
+- 1 weekend-paralysis fix (intraday_session_date fallback across 11 services)
+- 1 product feature shipped end-to-end (cockpit time-travel, BE + FE)
+- 8 cockpit panels parallelised (47-52% wins on the ones that aren't rate-limit-bound)
+- 1 architectural ceiling surfaced and documented (the 400 ms broker throttle + persistent-store backlog)
+- AI tester: 14/15 → **15/15 green**

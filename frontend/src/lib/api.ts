@@ -1,5 +1,6 @@
 import axios, { AxiosError, AxiosInstance, AxiosRequestConfig, AxiosResponse } from "axios";
 import { useAuthStore } from "@/stores/auth";
+import { useCockpitDateStore, isCockpitUrl } from "@/lib/cockpit-date";
 
 // ---------------------------------------------------------------------------
 // Two base URLs in local dev:
@@ -33,8 +34,22 @@ function attachAuth(client: AxiosInstance) {
   });
 }
 
+/** Thread the Cockpits page's selected date onto every cockpit-style call
+ * via the `?date=YYYY-MM-DD` query param. URL-scoped so non-cockpit pages
+ * are untouched even if the store is set. */
+function attachCockpitDate(client: AxiosInstance) {
+  client.interceptors.request.use((cfg) => {
+    const d = useCockpitDateStore.getState().selectedDate;
+    if (!d || !isCockpitUrl(cfg.url)) return cfg;
+    cfg.params = { ...(cfg.params ?? {}), date: d };
+    return cfg;
+  });
+}
+
 attachAuth(api);
 attachAuth(legacyApi);
+attachCockpitDate(api);
+attachCockpitDate(legacyApi);
 
 let refreshing: Promise<string | null> | null = null;
 

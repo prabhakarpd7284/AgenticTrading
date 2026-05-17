@@ -19,6 +19,8 @@ from typing import Any
 
 from django.core.cache import cache
 
+from trading.utils.time_utils import intraday_session_date
+
 _TTL = 300
 
 
@@ -42,7 +44,7 @@ def _daily(symbol: str, days: int = 100) -> list[dict]:
         token = ticker_service.get_token(symbol)
         if not token:
             cache.set(key, [], _TTL); return []
-        today = date.today()
+        today = intraday_session_date()
         start = (today - timedelta(days=days + 14)).strftime("%Y-%m-%d 09:15")
         end = today.strftime("%Y-%m-%d 15:30")
         try:
@@ -77,16 +79,14 @@ def _historical_fill_rate(daily: list[dict], gap_threshold: float = 0.3) -> floa
 
 
 def build_gap_fill(tenant=None) -> dict[str, Any]:
+    from apps.market_data.services._parallel import parallel_symbols
     symbols = _watchlist()[:30]
-    rows: list[dict] = []
-    for sym in symbols:
+
+    def _row(sym: str) -> dict:
         daily = _daily(sym)
         if len(daily) < 2:
-            rows.append({"symbol": sym, "status": "no_data", "gap_pct": 0.0,
-                         "filled_today": False, "historical_fill_p": 0.0})
-            continue
-
-        # Today's bar is the LAST element if market open, else also last
+            return {"symbol": sym, "status": "no_data", "gap_pct": 0.0,
+                    "filled_today": False, "historical_fill_p": 0.0}
         today_bar = daily[-1]
         prev_close = daily[-2]["c"] if len(daily) >= 2 else 0.0
         gap_pct = ((today_bar["o"] - prev_close) / prev_close * 100.0) if prev_close > 0 else 0.0
@@ -100,7 +100,7 @@ def build_gap_fill(tenant=None) -> dict[str, Any]:
                 filled = today_bar["h"] >= prev_close
             status = "filled" if filled else "open"
 
-        rows.append({
+        return {
             "symbol": sym,
             "prev_close": round(prev_close, 2),
             "open": round(today_bar["o"], 2),
@@ -110,8 +110,10 @@ def build_gap_fill(tenant=None) -> dict[str, Any]:
             "gap_pct": round(gap_pct, 2),
             "status": status,
             "filled_today": filled,
-            "historical_fill_p": _historical_fill_rate(daily[:-1]),  # exclude today
-        })
+            "historical_fill_p": _historical_fill_rate(daily[:-1]),
+        }
+
+    rows = parallel_symbols(symbols, _row)
 
     # Surface most actionable first — open gaps with high historical fill prob
     rows.sort(key=lambda r: (

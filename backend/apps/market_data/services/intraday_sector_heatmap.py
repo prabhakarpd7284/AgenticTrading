@@ -22,6 +22,8 @@ from typing import Any
 
 from django.core.cache import cache
 
+from trading.utils.time_utils import intraday_session_date
+
 from apps.market_data.services.orb_tracker import _parse_minute
 
 
@@ -36,7 +38,7 @@ def _bucket_label(t: time) -> str:
 
 
 def _fetch_5m(symbol: str) -> list[dict]:
-    key = f"sector_heatmap:5m:{symbol}:{date.today().isoformat()}"
+    key = f"sector_heatmap:5m:{symbol}:{intraday_session_date().isoformat()}"
     cached = cache.get(key)
     if cached is not None:
         return cached
@@ -47,7 +49,7 @@ def _fetch_5m(symbol: str) -> list[dict]:
         token = ticker_service.get_token(symbol)
         if not token:
             cache.set(key, [], _TTL); return []
-        today = date.today()
+        today = intraday_session_date()
         start = today.strftime("%Y-%m-%d 09:15")
         end = today.strftime("%Y-%m-%d 15:30")
         try:
@@ -84,9 +86,9 @@ def build_intraday_sector_heatmap(tenant=None) -> dict[str, Any]:
     }
     all_syms = sorted({s for v in sector_syms.values() for s in v})
 
-    pct_by_sym: dict[str, dict[str, float]] = {}
-    for sym in all_syms:
-        pct_by_sym[sym] = _pct_per_slot(_fetch_5m(sym))
+    from apps.market_data.services._parallel import parallel_symbols
+    pct_results = parallel_symbols(all_syms, lambda s: _pct_per_slot(_fetch_5m(s)))
+    pct_by_sym: dict[str, dict[str, float]] = dict(zip(all_syms, pct_results))
 
     # Collect every slot label any symbol produced (already chronological by
     # virtue of HH:MM string sort).

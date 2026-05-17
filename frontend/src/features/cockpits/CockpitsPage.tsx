@@ -69,6 +69,7 @@ function Help({ label, text }: { label: string; text: string }) {
   );
 }
 import { useQueryClient } from "@tanstack/react-query";
+import { useCockpitDateStore } from "@/lib/cockpit-date";
 import {
   checkSlippageEdge, flattenAll, pauseSymbol, resetTradingData,
   runSimulation, saveBacktestRun, setCapital,
@@ -160,6 +161,25 @@ export function CockpitsPage() {
   const [category, setCategory] = React.useState<CategoryId>("capital");
   const [search, setSearch] = React.useState("");
   const [activeTab, setActiveTab] = React.useState<string>("capital");
+  const qc = useQueryClient();
+  const selectedDate = useCockpitDateStore((s) => s.selectedDate);
+  const setSelectedDate = useCockpitDateStore((s) => s.setSelectedDate);
+
+  /** Wipe the cockpit page's query cache so panels refetch with the new
+   * as-of param. We invalidate everything because cockpit hook keys don't
+   * share a prefix; non-cockpit pages aren't visible right now so refetch
+   * cost is fine. */
+  const applyDate = React.useCallback((next: string | null) => {
+    setSelectedDate(next);
+    qc.invalidateQueries();
+  }, [qc, setSelectedDate]);
+
+  // Clear the as-of override when the operator navigates away — prevents
+  // a leaked historical date from contaminating their next session.
+  React.useEffect(() => {
+    return () => { setSelectedDate(null); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Search hits every tab regardless of category.
   const searchHits = React.useMemo(() => {
@@ -200,6 +220,33 @@ export function CockpitsPage() {
           </h1>
         </div>
         <div className="flex items-center gap-2">
+          {/* Cockpit time-travel — pick any past session, every panel
+              re-renders for that date via the ?date= query param the
+              backend's IntradayAsOfMiddleware reads. Empty = live. */}
+          <div className="flex items-center gap-1">
+            <Calendar className="h-3.5 w-3.5 text-fg-subtle" aria-hidden />
+            <input
+              type="date"
+              value={selectedDate ?? ""}
+              max={new Date().toISOString().slice(0, 10)}
+              onChange={(e) => applyDate(e.target.value || null)}
+              className="h-9 px-2 bg-surface border border-border rounded-sm text-body-sm font-mono text-fg"
+              title="Cockpit as-of date (blank = live session)"
+              aria-label="Cockpit as-of date"
+            />
+            {selectedDate ? (
+              <button
+                onClick={() => applyDate(null)}
+                className="h-9 px-2 text-caption text-fg-subtle hover:text-fg"
+                aria-label="Back to live session"
+                title="Back to live"
+              >
+                Live
+              </button>
+            ) : (
+              <span className="text-caption text-fg-subtle px-1" aria-hidden>Live</span>
+            )}
+          </div>
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}

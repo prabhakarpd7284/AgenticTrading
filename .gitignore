@@ -28,6 +28,8 @@ db.sqlite3
 logs/
 NSE_CM_sym_master.json
 *.jsonl
+celerybeat-schedule*
+backend/celerybeat-schedule*
 
 # ── Frontend ──
 frontend/node_modules/

@@ -22,6 +22,8 @@ from typing import Any
 
 from django.core.cache import cache
 
+from trading.utils.time_utils import intraday_session_date
+
 
 _TTL = 30
 _VOL_WINDOW = 20
@@ -29,7 +31,7 @@ _ANN_BARS = 252 * 375    # trading-days × intraday-minutes
 
 
 def _fetch_1m(symbol: str) -> list[dict]:
-    key = f"vol_strip:1m:{symbol}:{date.today().isoformat()}"
+    key = f"vol_strip:1m:{symbol}:{intraday_session_date().isoformat()}"
     cached = cache.get(key)
     if cached is not None:
         return cached
@@ -40,7 +42,7 @@ def _fetch_1m(symbol: str) -> list[dict]:
         token = ticker_service.get_token(symbol)
         if not token:
             cache.set(key, [], _TTL); return []
-        today = date.today()
+        today = intraday_session_date()
         start = today.strftime("%Y-%m-%d 09:15")
         end = today.strftime("%Y-%m-%d 15:30")
         try:

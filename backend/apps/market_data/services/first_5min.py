@@ -21,6 +21,8 @@ from typing import Any
 
 from django.core.cache import cache
 
+from trading.utils.time_utils import intraday_session_date
+
 _TTL = 60
 _FIRST_BAR_END = time(9, 20)
 
@@ -51,7 +53,7 @@ def _parse_minute(ts: str) -> time | None:
 
 def _fetch_first_5min(symbol: str) -> list[dict]:
     """09:15-09:20 IST 5-min bar(s) for today. Cached 60s."""
-    key = f"first5:{symbol}:{date.today().isoformat()}"
+    key = f"first5:{symbol}:{intraday_session_date().isoformat()}"
     cached = cache.get(key)
     if cached is not None:
         return cached
@@ -62,7 +64,7 @@ def _fetch_first_5min(symbol: str) -> list[dict]:
         token = ticker_service.get_token(symbol)
         if not token:
             cache.set(key, [], _TTL); return []
-        today = date.today()
+        today = intraday_session_date()
         start = today.strftime("%Y-%m-%d 09:15")
         end = today.strftime("%Y-%m-%d 09:20")
         try:
@@ -90,7 +92,7 @@ def _prev_close_and_atr(symbol: str) -> tuple[float, float, float]:
         token = ticker_service.get_token(symbol)
         if not token:
             return 0.0, 0.0, 0.0
-        today = date.today()
+        today = intraday_session_date()
         start = (today - timedelta(days=25)).strftime("%Y-%m-%d 09:15")
         end = today.strftime("%Y-%m-%d 15:30")
         try:
@@ -137,7 +139,7 @@ def _classify(bar: dict, prev_close: float, atr: float, prev_h: float) -> tuple[
 def _fetch_1030_bar(symbol: str) -> dict | None:
     """Return the 10:25-10:30 5-min bar, used by the market-profile refinement.
     Cached 60s, single API call per symbol."""
-    key = f"first5:1030:{symbol}:{date.today().isoformat()}"
+    key = f"first5:1030:{symbol}:{intraday_session_date().isoformat()}"
     cached = cache.get(key)
     if cached is not None:
         return cached
@@ -148,7 +150,7 @@ def _fetch_1030_bar(symbol: str) -> dict | None:
         token = ticker_service.get_token(symbol)
         if not token:
             cache.set(key, None, _TTL); return None
-        today = date.today()
+        today = intraday_session_date()
         start = today.strftime("%Y-%m-%d 10:25")
         end = today.strftime("%Y-%m-%d 10:30")
         try:
@@ -200,23 +202,23 @@ def _market_profile_refinement(first_bar: dict, bar_1030: dict | None) -> dict:
 
 
 def build_first_5min(tenant=None) -> dict[str, Any]:
+    from apps.market_data.services._parallel import parallel_symbols
     symbols = _watchlist()[:30]
-    rows: list[dict] = []
-    for sym in symbols:
+
+    def _row(sym: str) -> dict:
         bars = _fetch_first_5min(sym)
         if not bars:
-            rows.append({
+            return {
                 "symbol": sym, "classification": "no_data", "day_type_tag": "UNKNOWN",
                 "gap_pct": 0.0, "body_pct": 0.0, "vol": 0,
                 "refinement_1030": {"refined_at": "10:30", "label": "PENDING", "displacement_x": 0.0},
-            })
-            continue
+            }
         bar = bars[0]
         prev_close, atr, prev_h = _prev_close_and_atr(sym)
         classification, tag = _classify(bar, prev_close, atr, prev_h)
         rng = max(bar["h"] - bar["l"], 1e-9)
         bar_1030 = _fetch_1030_bar(sym)
-        rows.append({
+        return {
             "symbol": sym,
             "open": bar["o"], "high": bar["h"], "low": bar["l"], "close": bar["c"],
             "vol": bar["v"],
@@ -226,7 +228,9 @@ def build_first_5min(tenant=None) -> dict[str, Any]:
             "classification": classification,
             "day_type_tag": tag,
             "refinement_1030": _market_profile_refinement(bar, bar_1030),
-        })
+        }
+
+    rows = parallel_symbols(symbols, _row)
     return {
         "count": len(rows),
         "rows": rows,
