@@ -44,14 +44,19 @@ Examples:
   manage_straddle --register --underlying NIFTY --strike 24200 \\
       --expiry 2026-05-13 --ce-sell 394.85 --pe-sell 138.35
 
-  # Daily babysitting cycle (analyze -> recommend -> execute if approved)
-  manage_straddle --analyze --position 1
-
-  # Force-close both legs immediately (skips LLM, asks for confirmation)
-  manage_straddle --execute CLOSE_BOTH --position 1
+  # List positions (v2 ids are UUIDs — copy one for the commands below)
+  manage_straddle --list
 
   # Snapshot only (P&L + market context, no LLM, no execution)
-  manage_straddle --status --position 1
+  manage_straddle --status --position <UUID>
+
+  # Daily babysitting cycle — see deprecation notice; the v2 path lives in
+  # the short_straddle plugin (apps.strategies.runtime.run_workflow).
+  manage_straddle --analyze --position <UUID>
+
+  # Force-close both legs immediately (skips LLM, asks for confirmation).
+  # Emits an apps.events.Event row for the audit trail.
+  manage_straddle --execute CLOSE_BOTH --position <UUID>
 
 Mode banner is printed at startup. TRADING_MODE=live places real orders.
 """
@@ -97,8 +102,12 @@ class Command(BaseCommand):
         mode.add_argument("--list",     action="store_true", help="List all straddle positions")
 
         # ── Position selector ──
-        parser.add_argument("--position", type=int, default=None,
-                            help="StraddlePosition ID (required for --analyze/--status/--execute)")
+        # v2 OptionsPosition ids are UUIDs; accept the raw string. The legacy
+        # int-typed flag silently rejected every UUID via argparse before the
+        # handler ever ran (see redesign-v2 audit). Validation happens in
+        # _get_position by attempting the OptionsPosition.objects.get.
+        parser.add_argument("--position", type=str, default=None,
+                            help="OptionsPosition UUID (required for --analyze/--status/--execute)")
 
         # ── Register options ──
         parser.add_argument("--underlying",  default="NIFTY")
@@ -272,6 +281,13 @@ class Command(BaseCommand):
     # ──────────────────────────────────────────────
     def _analyze(self, options):
         pos = self._get_position(options)
+        legs = self._unpack_legs(pos)
+        if not (legs["ce_symbol"] and legs["pe_symbol"]):
+            raise CommandError(
+                f"Position {pos.id} is not a two-leg short straddle "
+                f"(missing SHORT_CE or SHORT_PE leg). Use the short_straddle "
+                "plugin for multi-leg strategies."
+            )
 
         self.stdout.write(f"\n{'='*60}")
         self.stdout.write(f"STRADDLE MANAGEMENT CYCLE")
@@ -283,16 +299,16 @@ class Command(BaseCommand):
         result = run_straddle_workflow(
             position_id   = pos.id,
             underlying    = pos.underlying,
-            strike        = pos.strike,
+            strike        = legs["strike"] or 0,
             expiry        = pos.expiry.isoformat(),
             lot_size      = pos.lot_size,
             lots          = pos.lots,
-            ce_symbol     = pos.ce_symbol,
-            ce_token      = pos.ce_token,
-            pe_symbol     = pos.pe_symbol,
-            pe_token      = pos.pe_token,
-            ce_sell_price = pos.ce_sell_price,
-            pe_sell_price = pos.pe_sell_price,
+            ce_symbol     = legs["ce_symbol"],
+            ce_token      = legs["ce_token"],
+            pe_symbol     = legs["pe_symbol"],
+            pe_token      = legs["pe_token"],
+            ce_sell_price = legs["ce_sell_price"],
+            pe_sell_price = legs["pe_sell_price"],
         )
 
         self._print_result(result)
@@ -316,6 +332,12 @@ class Command(BaseCommand):
     # ──────────────────────────────────────────────
     def _status(self, options):
         pos = self._get_position(options)
+        legs = self._unpack_legs(pos)
+        if not (legs["ce_symbol"] and legs["pe_symbol"]):
+            raise CommandError(
+                f"Position {pos.id} is not a two-leg short straddle "
+                f"(missing SHORT_CE or SHORT_PE leg)."
+            )
 
         self.stdout.write(f"\n{'='*60}")
         self.stdout.write(f"POSITION STATUS (no LLM)")
@@ -326,8 +348,8 @@ class Command(BaseCommand):
 
         svc = OptionsDataService()
         snapshot = svc.fetch_straddle_snapshot(
-            ce_symbol=pos.ce_symbol, ce_token=pos.ce_token,
-            pe_symbol=pos.pe_symbol, pe_token=pos.pe_token,
+            ce_symbol=legs["ce_symbol"], ce_token=legs["ce_token"],
+            pe_symbol=legs["pe_symbol"], pe_token=legs["pe_token"],
             date_str=date.today().isoformat(),
         )
 
@@ -338,12 +360,12 @@ class Command(BaseCommand):
 
         analysis = analyze_straddle(
             underlying     = pos.underlying,
-            strike         = pos.strike,
+            strike         = legs["strike"] or 0,
             expiry         = pos.expiry.isoformat(),
             lot_size       = pos.lot_size,
             lots           = pos.lots,
-            ce_sell_price  = pos.ce_sell_price,
-            pe_sell_price  = pos.pe_sell_price,
+            ce_sell_price  = legs["ce_sell_price"],
+            pe_sell_price  = legs["pe_sell_price"],
             ce_ltp         = ce.get("ltp", 0),
             pe_ltp         = pe.get("ltp", 0),
             nifty_spot     = nifty.get("ltp", 0),
@@ -354,13 +376,19 @@ class Command(BaseCommand):
         )
 
         self.stdout.write(analysis.summary_text)
-        self.stdout.write(f"\nStatus: {pos.status} | Action taken: {pos.action_taken}")
-        if pos.management_log:
-            self.stdout.write("\nManagement History:")
-            for entry in pos.management_log[-5:]:
+        self.stdout.write(f"\nStatus: {pos.status} | Current P&L: {float(pos.current_pnl_inr):+,.0f} INR")
+
+        # Management history — read from the v2 Event firehose (the legacy
+        # JSON management_log on the position row is gone). Quiet if no
+        # events have been emitted for this position yet.
+        events = self._recent_events(pos, limit=5)
+        if events:
+            self.stdout.write("\nRecent management events:")
+            for ev in events:
+                payload = ev.payload or {}
                 self.stdout.write(
-                    f"  {entry.get('time','?')} | {entry.get('action','?')} | "
-                    f"NIFTY {entry.get('nifty','?'):.0f} | P&L {entry.get('pnl_inr',0):+,.0f} INR"
+                    f"  {ev.ts.strftime('%H:%M')} | {ev.type} | "
+                    f"{payload.get('action', payload.get('text', ev.text or '—'))}"
                 )
 
         self._print_next_steps([
@@ -377,6 +405,12 @@ class Command(BaseCommand):
             raise CommandError(f"Unknown action: {action}. Valid: {valid_actions}")
 
         pos = self._get_position(options)
+        legs = self._unpack_legs(pos)
+        if not (legs["ce_symbol"] and legs["pe_symbol"]):
+            raise CommandError(
+                f"Position {pos.id} is not a two-leg short straddle "
+                f"(missing SHORT_CE or SHORT_PE leg)."
+            )
 
         self.stdout.write(f"\nForce-executing: {action} on position {pos.id}")
         confirm = input(f"Confirm {action} for {pos}? [y/N]: ").strip().lower()
@@ -384,24 +418,32 @@ class Command(BaseCommand):
             self.stdout.write("Cancelled.")
             return
 
+        # NOTE: deliberately do NOT import `journal_action_node` here. That
+        # node still writes to legacy `StraddlePosition.ce_current_price /
+        # management_log` fields that v2 `apps.trading.OptionsPosition` does
+        # not have, and its try/except swallows the AttributeError silently
+        # — leaving the operator to think the execute succeeded when the
+        # state-update never landed. We emit a v2 Event row at the bottom
+        # of this method instead. The full journal-update rewrite belongs
+        # in the short_straddle plugin.
         from trading.options.straddle.graph import (
             fetch_market_data_node, analyze_position_node,
-            execute_action_node, journal_action_node
+            execute_action_node,
         )
 
         state = {
             "position_id":    pos.id,
             "underlying":     pos.underlying,
-            "strike":         pos.strike,
+            "strike":         legs["strike"] or 0,
             "expiry":         pos.expiry.isoformat(),
             "lot_size":       pos.lot_size,
             "lots":           pos.lots,
-            "ce_symbol":      pos.ce_symbol,
-            "ce_token":       pos.ce_token,
-            "pe_symbol":      pos.pe_symbol,
-            "pe_token":       pos.pe_token,
-            "ce_sell_price":  pos.ce_sell_price,
-            "pe_sell_price":  pos.pe_sell_price,
+            "ce_symbol":      legs["ce_symbol"],
+            "ce_token":       legs["ce_token"],
+            "pe_symbol":      legs["pe_symbol"],
+            "pe_token":       legs["pe_token"],
+            "ce_sell_price":  legs["ce_sell_price"],
+            "pe_sell_price":  legs["pe_sell_price"],
             "recommended_action": {
                 "action":     action,
                 "urgency":    "IMMEDIATE",
@@ -428,7 +470,10 @@ class Command(BaseCommand):
         state.update(fetch_market_data_node(state))
         state.update(analyze_position_node(state))
         state.update(execute_action_node(state))
-        state.update(journal_action_node(state))
+
+        # Persist the action to the v2 Event firehose so the audit trail
+        # picks it up (replaces the legacy management_log JSON write).
+        self._record_execute_event(pos, action, state)
 
         exec_result = state.get("execution_result", {})
         self.stdout.write(self.style.SUCCESS(
@@ -572,3 +617,106 @@ class Command(BaseCommand):
             return OptionsPosition.objects.get(id=position_id)
         except OptionsPosition.DoesNotExist:
             raise CommandError(f"OptionsPosition {position_id} not found.")
+        except (ValueError, Exception) as e:
+            # UUID parse errors raise ValidationError under the hood; surface
+            # a friendlier message instead of a stack trace.
+            raise CommandError(
+                f"Invalid position id {position_id!r}: {e}. "
+                "v2 OptionsPosition ids are UUIDs — copy one from --list."
+            )
+
+    # ──────────────────────────────────────────────
+    # Leg unpacker — bridges the legacy flat-shape CLI to the v2 multi-leg model
+    # ──────────────────────────────────────────────
+    def _unpack_legs(self, pos):
+        """Return a flat dict of (strike, ce_symbol, ce_token, ce_sell_price,
+        pe_symbol, pe_token, pe_sell_price) derived from `pos.legs.all()`.
+
+        The v2 `apps.trading.OptionsPosition` keeps strike + entry price on
+        per-leg `OptionsLeg` rows (so spreads/condors fit the same schema).
+        The straddle CLI predates that change — it still uses the legacy
+        flat-shape kwargs (`ce_symbol=`, `ce_token=`, `strike=`, ...) that
+        the analyzer/data-service/graph accept. This helper is the bridge.
+
+        Returns None for missing leg sides (e.g. one-legged custom position)
+        so callers can detect "this isn't a 2-leg straddle" gracefully.
+        """
+        from apps.trading.models import OptionsLeg
+
+        out = {
+            "strike": None,
+            "ce_symbol": "", "ce_token": "", "ce_sell_price": 0.0,
+            "pe_symbol": "", "pe_token": "", "pe_sell_price": 0.0,
+        }
+        for leg in pos.legs.all():
+            if leg.leg_role == OptionsLeg.LegRole.SHORT_CE:
+                out["ce_symbol"] = leg.symbol
+                out["ce_token"] = leg.token
+                out["ce_sell_price"] = float(leg.open_price)
+                if out["strike"] is None and leg.strike:
+                    out["strike"] = leg.strike
+            elif leg.leg_role == OptionsLeg.LegRole.SHORT_PE:
+                out["pe_symbol"] = leg.symbol
+                out["pe_token"] = leg.token
+                out["pe_sell_price"] = float(leg.open_price)
+                if out["strike"] is None and leg.strike:
+                    out["strike"] = leg.strike
+        return out
+
+    def _record_execute_event(self, pos, action: str, state: dict) -> None:
+        """Write the executed action to `apps.events.Event` so the Now feed
+        and `--status` history surface it. Non-fatal — a failed audit
+        write must not mask a successful (or failed) order placement.
+        """
+        try:
+            from apps.events.models import Event
+            from apps.events.services.event_writer import emit
+            exec_result = state.get("execution_result") or {}
+            analysis = state.get("analysis") or {}
+            # Map operator action → semantic event type. CLOSE_* collapses
+            # to STRADDLE_CLOSED (the position is no longer a 2-leg short);
+            # HEDGE_FUTURES → STRADDLE_HEDGED; HOLD is a no-op so we skip
+            # emitting to avoid polluting the firehose.
+            if action == "HOLD":
+                return
+            ev_type = (
+                Event.Type.STRADDLE_HEDGED
+                if action == "HEDGE_FUTURES"
+                else Event.Type.STRADDLE_CLOSED
+            )
+            emit(
+                tenant=pos.tenant,
+                type=ev_type,
+                actor_kind=Event.ActorKind.SYSTEM,
+                text=f"manage_straddle --execute {action} on {pos.underlying} {pos.expiry}",
+                payload={
+                    "source": "manage_straddle",
+                    "position_id": str(pos.id),
+                    "action": action,
+                    "actions_taken": exec_result.get("actions_taken", []),
+                    "success": exec_result.get("success"),
+                    "mode": exec_result.get("mode", "paper"),
+                    "net_pnl_inr": analysis.get("net_pnl_inr"),
+                    "nifty_spot": analysis.get("nifty_spot"),
+                },
+            )
+        except Exception as e:
+            logger.warning(f"manage_straddle event emit failed (non-blocking): {e}")
+
+    def _recent_events(self, pos, limit: int = 5) -> list:
+        """Best-effort: pull recent `apps.events.Event` rows tied to this
+        position so `--status` can show a management history.
+
+        The legacy `pos.management_log` JSON field is gone in v2 — the per-leg
+        action stream now lives in the unified Event firehose. Failures here
+        are non-fatal; the CLI prints "no recent management events" instead.
+        """
+        try:
+            from apps.events.models import Event
+            qs = Event.objects.filter(
+                tenant=pos.tenant,
+                payload__contains={"position_id": str(pos.id)},
+            ).order_by("-ts")[:limit]
+            return list(qs)
+        except Exception:
+            return []
