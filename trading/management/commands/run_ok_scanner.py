@@ -136,33 +136,60 @@ class Command(BaseCommand):
             self._send_telegram(results, scanner)
 
     def _persist_signals(self, results, scan_date):
-        """Persist actionable cycle results to SignalLog for monthly feedback."""
+        """Persist actionable cycle results to the v2 Signal ledger.
+
+        Powers the Monthly capture-rate report and lights up the Swing
+        Scanner page's `useSwingScanner` query when the user hits the
+        OpButton's "Re-scan now" — that hook invalidates and re-fetches,
+        and these rows are what the new fetch sees.
+        """
         from plugins.strategy_swing.ok_cycles import CyclePhase
         try:
-            from trading.models import SignalLog
             from datetime import datetime
+            from apps.strategies.models import Signal
+            from apps.tenants.models import Membership
 
-            scan_dt = datetime.strptime(scan_date, "%Y-%m-%d") if isinstance(scan_date, str) else datetime.combine(scan_date, datetime.min.time())
-            actionable = [r for r in results if r.phase != CyclePhase.NONE and r.action in ("BUY", "SHORT")]
+            # Resolve the single-trader tenant — same bootstrap pattern
+            # the screener plugin's signals.persist() uses. CLI commands
+            # run without a request, so no tenant is in scope.
+            mem = (
+                Membership.objects.filter(is_active=True, role="owner")
+                .select_related("tenant")
+                .first()
+            )
+            if mem is None:
+                logger.warning("Signal persist skipped: no owner Membership found.")
+                return
+            tenant = mem.tenant
+
+            scan_dt = (
+                datetime.strptime(scan_date, "%Y-%m-%d")
+                if isinstance(scan_date, str)
+                else datetime.combine(scan_date, datetime.min.time())
+            )
+            actionable = [
+                r for r in results
+                if r.phase != CyclePhase.NONE and r.action in ("BUY", "SHORT")
+            ]
             count = 0
             for r in actionable:
                 side = "BUY" if r.action == "BUY" else "SELL"
-                # Use EMA levels as approximate entry/SL/target
                 entry = r.last_close
                 if side == "BUY":
                     stoploss = r.ema_slow if r.ema_slow > 0 else entry * 0.97
-                    target = r.upper_ext if r.upper_ext > 0 else entry * 1.05
+                    target   = r.upper_ext if r.upper_ext > 0 else entry * 1.05
                 else:
                     stoploss = r.ema_slow if r.ema_slow > 0 else entry * 1.03
-                    target = r.lower_ext if r.lower_ext > 0 else entry * 0.95
+                    target   = r.lower_ext if r.lower_ext > 0 else entry * 0.95
 
                 risk = abs(entry - stoploss)
-                rr = abs(target - entry) / risk if risk > 0 else 0
+                rr   = abs(target - entry) / risk if risk > 0 else 0
 
-                SignalLog.objects.get_or_create(
+                Signal.objects.get_or_create(
+                    tenant=tenant,
                     symbol=r.symbol,
                     signal_date=scan_dt.date(),
-                    source=SignalLog.Source.OK_SCANNER,
+                    source=Signal.Source.OK_SCANNER,
                     strategy=r.phase.value,
                     defaults=dict(
                         signal_time=scan_dt,
@@ -187,9 +214,11 @@ class Command(BaseCommand):
                 )
                 count += 1
             if count:
-                self.stdout.write(self.style.SUCCESS(f"\n  Persisted {count} actionable signals to SignalLog"))
+                self.stdout.write(self.style.SUCCESS(
+                    f"\n  Persisted {count} actionable signals to apps.strategies.Signal"
+                ))
         except Exception as e:
-            logger.warning(f"SignalLog persist failed (non-blocking): {e}")
+            logger.warning(f"Signal persist failed (non-blocking): {e}")
 
     def _output_table(self, results, scanner):
         """Pretty CLI table output."""
