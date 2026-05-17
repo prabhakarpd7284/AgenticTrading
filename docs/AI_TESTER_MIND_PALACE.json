@@ -1,0 +1,47 @@
+{
+  "context_version": 1,
+  "fingerprint": "16440204a7bfb31e",
+  "last_run_at": "2026-05-17T11:19:40Z",
+  "open_bugs": [
+    {
+      "id": "ui-plumbing-pyramid-intraday-chart-component-exists-with-entries-markers",
+      "title": "[ui_plumbing] Pyramid intraday chart component exists (with entries markers)",
+      "severity": "high",
+      "suite": "ui_plumbing",
+      "evidence": "Pyramid run has 150 candles in result.candles_raw but no PyramidChart component references them in AgentConsolePage.tsx. The intraday + entries chart is missing.",
+      "suggested_fix": null,
+      "first_seen": "2026-05-17T11:19:40Z",
+      "last_seen": "2026-05-17T11:19:40Z",
+      "occurrences": 1,
+      "status": "open"
+    },
+    {
+      "id": "ui-plumbing-vertical-spread-payoff-diagram-component-exists",
+      "title": "[ui_plumbing] Vertical-spread payoff diagram component exists",
+      "severity": "high",
+      "suite": "ui_plumbing",
+      "evidence": "Vertical spread has structured legs (long/short/strikes/breakeven) but no payoff diagram component renders them. Add a VerticalSpreadChart that plots P&L vs underlying with breakeven + max profit/loss zones.",
+      "suggested_fix": null,
+      "first_seen": "2026-05-17T11:19:40Z",
+      "last_seen": "2026-05-17T11:19:40Z",
+      "occurrences": 1,
+      "status": "open"
+    }
+  ],
+  "fixed_bugs": [],
+  "runs": [
+    {
+      "id": "140a0e3f2412",
+      "started_at": "2026-05-17T11:19:32Z",
+      "ended_at": "2026-05-17T11:19:40Z",
+      "total": 12,
+      "passed": 10,
+      "failed": 2,
+      "finding_ids": [
+        "ui-plumbing-pyramid-intraday-chart-component-exists-with-entries-markers",
+        "ui-plumbing-vertical-spread-payoff-diagram-component-exists"
+      ]
+    }
+  ],
+  "notes": []
+}
