@@ -1,7 +1,7 @@
 {
   "context_version": 2,
   "fingerprint": "16440204a7bfb31e",
-  "last_run_at": "2026-05-17T11:54:04Z",
+  "last_run_at": "2026-05-17T12:19:24Z",
   "open_bugs": [],
   "fixed_bugs": [
     {
@@ -68,12 +68,33 @@
       "passed": 12,
       "failed": 0,
       "finding_ids": []
+    },
+    {
+      "id": "c00dd896b966",
+      "started_at": "2026-05-17T12:17:49Z",
+      "ended_at": "2026-05-17T12:17:58Z",
+      "total": 14,
+      "passed": 14,
+      "failed": 0,
+      "finding_ids": []
+    },
+    {
+      "id": "9a000811a258",
+      "started_at": "2026-05-17T12:18:05Z",
+      "ended_at": "2026-05-17T12:18:13Z",
+      "total": 14,
+      "passed": 14,
+      "failed": 0,
+      "finding_ids": []
     }
   ],
   "notes": [
     "[trader_user @ 2026-05-17T11:53:28Z] Mind palace is empty (no existing requests/bugs). Focused on whole-picture views: capital deployment, leverage exposure, edge decay, and plan-vs-actual reconciliation across equity + F&O.",
     "[planner @ 2026-05-17T11:53:37Z] Translated 5 open feature_requests into prioritised tasks. No open bugs to address. Risk/report categories that unlock decisions promoted to high.",
-    "[executor @ 2026-05-17T11:53:46Z] proposed prop-unified-capital-leverage-cockpit-001 for unified-capital-leverage-cockpit"
+    "[executor @ 2026-05-17T11:53:46Z] proposed prop-unified-capital-leverage-cockpit-001 for unified-capital-leverage-cockpit",
+    "[trader_user @ 2026-05-17T12:18:13Z] Mind palace already has 5 high-quality 'whole picture' requests open. Focused on adjacent gaps: regime-aware sizing, drawdown anatomy, theta budgeting, expiry-day playbook, and broker reconciliation.",
+    "[planner @ 2026-05-17T12:18:23Z] Translated 5 newly-open feature_requests into prioritised tasks. No open bugs. Risk/report/expiry-workflow categories promoted to high; chart/data left medium.",
+    "[executor @ 2026-05-17T12:18:36Z] proposed prop-plan-vs-actual-reconciliation-report-002 for plan-vs-actual-reconciliation-report"
   ],
   "feature_requests": [
     {
@@ -120,6 +141,51 @@
       "status": "open",
       "created_at": "2026-05-17T11:53:37Z",
       "requested_by": "trader_user"
+    },
+    {
+      "id": "daily-risk-budget-drawdown-anatomy",
+      "title": "Daily Risk Budget & Drawdown Anatomy",
+      "rationale": "Top-of-screen tile showing today's used vs allowed risk (1% per trade, 3% daily loss cap), open-trade risk-at-stop, and a 30-day intraday-drawdown waterfall sliced by strategy + workflow. Lets me decide instantly whether to take the next setup or stop trading for the day, and which strategy is bleeding the daily budget.",
+      "category": "risk",
+      "status": "open",
+      "created_at": "2026-05-17T12:18:23Z",
+      "requested_by": "trader_user"
+    },
+    {
+      "id": "theta-decay-premium-burn-forecast-curve",
+      "title": "Theta Decay & Premium-Burn Forecast Curve",
+      "rationale": "For all open short-premium positions (straddles + short legs of spreads), project per-minute theta capture vs realised P&L till 3:15 PM, with a 'breakeven move in underlying' band overlaid. Tells me whether the position is still worth holding for theta or if I'm now net-short gamma without enough premium left to justify the risk.",
+      "category": "chart",
+      "status": "open",
+      "created_at": "2026-05-17T12:18:23Z",
+      "requested_by": "trader_user"
+    },
+    {
+      "id": "expiry-day-tactical-cockpit-nifty-tue-sensex-thu",
+      "title": "Expiry-Day Tactical Cockpit (NIFTY Tue / SENSEX Thu)",
+      "rationale": "Dedicated screen that auto-activates on expiry days: time-to-3:15PM countdown, ATM pin probability, gamma exposure by strike, mandatory close-list with one-click square-off, and a forced-flat checklist by 3:10 PM. Enforces invariant #5 (close expiry positions before 3:15) instead of relying on memory during the highest-risk session of the week.",
+      "category": "workflow",
+      "status": "open",
+      "created_at": "2026-05-17T12:18:23Z",
+      "requested_by": "trader_user"
+    },
+    {
+      "id": "broker-vs-journal-reconciliation-report",
+      "title": "Broker vs Journal Reconciliation Report",
+      "rationale": "End-of-day diff between Angel One ledger (positions, charges, realised P&L, margin used) and our internal TradeJournal + PortfolioSnapshot. Surfaces missed fills, ghost positions, brokerage drag eating edge, and silent paper-vs-live divergence \u2014 critical before scaling capital from 5L upward.",
+      "category": "report",
+      "status": "open",
+      "created_at": "2026-05-17T12:18:23Z",
+      "requested_by": "trader_user"
+    },
+    {
+      "id": "regime-conditioned-strategy-allocation-heatmap",
+      "title": "Regime-Conditioned Strategy Allocation Heatmap",
+      "rationale": "Matrix of strategy \u00d7 NIFTY regime (trending up / trending down / chop / high-VIX / low-VIX) showing historical expectancy and trade count in each cell, plus today's detected regime highlighted. Tells me which strategies to enable/disable at 9:15 AM based on the morning regime read instead of running everything blindly.",
+      "category": "data",
+      "status": "open",
+      "created_at": "2026-05-17T12:18:23Z",
+      "requested_by": "trader_user"
     }
   ],
   "tasks": [
@@ -155,7 +221,7 @@
       "acceptance": "GET /api/v1/portfolios/plan-vs-actual/ returns a list of plans with planned vs actual entry/SL/target/size/outcome and a computed slippage_bps field per row.",
       "source": "feature_request",
       "source_id": "plan-vs-actual-reconciliation-report",
-      "status": "open",
+      "status": "proposed",
       "created_at": "2026-05-17T11:53:46Z"
     },
     {
@@ -210,6 +276,97 @@
       "source_id": "strategy-edge-decay-chart-rolling-expectancy-by-strategy",
       "status": "open",
       "created_at": "2026-05-17T11:53:46Z"
+    },
+    {
+      "id": "daily-risk-budget-drawdown-anatomy",
+      "title": "Daily Risk Budget & Drawdown Anatomy",
+      "priority": "high",
+      "scope": "Add a top-of-dashboard tile showing today's used vs allowed risk (1%/trade, 3% daily loss cap), live open-trade risk-at-stop, and a 30-day intraday-drawdown waterfall sliced by strategy and workflow.",
+      "files": [
+        "backend/apps/portfolio/services/risk_budget.py",
+        "backend/apps/portfolio/api/views.py",
+        "backend/apps/portfolio/api/urls.py",
+        "frontend/src/features/dashboard/RiskBudgetTile.tsx",
+        "frontend/src/lib/api.ts"
+      ],
+      "acceptance": "GET /api/v1/portfolios/risk-budget/ returns used_risk_pct, allowed_risk_pct, open_risk_at_stop, and a 30-day drawdown series with per-strategy buckets, and the tile renders without errors on /dashboard.",
+      "source": "feature_request",
+      "source_id": "daily-risk-budget-drawdown-anatomy",
+      "status": "open",
+      "created_at": "2026-05-17T12:18:36Z"
+    },
+    {
+      "id": "theta-decay-premium-burn-forecast-curve",
+      "title": "Theta Decay & Premium-Burn Forecast Curve",
+      "priority": "medium",
+      "scope": "For every open short-premium position (straddles + short legs of spreads), project per-minute theta capture vs realised P&L through 3:15 PM IST and overlay a breakeven-move band on the underlying.",
+      "files": [
+        "backend/apps/portfolio/services/theta_forecast.py",
+        "backend/apps/portfolio/api/views.py",
+        "backend/apps/portfolio/api/urls.py",
+        "frontend/src/features/positions/ThetaForecastChart.tsx",
+        "trading/options/data_service.py"
+      ],
+      "acceptance": "GET /api/v1/portfolios/theta-forecast/ returns per-position minute-bucket arrays of projected_theta, realised_pnl, and breakeven_band, and the chart renders for at least one open short-premium position.",
+      "source": "feature_request",
+      "source_id": "theta-decay-premium-burn-forecast-curve",
+      "status": "open",
+      "created_at": "2026-05-17T12:18:36Z"
+    },
+    {
+      "id": "expiry-day-tactical-cockpit",
+      "title": "Expiry-Day Tactical Cockpit",
+      "priority": "high",
+      "scope": "Build a dedicated screen that auto-activates on NIFTY Tue / SENSEX Thu expiry days with a 3:15 PM countdown, ATM pin probability, gamma exposure by strike, mandatory close-list with one-click square-off, and a forced-flat checklist.",
+      "files": [
+        "backend/apps/portfolio/services/expiry_cockpit.py",
+        "backend/apps/portfolio/api/views.py",
+        "backend/apps/portfolio/api/urls.py",
+        "frontend/src/features/positions/ExpiryCockpit.tsx",
+        "frontend/src/app/router.tsx",
+        "trading/utils/expiry_utils.py"
+      ],
+      "acceptance": "On an expiry day GET /api/v1/portfolios/expiry-cockpit/?underlying=NIFTY returns countdown_seconds, pin_strike, gamma_by_strike, and a close_list with order intents, and the /expiry-cockpit route renders the screen.",
+      "source": "feature_request",
+      "source_id": "expiry-day-tactical-cockpit-nifty-tue-sensex-thu",
+      "status": "open",
+      "created_at": "2026-05-17T12:18:36Z"
+    },
+    {
+      "id": "broker-vs-journal-reconciliation-report",
+      "title": "Broker vs Journal Reconciliation Report",
+      "priority": "high",
+      "scope": "EOD diff between Angel One ledger (positions, charges, realised P&L, margin used) and internal TradeJournal + PortfolioSnapshot to surface missed fills, ghost positions, and brokerage drag.",
+      "files": [
+        "backend/apps/portfolio/services/broker_reconciliation.py",
+        "backend/apps/portfolio/api/views.py",
+        "backend/apps/portfolio/api/urls.py",
+        "frontend/src/features/monthly/BrokerReconReport.tsx",
+        "trading/services/broker_service.py"
+      ],
+      "acceptance": "GET /api/v1/portfolios/broker-recon/?date=YYYY-MM-DD returns diff arrays for positions, realised_pnl, charges, and margin_used with a mismatched_count field, and the React report renders a row per discrepancy.",
+      "source": "feature_request",
+      "source_id": "broker-vs-journal-reconciliation-report",
+      "status": "open",
+      "created_at": "2026-05-17T12:18:36Z"
+    },
+    {
+      "id": "regime-conditioned-strategy-allocation-heatmap",
+      "title": "Regime-Conditioned Strategy Allocation Heatmap",
+      "priority": "medium",
+      "scope": "Compute a strategy x NIFTY-regime (trending up / trending down / chop / high-VIX / low-VIX) expectancy matrix from historical SignalLog + TradeJournal, with today's detected regime highlighted.",
+      "files": [
+        "backend/apps/portfolio/services/regime_heatmap.py",
+        "backend/apps/portfolio/api/views.py",
+        "backend/apps/portfolio/api/urls.py",
+        "frontend/src/features/monthly/RegimeHeatmap.tsx",
+        "trading/models.py"
+      ],
+      "acceptance": "GET /api/v1/portfolios/regime-heatmap/ returns a cells array of {strategy, regime, expectancy, trade_count} plus a current_regime field, and the heatmap renders with the active regime column highlighted.",
+      "source": "feature_request",
+      "source_id": "regime-conditioned-strategy-allocation-heatmap",
+      "status": "open",
+      "created_at": "2026-05-17T12:18:36Z"
     }
   ],
   "proposals": [
@@ -261,6 +418,49 @@
       ],
       "status": "proposed",
       "created_at": "2026-05-17T11:54:04Z"
+    },
+    {
+      "id": "prop-plan-vs-actual-reconciliation-report-002",
+      "task_id": "plan-vs-actual-reconciliation-report",
+      "summary": "Add a Plan vs Actual reconciliation endpoint and React report that joins AI plans (AgentRun.result) to executed Orders and realised Positions, exposing per-plan slippage, sizing drift, and SL-handling outcome.",
+      "files_changed": [
+        {
+          "path": "backend/apps/portfolio/services/plan_vs_actual.py",
+          "change_kind": "create",
+          "approach": "New aggregation service that walks AgentRun rows for the tenant (filtered by strategy_name in {directional, straddle, pyramid, spread}), extracts the planned entry/SL/target/qty from AgentRun.result and JournalEntry(kind='plan'), then joins to the resulting Order (via JournalEntry.order or AgentRun \u2192 Order outbox link) and the resulting Position to produce a list of reconciliation rows. Pure-Pytho",
+          "code_outline": "from dataclasses import dataclass\n@dataclass\nclass PlanVsActualRow:\n    plan_id: str; strategy: str; symbol: str; side: str; created_at: str\n    planned_entry: float|None; planned_sl: float|None; planned_target: float|None; planned_qty: int|None\n    actual_entry: float|None; actual_sl: float|None; actual_target: float|None; actual_qty: int|None\n    exit_price: float|None; realized_pnl: float|None\n    slippage_bps: float|None         # signed: (actual-planned)/planned * 1e4 * side_sign\n    sizing_drift_pct: float|None     # (actual_qty - planned_qty) / planned_qty\n    sl_handling: str                 # ok | sl_widened | sl_missing | sl_not_honoured\n    outcome: str                     # win | loss | scratch | open | aborted\n\ndef build_plan_vs_actual(tenant, portfolio=None, *, since=None, until=None, strategy=None, force=False) -> list[dict]:\n    cache_key = f'pva:{tenant.id}:{portfolio and portfolio.id}:{since}:{until}:{strategy}'\n    if not force and (cached := cache.get(cache_key)): return cached\n    runs = AgentRun.objects.filter(tenant=tenant, status='succeeded')\n    if portfolio: runs = runs.filter(portfolio=portfolio)\n    if strategy: runs = runs.filter(strategy_name=strategy)\n    rows = []\n    for run in runs.iterator():\n        plan = _extract_plan(run)            # reads run.result + JournalEntry(kind='plan', agent_run=run)\n        order = Order.objects.filter(tenant=tenant, ...).first()  # link via journal.order or idempotency_key=run.id\n        position = _match_position(tenant, order, plan)\n        rows.append(_reconcile(plan, order, position))\n    cache.set(cach"
+        },
+        {
+          "path": "backend/apps/portfolio/api/views.py",
+          "change_kind": "modify",
+          "approach": "Add a PlanVsActualView APIView mirroring MonthlyReportView \u2014 IsAuthenticated, reads tenant from request, accepts ?portfolio, ?since, ?until, ?strategy, ?force query params, returns the list shape from build_plan_vs_actual.",
+          "code_outline": "from apps.portfolio.services.plan_vs_actual import build_plan_vs_actual\n\nclass PlanVsActualView(APIView):\n    \"\"\"GET /api/v1/portfolios/plan-vs-actual/?portfolio=&since=&until=&strategy=&force=\"\"\"\n    permission_classes = [IsAuthenticated]\n    def get(self, request):\n        portfolio_id = request.query_params.get('portfolio')\n        since = request.query_params.get('since')\n        until = request.query_params.get('until')\n        strategy = request.query_params.get('strategy')\n        force = request.query_params.get('force') in ('1','true')\n        portfolio = Portfolio.objects.filter(tenant=request.tenant, id=portfolio_id).first() if portfolio_id else None\n        rows = build_plan_vs_actual(request.tenant, portfolio, since=since, until=until, strategy=strategy, force=force)\n        return Response({'rows': rows, 'count': len(rows)})"
+        },
+        {
+          "path": "backend/apps/portfolio/api/urls.py",
+          "change_kind": "modify",
+          "approach": "Register the new view at path('plan-vs-actual/', ...) BEFORE the portfolio_router include, same shadowing rule called out in the existing docstring.",
+          "code_outline": "from apps.portfolio.api.views import (..., PlanVsActualView)\nurlpatterns = [\n    path('monthly/', MonthlyReportView.as_view(), name='portfolio-monthly'),\n    path('plan-vs-actual/', PlanVsActualView.as_view(), name='portfolio-plan-vs-actual'),\n    path('positions/', include(position_router.urls)),\n    path('snapshots/', include(snapshot_router.urls)),\n    path('', include(portfolio_router.urls)),\n]"
+        },
+        {
+          "path": "frontend/src/features/monthly/PlanVsActualReport.tsx",
+          "change_kind": "create",
+          "approach": "New React component using the existing TanStack Query + axios client (lib/api.ts) to GET /api/v1/portfolios/plan-vs-actual/, renders a DataTable with planned vs actual columns, a coloured slippage_bps cell (red if |bps|>50), a sizing_drift_pct cell, sl_handling badge, and a strategy filter dropdown. Reuses existing ui primitives (Card, DataTable, Badge, KPI). Route is wired in the monthly feature ",
+          "code_outline": "import { useQuery } from '@tanstack/react-query';\nimport { api } from '@/lib/api';\nimport { fmtInr, fmtPct, clsPnl } from '@/lib/utils';\n\ntype Row = { plan_id:string; strategy:string; symbol:string; side:'BUY'|'SELL';\n             planned_entry:number|null; actual_entry:number|null;\n             planned_sl:number|null; actual_sl:number|null;\n             planned_target:number|null; actual_target:number|null;\n             planned_qty:number|null; actual_qty:number|null;\n             realized_pnl:number|null; slippage_bps:number|null;\n             sizing_drift_pct:number|null; sl_handling:string; outcome:string };\n\nexport function PlanVsActualReport() {\n  const [strategy, setStrategy] = useState<string|undefined>();\n  const { data, isLoading } = useQuery({\n    queryKey: ['plan-vs-actual', strategy],\n    queryFn: () => api.get('/portfolios/plan-vs-actual/', { params:{ strategy }}).then(r => r.data),\n  });\n  return (\n    <Card title='Plan vs Actual Reconciliation'>\n      <StrategyFilter value={strategy} onChange={setStrategy} />\n      <DataTable<Row>\n        rows={data?.rows ?? []}\n        columns={[\n          { key:'symbol', label:'Symbol' },\n          { key:'strategy', label:'Strategy' },\n          { key:'planned_entry', label:'Plan Entry' },\n          { key:'actual_entry', label:'Actual Entry' },\n          { key:'slippage_bps', label:'Slip (bps)', cell:r => <SlippagePill bps={r.slippage_bps} /> },\n          { key:'planned_qty', label:'Plan Qty' },\n          { key:'actual_qty', label:'Actual Qty' },\n          { key:'sizing_drift_pct', label:'Size Drift', cell:r => fmtPct(r.si"
+        }
+      ],
+      "risks": [
+        "Plan extraction depends on the shape stored in AgentRun.result + JournalEntry.meta, which varies per workflow (directional/straddle/pyramid/spread) \u2014 if a strategy uses a different key path the row wi",
+        "Joining a plan to its executed Order has no FK in the current schema; relying on JournalEntry(kind='plan').order or a name/time heuristic can mis-pair when the same symbol is replanned within minutes,",
+        "For multi-leg straddles/spreads a single AgentRun produces multiple Orders/Positions; flattening to one row per leg vs one row per plan needs an explicit choice \u2014 the wrong default will mislead the op"
+      ],
+      "tests_needed": [
+        "Service unit: given a fixture AgentRun.result + Order + Position, build_plan_vs_actual returns the expected slippage_bps (sign flipped for SELL), sizing_drift_pct, and sl_handling classification \u2014 inc",
+        "API: GET /api/v1/portfolios/plan-vs-actual/ requires auth, scopes by request.tenant (no cross-tenant leakage), honours ?strategy and ?portfolio filters, and returns 200 with {rows, count} shape.",
+        "URL ordering: hitting /api/v1/portfolios/plan-vs-actual/ resolves to PlanVsActualView and NOT to the PortfolioViewSet detail route (guards against the same shadowing footgun called out in urls.py)."
+      ],
+      "status": "proposed",
+      "created_at": "2026-05-17T12:19:24Z"
     }
   ],
   "agent_runs": [
@@ -303,6 +503,47 @@
       "summary": "Proposed change for task 'Unified Capital & Leverage Cockpit'",
       "produced_ids": [
         "prop-unified-capital-leverage-cockpit-001"
+      ]
+    },
+    {
+      "id": "trader_user-2026-05-17t12-18-13z",
+      "agent_kind": "trader_user",
+      "started_at": "2026-05-17T12:18:13Z",
+      "ended_at": "2026-05-17T12:18:23Z",
+      "ok": true,
+      "summary": "Mind palace already has 5 high-quality 'whole picture' requests open. Focused on adjacent gaps: regime-aware sizing, drawdown anatomy, theta budgeting, expiry-day playbook, and broker reconciliation.",
+      "produced_ids": [
+        "daily-risk-budget-drawdown-anatomy",
+        "theta-decay-premium-burn-forecast-curve",
+        "expiry-day-tactical-cockpit-nifty-tue-sensex-thu",
+        "broker-vs-journal-reconciliation-report",
+        "regime-conditioned-strategy-allocation-heatmap"
+      ]
+    },
+    {
+      "id": "planner-2026-05-17t12-18-23z",
+      "agent_kind": "planner",
+      "started_at": "2026-05-17T12:18:23Z",
+      "ended_at": "2026-05-17T12:18:36Z",
+      "ok": true,
+      "summary": "Translated 5 newly-open feature_requests into prioritised tasks. No open bugs. Risk/report/expiry-workflow categories promoted to high; chart/data left medium.",
+      "produced_ids": [
+        "daily-risk-budget-drawdown-anatomy",
+        "theta-decay-premium-burn-forecast-curve",
+        "expiry-day-tactical-cockpit",
+        "broker-vs-journal-reconciliation-report",
+        "regime-conditioned-strategy-allocation-heatmap"
+      ]
+    },
+    {
+      "id": "executor-2026-05-17t12-18-36z",
+      "agent_kind": "executor",
+      "started_at": "2026-05-17T12:18:36Z",
+      "ended_at": "2026-05-17T12:19:24Z",
+      "ok": true,
+      "summary": "Proposed change for task 'Plan vs Actual Reconciliation Report'",
+      "produced_ids": [
+        "prop-plan-vs-actual-reconciliation-report-002"
       ]
     }
   ]
