@@ -7,11 +7,11 @@
 import * as React from "react";
 import {
   Activity, AlertTriangle, Award, BarChart3, Bell, BookOpen, Briefcase,
-  Calculator, Calendar, Check, Clock, Compass, Droplets, Eraser, Flag,
-  FlaskConical, Gauge, GitCompareArrows, Grid3X3, Hourglass, Layers,
-  LineChart, Microscope, Pencil, Radar, Receipt, RotateCw, Scale, Shield,
-  Sigma, Sunrise, Sunrise as DaybreakIcon, Target, TrendingDown, Waves, X,
-  Zap, ZapOff,
+  Calculator, Calendar, Check, Clock, Compass, Crosshair, Droplets, Eraser,
+  Flag, FlaskConical, Flame, Gauge, GitCompareArrows, Grid3X3, Hourglass,
+  Layers, LineChart, Microscope, Pause, Pencil, PieChart, Radar, Receipt,
+  RotateCw, Scale, Shield, Sigma, Sparkles, Sunrise, Sunrise as DaybreakIcon,
+  Target, TrendingDown, Waves, X, Zap, ZapOff,
 } from "lucide-react";
 import {
   Bar, BarChart, CartesianGrid, Line, LineChart as RLineChart,
@@ -70,16 +70,17 @@ function Help({ label, text }: { label: string; text: string }) {
 }
 import { useQueryClient } from "@tanstack/react-query";
 import {
-  checkSlippageEdge, flattenAll, resetTradingData, setCapital, simulateSizer,
+  checkSlippageEdge, flattenAll, pauseSymbol, resetTradingData, setCapital,
+  simulateSizer, unpauseSymbol,
   useBaseQuality, useBreakoutClassifier, useBrokerRecon, useCapitalCockpit,
   useCorrelationMatrix, useDepthImbalance, useEarningsOverlay, useEdgeDecay,
   useEdgeLedger, useExpiryCockpit, useFIIDIIFlow, useFirst5Min, useForcedFlat,
   useGapFill, useGapRisk, useGreeksHeatmap, useIntradayRotation,
-  useLiquidityMap, useMTFStage, useNewsShock, useORB, useORBFailure,
-  usePlanVsActual, usePostMortem, useRegimeHeatmap, useRiskBudget,
-  useSecond5Min, useSectorDispersion, useSectorRRG, useSignalFunnel,
-  useStructuralStops, useTapeSpeed, useThetaForecast, useVolRegime,
-  useVWAPBands,
+  useIntradaySectorHeatmap, useLiquidityMap, useMTFStage, useNewsShock,
+  useORB, useORBFailure, usePartialFill, usePlanVsActual, usePostMortem,
+  useRegimeHeatmap, useRiskBudget, useSecond5Min, useSectorDispersion,
+  useSectorRRG, useSignalFunnel, useStockRRG, useStructuralStops,
+  useTapeSpeed, useThetaForecast, useVolRegime, useVWAPBands,
   type SizerResponse, type SlippageEdgeResponse,
 } from "@/lib/cockpits";
 
@@ -121,6 +122,9 @@ const TABS = [
   { id: "fii-dii",       label: "FII/DII Flow", icon: LineChart },
   { id: "depth",         label: "Depth Proxy",  icon: BarChart3 },
   { id: "earnings",      label: "Earnings",     icon: Calendar },
+  { id: "stock-rrg",     label: "Stock RRG",    icon: Crosshair },
+  { id: "partial-fill",  label: "Partial Fill", icon: PieChart },
+  { id: "isector",       label: "Sector Heatmap (5m)", icon: Flame },
   { id: "reset",         label: "Reset / Seed", icon: Eraser },
 ] as const;
 
@@ -185,6 +189,9 @@ export function CockpitsPage() {
         <TabsContent value="fii-dii"><FIIDIIFlowPanel /></TabsContent>
         <TabsContent value="depth"><DepthImbalancePanel /></TabsContent>
         <TabsContent value="earnings"><EarningsOverlayPanel /></TabsContent>
+        <TabsContent value="stock-rrg"><StockRRGPanel /></TabsContent>
+        <TabsContent value="partial-fill"><PartialFillPanel /></TabsContent>
+        <TabsContent value="isector"><IntradaySectorHeatmapPanel /></TabsContent>
         <TabsContent value="reset"><ResetPanel /></TabsContent>
       </Tabs>
     </div>
@@ -1878,6 +1885,7 @@ function MTFStagePanel() {
                       <th className="text-left">Weekly</th>
                       <th className="text-left">Monthly</th>
                       <th className="text-left">Alignment</th>
+                      <th className="text-left">Weinstein S2</th>
                       <th className="text-right">D close</th>
                       <th className="text-right">D-MA slope</th>
                     </tr>
@@ -1890,6 +1898,9 @@ function MTFStagePanel() {
                         <td>{stageBadge(r.weekly?.stage)}</td>
                         <td>{stageBadge(r.monthly?.stage)}</td>
                         <td><Badge tone={alignmentTone(r.alignment)}>{r.alignment.replace("_"," ")}</Badge></td>
+                        <td>{r.stage2_aligned
+                          ? <Badge tone="success">YES</Badge>
+                          : <span className="text-fg-subtle">—</span>}</td>
                         <td className="text-right tabular-nums">{r.daily?.close ? fmtNum(r.daily.close, 2) : "—"}</td>
                         <td className={`text-right tabular-nums ${
                           r.daily && r.daily.slope_pct > 0.5 ? "text-pnl-up"
@@ -2527,25 +2538,139 @@ function TapeSpeedPanel() {
 
 /* ------------------------------ 34. News Shocks --------------------------- */
 function NewsShockPanel() {
+  const qc = useQueryClient();
   const { data, isLoading } = useNewsShock();
+  const [draft, setDraft] = React.useState({ symbol: "", minutes: 15, reason: "" });
+  const [pending, setPending] = React.useState(false);
+  const [feedback, setFeedback] = React.useState<string | null>(null);
+
+  const submitPause = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!draft.symbol.trim()) return;
+    setPending(true); setFeedback(null);
+    try {
+      const r = await pauseSymbol({
+        symbol: draft.symbol.trim().toUpperCase(),
+        minutes: Math.max(1, Number(draft.minutes) || 15),
+        reason: draft.reason.trim() || "manual",
+      });
+      if (r.error) setFeedback(`error: ${r.error}`);
+      else setFeedback(`paused ${r.symbol} until ${r.re_entry_at.slice(11, 19)} UTC`);
+      setDraft((d) => ({ ...d, symbol: "" }));
+      await qc.invalidateQueries({ queryKey: ["cockpits", "news-shock"] });
+    } catch (err) {
+      setFeedback(err instanceof Error ? err.message : "request failed");
+    } finally {
+      setPending(false);
+    }
+  };
+
+  const doUnpause = async (sym: string) => {
+    setPending(true); setFeedback(null);
+    try {
+      const r = await unpauseSymbol(sym);
+      setFeedback(`unpaused ${r.symbol}${r.was_paused ? "" : " (was already clear)"}`);
+      await qc.invalidateQueries({ queryKey: ["cockpits", "news-shock"] });
+    } catch (err) {
+      setFeedback(err instanceof Error ? err.message : "request failed");
+    } finally {
+      setPending(false);
+    }
+  };
+
   if (isLoading || !data) return <LoadingPanel />;
   return (
     <PanelWrap>
       <HelpBlock
-        what="Real-time NSE corporate-action + LULD/circuit/halt monitor for every held + watchlisted symbol, with a flatten-recommendation flag per shock event."
-        why="A halted stock is a position you can neither size nor exit. Knowing about it within seconds, not minutes, is the difference between paper risk and realised loss."
-        act="Critical event = flatten the position immediately, even if at a loss. Warning = cut size 50% pending clarity. Info = note the event, hold position."
+        what="Real-time NSE corporate-action + LULD/circuit/halt monitor for every held + watchlisted symbol, plus a manual circuit-breaker — pause a symbol for N minutes and @RiskGuard will skip new entries on it."
+        why="A halted stock is a position you can neither size nor exit. The pause list is the safety net when you spot a shock before the automated feed catches up."
+        act="Pause a symbol the moment you see a bad headline. The cooldown auto-expires; you can unpause manually if the situation clears. Default 15 minutes is a fair starting window."
       />
+      <section className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+        <KPI label="Active shocks" value={String(data.events.length)} tone={data.events.length > 0 ? "danger" : "neutral"} />
+        <KPI label="Paused symbols" value={String(data.active_pause_count ?? 0)}
+             tone={(data.active_pause_count ?? 0) > 0 ? "warning" : "neutral"} />
+        <KPI label="Coverage" value={String(data.coverage_symbols.length)}
+             hint={`data source: ${data.data_source}`} />
+      </section>
       <Card>
         <CardHeader>
-          <CardTitle>Active shocks · {data.events.length}</CardTitle>
+          <CardTitle>Circuit-breaker — pause / unpause</CardTitle>
+          <CardDescription>
+            Default cooldown {data.default_cooldown_min ?? 15} min. Pauses live in cache and auto-expire.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <form onSubmit={submitPause} className="grid grid-cols-2 sm:grid-cols-5 gap-2 items-end">
+            <Field label="Symbol">
+              <input value={draft.symbol}
+                     onChange={(e) => setDraft({ ...draft, symbol: e.target.value })}
+                     placeholder="HDFCBANK"
+                     className="w-full h-9 px-2 bg-surface border border-border rounded-sm text-body-sm" />
+            </Field>
+            <Field label="Minutes">
+              <input type="number" min={1} step="any" value={draft.minutes}
+                     onChange={(e) => setDraft({ ...draft, minutes: Number(e.target.value) })}
+                     className="w-full h-9 px-2 bg-surface border border-border rounded-sm text-body-sm tabular-nums" />
+            </Field>
+            <Field label="Reason (optional)">
+              <input value={draft.reason}
+                     onChange={(e) => setDraft({ ...draft, reason: e.target.value })}
+                     placeholder="circuit hit"
+                     className="w-full h-9 px-2 bg-surface border border-border rounded-sm text-body-sm" />
+            </Field>
+            <div className="sm:col-span-2 flex gap-2">
+              <button type="submit" disabled={pending}
+                      className="h-9 px-3 bg-warning text-bg rounded-sm text-body-sm font-medium disabled:opacity-50">
+                <Pause className="h-3.5 w-3.5 inline mr-1" /> Pause
+              </button>
+              {feedback ? <span className="text-caption text-fg-muted self-center">{feedback}</span> : null}
+            </div>
+          </form>
+
+          {(data.paused_symbols ?? []).length === 0 ? (
+            <p className="text-body-sm text-fg-subtle">No symbols paused.</p>
+          ) : (
+            <table className="w-full text-body-sm">
+              <thead className="text-fg-subtle border-b border-border">
+                <tr>
+                  <th className="text-left py-1.5">Symbol</th>
+                  <th className="text-left">Reason</th>
+                  <th className="text-left">Re-entry at</th>
+                  <th className="text-right">Minutes</th>
+                  <th className="text-right">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(data.paused_symbols ?? []).map((p) => (
+                  <tr key={p.symbol} className="border-b border-border/40">
+                    <td className="py-1.5 font-mono">{p.symbol}</td>
+                    <td className="text-fg-muted">{p.reason}</td>
+                    <td className="text-fg-muted">{p.re_entry_at.slice(11, 19)} UTC</td>
+                    <td className="text-right tabular-nums">{p.minutes}</td>
+                    <td className="text-right">
+                      <button onClick={() => doUnpause(p.symbol)} disabled={pending}
+                              className="h-7 px-2 text-caption bg-surface-2 border border-border rounded-sm hover:bg-surface-3 disabled:opacity-50">
+                        Unpause
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader>
+          <CardTitle>Live shocks · {data.events.length}</CardTitle>
           <CardDescription>{data.note}</CardDescription>
         </CardHeader>
         <CardContent>
           {data.events.length === 0 ? (
             <EmptyState
               title="No active shocks"
-              description={`Monitoring ${data.coverage_symbols.length} symbols (data source: ${data.data_source}).`}
+              description={`Monitoring ${data.coverage_symbols.length} symbols.`}
             />
           ) : (
             <table className="w-full text-body-sm">
@@ -2581,13 +2706,33 @@ function NewsShockPanel() {
 function FIIDIIFlowPanel() {
   const { data, isLoading } = useFIIDIIFlow();
   if (isLoading || !data) return <LoadingPanel />;
+  const regimeTone = (r: string): "success" | "warning" | "danger" | "neutral" =>
+    r.includes("BULLISH") || r === "ACCUMULATING" ? "success"
+    : r.includes("BEARISH") || r === "DISTRIBUTING" ? "danger"
+    : r === "MIXED" ? "warning"
+    : "neutral";
   return (
     <PanelWrap>
       <HelpBlock
-        what="Daily FII + DII cash buy/sell, FII index-futures net OI change, and FII index-options net premium, overlaid on NIFTY 50 closing series for context."
+        what="Daily FII + DII cash buy/sell, FII index-futures net OI change, and FII index-options net premium, overlaid on NIFTY 50 closing series for context. Regime classifier tags 5d + 20d rolling sums."
         why="When FIIs sell into rallies for 5+ sessions while NIFTY makes new highs, distribution is happening — and the rally usually breaks within 10 sessions. Conversely, FII buying through a dip is the bottom signal that beats every chart pattern."
-        act="If FII cash is net-selling and NIFTY is up 5+ days, halve long exposure. If FII cash is net-buying through a 3% drawdown, add longs aggressively."
+        act="If FII cash regime = DISTRIBUTING + NIFTY up 5+ days, halve long exposure. If ACCUMULATING through a drawdown, add longs aggressively."
       />
+      {data.regimes ? (
+        <Card>
+          <CardHeader><CardTitle>Flow regimes</CardTitle></CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+              {Object.entries(data.regimes).map(([k, v]) => (
+                <div key={k} className="flex items-center justify-between p-2 rounded-sm border border-border bg-surface">
+                  <span className="text-caption text-fg-subtle">{k.replace(/_/g, " ")}</span>
+                  <Badge tone={regimeTone(v)}>{v.replace(/_/g, " ")}</Badge>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
       <Card>
         <CardHeader><CardTitle>NIFTY {data.days}-day overlay</CardTitle><CardDescription>{data.note}</CardDescription></CardHeader>
         <CardContent>
@@ -2929,6 +3074,266 @@ python manage.py reset_trading_data --nuke --confirm
 # Nuke without re-seeding (you'll need to make a user)
 python manage.py reset_trading_data --nuke --no-reseed --confirm`}
           </pre>
+        </CardContent>
+      </Card>
+    </PanelWrap>
+  );
+}
+
+/* ------------------------------ 39. Stock RRG ----------------------------- */
+function StockRRGPanel() {
+  const [draft, setDraft] = React.useState("");
+  const [symbols, setSymbols] = React.useState<string | undefined>(undefined);
+  const { data, isLoading } = useStockRRG(symbols);
+  const submit = (e: React.FormEvent) => { e.preventDefault(); setSymbols(draft.trim() || undefined); };
+
+  const quadTone = (q: string): "success" | "warning" | "danger" | "neutral" =>
+    q === "LEADING" ? "success"
+    : q === "WEAKENING" ? "warning"
+    : q === "LAGGING" ? "danger"
+    : q === "IMPROVING" ? "neutral"
+    : "neutral";
+
+  return (
+    <PanelWrap>
+      <HelpBlock
+        what="Relative Rotation Graph at the stock level: each open + watchlisted name's 14-day RS vs NIFTY 50 (X) and the rate-of-change of that RS (Y). Weekly samples, 8-week tails."
+        why="Sector RRG tells you where the wind is blowing; stock RRG tells you which boat in the regatta is fastest. Buying LEADING stocks from LEADING sectors is the high-conviction pair-trade."
+        act="Add longs to LEADING names. Start scaling INTO IMPROVING for early rotation. Trim WEAKENING. Avoid LAGGING (or short the weakest)."
+      />
+      <form onSubmit={submit} className="flex items-center gap-2">
+        <input value={draft} onChange={(e) => setDraft(e.target.value)}
+               placeholder="Comma-separated symbols (blank = open + watchlist)"
+               className="h-9 px-2 flex-1 max-w-md bg-surface border border-border rounded-sm text-body-sm" />
+        <button type="submit" className="h-9 px-3 bg-accent text-accent-fg rounded-sm text-body-sm">Scan</button>
+      </form>
+      {isLoading || !data ? <LoadingPanel /> : (
+        <Card>
+          <CardHeader>
+            <CardTitle>Stock RRG · {data.count} name{data.count === 1 ? "" : "s"}</CardTitle>
+            <CardDescription>{data.note}</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {data.rows.length === 0 ? <EmptyState title="No data" description="Need open positions or watchlist entries." /> : (
+              <div className="overflow-auto">
+                <table className="w-full text-body-sm">
+                  <thead className="text-fg-subtle border-b border-border">
+                    <tr>
+                      <th className="text-left py-1.5">Symbol</th>
+                      <th className="text-left">Quadrant</th>
+                      <th className="text-right">RS ratio</th>
+                      <th className="text-right">RS momentum</th>
+                      <th className="text-left">Tail (last 8w)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.rows.map((r) => (
+                      <tr key={r.symbol} className="border-b border-border/40">
+                        <td className="py-1.5">{r.symbol}</td>
+                        <td><Badge tone={quadTone(r.quadrant)}>{r.quadrant}</Badge></td>
+                        <td className={`text-right tabular-nums ${r.rs_ratio >= 100 ? "text-pnl-up" : "text-pnl-down"}`}>{fmtNum(r.rs_ratio, 2)}</td>
+                        <td className={`text-right tabular-nums ${r.rs_momentum > 0 ? "text-pnl-up" : "text-pnl-down"}`}>{fmtNum(r.rs_momentum, 2)}</td>
+                        <td>
+                          {r.tail.length > 0 ? (
+                            <span className="text-fg-subtle text-caption">
+                              {r.tail.map((p) => p.rs_ratio.toFixed(0)).join("→")}
+                            </span>
+                          ) : "—"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+    </PanelWrap>
+  );
+}
+
+/* ------------------------------ 40. Partial Fill -------------------------- */
+function PartialFillPanel() {
+  const { data, isLoading } = usePartialFill();
+  if (isLoading || !data) return <LoadingPanel />;
+  const t = data.totals;
+  return (
+    <PanelWrap>
+      <HelpBlock
+        what="For every closed trade: fill ratio (filled / requested), signed slippage in bps, queue_score ∈ [0,1] (1 = filled at mid, 0 = chased the far side), and execution-quality flags."
+        why="Execution quality is the silent edge killer. A strategy that backtests at +5R but consistently chases the market (queue_score < 0.3) pays it all back in spread + impact."
+        act="Strategy avg_queue_score < 0.5 = stop using market orders; switch to limit-fragments. Symbols with chronic 'low_fill_ratio' = liquidity-starved; drop them from the playbook."
+      />
+      <section className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <KPI label="Trades scored" value={String(t.trades)} />
+        <KPI label="Avg queue score" value={fmtNum(t.avg_queue_score, 2)}
+             tone={t.avg_queue_score >= 0.7 ? "success" : t.avg_queue_score >= 0.5 ? "neutral" : "warning"} />
+        <KPI label="Avg fill ratio" value={fmtNum(t.avg_fill_ratio, 2)}
+             tone={t.avg_fill_ratio >= 0.9 ? "success" : t.avg_fill_ratio >= 0.7 ? "neutral" : "warning"} />
+        <KPI label="Quality flags" value={`${t.high_slippage_count + t.low_fill_count + t.chased_count}`}
+             hint={`slippage ${t.high_slippage_count} · low fill ${t.low_fill_count} · chased ${t.chased_count}`}
+             tone={(t.high_slippage_count + t.chased_count) > 0 ? "warning" : "neutral"} />
+      </section>
+      <div className="grid md:grid-cols-2 gap-4">
+        <Card>
+          <CardHeader><CardTitle>By strategy</CardTitle></CardHeader>
+          <CardContent>
+            {Object.keys(data.by_strategy).length === 0 ? <EmptyState title="No closed trades yet" /> : (
+              <table className="w-full text-body-sm">
+                <thead className="text-fg-subtle border-b border-border">
+                  <tr>
+                    <th className="text-left py-1.5">Strategy</th>
+                    <th className="text-right">N</th>
+                    <th className="text-right">Avg queue</th>
+                    <th className="text-right">Median queue</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {Object.entries(data.by_strategy).map(([k, v]) => (
+                    <tr key={k} className="border-b border-border/40">
+                      <td className="py-1.5">{k}</td>
+                      <td className="text-right tabular-nums">{v.count}</td>
+                      <td className={`text-right tabular-nums ${(v.avg_queue_score ?? 0) < 0.5 ? "text-warning" : ""}`}>
+                        {fmtNum(v.avg_queue_score ?? 0, 2)}
+                      </td>
+                      <td className="text-right tabular-nums">{fmtNum(v.median_queue_score ?? 0, 2)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader><CardTitle>By symbol · top 15</CardTitle></CardHeader>
+          <CardContent>
+            {Object.keys(data.by_symbol).length === 0 ? <EmptyState title="No data" /> : (
+              <table className="w-full text-body-sm">
+                <thead className="text-fg-subtle border-b border-border">
+                  <tr>
+                    <th className="text-left py-1.5">Symbol</th>
+                    <th className="text-right">N</th>
+                    <th className="text-right">Avg queue</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {Object.entries(data.by_symbol).map(([k, v]) => (
+                    <tr key={k} className="border-b border-border/40">
+                      <td className="py-1.5">{k}</td>
+                      <td className="text-right tabular-nums">{v.count}</td>
+                      <td className={`text-right tabular-nums ${(v.avg_queue_score ?? 0) < 0.5 ? "text-warning" : ""}`}>
+                        {fmtNum(v.avg_queue_score ?? 0, 2)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+      <Card>
+        <CardHeader><CardTitle>Recent trades · execution detail</CardTitle></CardHeader>
+        <CardContent>
+          {data.rows.length === 0 ? <EmptyState title="No closed trades" /> : (
+            <div className="overflow-auto max-h-[480px]">
+              <table className="w-full text-body-sm">
+                <thead className="text-fg-subtle border-b border-border sticky top-0 bg-surface">
+                  <tr>
+                    <th className="text-left py-1.5">Symbol</th>
+                    <th className="text-left">Strategy</th>
+                    <th className="text-right">Qty (req/fill)</th>
+                    <th className="text-right">Slippage (bps)</th>
+                    <th className="text-right">Queue</th>
+                    <th className="text-left">Flags</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.rows.map((r) => (
+                    <tr key={r.trade_id} className="border-b border-border/40">
+                      <td className="py-1.5">{r.symbol}</td>
+                      <td className="text-fg-muted">{r.strategy}</td>
+                      <td className="text-right tabular-nums">{r.qty_requested} / {r.qty_filled}</td>
+                      <td className={`text-right tabular-nums ${Math.abs(r.slippage_bps) > 25 ? "text-warning" : ""}`}>
+                        {fmtNum(r.slippage_bps, 1)}
+                      </td>
+                      <td className={`text-right tabular-nums ${r.queue_score < 0.5 ? "text-warning" : "text-pnl-up"}`}>
+                        {fmtNum(r.queue_score, 2)}
+                      </td>
+                      <td className="text-caption">
+                        {r.flags.length === 0 ? <span className="text-fg-subtle">—</span>
+                          : r.flags.map((f) => <Badge key={f} tone="warning">{f}</Badge>)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </PanelWrap>
+  );
+}
+
+/* ------------------------------ 41. Intraday Sector Heatmap (5m) ---------- */
+function IntradaySectorHeatmapPanel() {
+  const { data, isLoading } = useIntradaySectorHeatmap();
+  if (isLoading || !data) return <LoadingPanel />;
+
+  const cellBg = (disp: number, n: number) => {
+    if (n === 0) return "transparent";
+    const intensity = Math.min(1, disp / 2.0);
+    return `rgba(245, 158, 11, ${(intensity * 0.7).toFixed(2)})`;
+  };
+
+  return (
+    <PanelWrap>
+      <HelpBlock
+        what="Sector × 5-min slot matrix of cross-sectional dispersion (std-dev of constituent % moves) and per-slot leader/laggard within each sector. Hot cells = stock-picking opportunity in that sector at that minute."
+        why="Sector dispersion changes intraday. A sector that was a tight herd at 10:00 can fragment by 11:30 (news, earnings, single-name moves). Catching that switch is when long/short pair trades print."
+        act="Hot cells (>1.5 dispersion) = open a long on the slot's leader + short on the laggard; close before the cell cools. Cold cells = trade the sector ETF or skip the cohort."
+      />
+      <Card>
+        <CardHeader>
+          <CardTitle>{data.sector_count} sectors × {data.slot_count} slots</CardTitle>
+          <CardDescription>{data.note}</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {data.rows.length === 0 ? <EmptyState title="No 5-min data yet (market closed?)" /> : (
+            <div className="overflow-auto">
+              <table className="text-caption border-collapse">
+                <thead>
+                  <tr>
+                    <th className="sticky left-0 bg-surface px-2 py-1 text-left text-fg-subtle font-normal">Sector \ Slot</th>
+                    {data.slots.map((s) => (
+                      <th key={s} className="px-1 py-1 text-fg-subtle font-normal" title={s}>
+                        {s.slice(0, 5)}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.rows.map((r) => (
+                    <tr key={r.sector} className="border-b border-border/30">
+                      <th className="sticky left-0 bg-surface px-2 py-1 text-right text-fg-subtle font-normal whitespace-nowrap">
+                        {r.sector.replace("NIFTY_", "")}
+                      </th>
+                      {r.cells.map((c) => (
+                        <td key={c.slot}
+                            title={`${c.slot}  n=${c.n}  disp=${c.dispersion}  median=${c.median}%  leader=${c.leader}%  laggard=${c.laggard}%`}
+                            className="px-1 py-1 text-center tabular-nums"
+                            style={{ background: cellBg(c.dispersion, c.n) }}>
+                          {c.n > 0 ? fmtNum(c.dispersion, 1) : "·"}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </CardContent>
       </Card>
     </PanelWrap>

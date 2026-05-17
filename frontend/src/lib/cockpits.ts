@@ -520,6 +520,7 @@ export interface MTFStageRow {
   weekly: StagePhase | null;
   monthly: StagePhase | null;
   alignment: "long_aligned" | "short_aligned" | "conflict" | "mixed" | "no_data";
+  stage2_aligned?: boolean;
 }
 export interface MTFStage { count: number; rows: MTFStageRow[]; note?: string; }
 
@@ -734,6 +735,9 @@ export interface NewsShockEvent {
 }
 export interface NewsShock {
   events: NewsShockEvent[]; coverage_symbols: string[];
+  paused_symbols?: PauseRecord[];
+  active_pause_count?: number;
+  default_cooldown_min?: number;
   as_of: string; data_source: string; note?: string;
 }
 
@@ -750,6 +754,7 @@ export interface FIIDIIFlow {
   fii_cash: FIIDIIPoint[]; dii_cash: FIIDIIPoint[];
   fii_futures_oi: FIIDIIPoint[]; fii_options_premium: FIIDIIPoint[];
   nifty_close: FIIDIIPoint[];
+  regimes?: Record<string, string>;
   data_source: string; note?: string;
 }
 
@@ -813,5 +818,104 @@ export interface ResetResponse {
 
 export async function resetTradingData(payload: ResetRequest): Promise<ResetResponse> {
   const { data } = await api.post<ResetResponse>("/portfolios/reset/", payload);
+  return data;
+}
+
+// ---------------------------------------------------------------------------
+// Cycle-8 new endpoints
+// ---------------------------------------------------------------------------
+export interface StockRRGRow {
+  symbol: string;
+  rs_ratio: number;
+  rs_momentum: number;
+  quadrant: "LEADING" | "WEAKENING" | "LAGGING" | "IMPROVING" | "no_data";
+  tail: { rs_ratio: number; rs_mom: number }[];
+}
+export interface StockRRG {
+  count: number;
+  mode: string;
+  tail_length: number;
+  rows: StockRRGRow[];
+  note?: string;
+}
+
+export const useStockRRG = (symbols?: string) =>
+  useQuery({
+    queryKey: ["cockpits", "stock-rrg", symbols ?? ""],
+    queryFn: () => {
+      const q = symbols ? `?symbols=${encodeURIComponent(symbols)}` : "";
+      return api.get<StockRRG>(`/market-data/stock-rrg/${q}`).then((r) => r.data);
+    },
+    ...COMMON,
+  });
+
+export interface PartialFillRow {
+  trade_id: number; symbol: string; side: string;
+  qty_requested: number; qty_filled: number; fill_ratio: number;
+  entry: number; fill: number; slippage_bps: number;
+  queue_score: number; cost_per_lot_inr: number;
+  strategy: string; flags: string[]; created_at: string | null;
+}
+export interface PartialFillBucket {
+  count: number;
+  avg_queue_score?: number;
+  median_queue_score?: number;
+}
+export interface PartialFillReport {
+  count: number;
+  totals: {
+    trades: number; avg_queue_score: number; avg_fill_ratio: number;
+    high_slippage_count: number; low_fill_count: number; chased_count: number;
+  };
+  by_strategy: Record<string, PartialFillBucket>;
+  by_symbol: Record<string, PartialFillBucket>;
+  rows: PartialFillRow[];
+  note?: string;
+}
+
+export const usePartialFill = () =>
+  useQuery({
+    queryKey: ["cockpits", "partial-fill"],
+    queryFn: () => api.get<PartialFillReport>("/portfolios/partial-fill/").then((r) => r.data),
+    ...COMMON,
+  });
+
+export interface SectorHeatmapCell {
+  slot: string; n: number; median: number;
+  dispersion: number; leader: number; laggard: number;
+}
+export interface SectorHeatmapRow {
+  sector: string;
+  cells: SectorHeatmapCell[];
+}
+export interface IntradaySectorHeatmap {
+  slots: string[];
+  rows: SectorHeatmapRow[];
+  sector_count: number;
+  slot_count: number;
+  note?: string;
+}
+
+export const useIntradaySectorHeatmap = () =>
+  useQuery({
+    queryKey: ["cockpits", "intraday-sector-heatmap"],
+    queryFn: () => api.get<IntradaySectorHeatmap>("/market-data/intraday-sector-heatmap/").then((r) => r.data),
+    ...COMMON,
+  });
+
+// News-shock pause/unpause mutations (the GET hook already exists).
+export interface PauseRequest { symbol: string; minutes?: number; reason?: string; }
+export interface PauseRecord {
+  symbol: string; paused_at: string; re_entry_at: string;
+  minutes: number; reason: string; error?: string;
+}
+export async function pauseSymbol(payload: PauseRequest): Promise<PauseRecord> {
+  const { data } = await api.post<PauseRecord>("/market-data/news-shocks/pause/", payload);
+  return data;
+}
+export async function unpauseSymbol(symbol: string): Promise<{ symbol: string; was_paused: boolean }> {
+  const { data } = await api.post<{ symbol: string; was_paused: boolean }>(
+    "/market-data/news-shocks/unpause/", { symbol },
+  );
   return data;
 }
