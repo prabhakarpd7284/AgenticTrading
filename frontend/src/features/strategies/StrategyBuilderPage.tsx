@@ -6,7 +6,7 @@ import { BookOpen, Plus, Sparkles } from "lucide-react";
 import { api } from "@/lib/api";
 import type { StrategySchema } from "@/types";
 import { fmtRel } from "@/lib/utils";
-import { useLegacyStrategies } from "@/lib/legacy";
+import { useKnowledgeDocs } from "@/lib/v2";
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
@@ -37,7 +37,7 @@ export function StrategyBuilderPage() {
     queryKey: ["strategy-instances"],
     queryFn: () => api.get<StrategyInstance[]>("/strategies/instances/").then((r) => r.data),
   });
-  const { data: legacyStrategies = [] } = useLegacyStrategies();
+  const { data: legacyStrategies = [] } = useKnowledgeDocs();
 
   const [open, setOpen] = React.useState(false);
 
@@ -143,12 +143,12 @@ export function StrategyBuilderPage() {
                 <li key={s.id} className="px-5 py-3">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <div className="text-body-sm text-fg font-medium">{s.name}</div>
+                      <div className="text-body-sm text-fg font-medium">{s.title}</div>
                       <div className="text-caption text-fg-subtle">
                         {s.category}{s.created_at && ` · added ${fmtRel(s.created_at)} ago`}
                       </div>
-                      {s.description && (
-                        <p className="text-body-sm text-fg-muted mt-1 line-clamp-2">{s.description}</p>
+                      {s.content && (
+                        <p className="text-body-sm text-fg-muted mt-1 line-clamp-2">{s.content}</p>
                       )}
                     </div>
                     <Badge tone="neutral" className="shrink-0">{s.category || "general"}</Badge>

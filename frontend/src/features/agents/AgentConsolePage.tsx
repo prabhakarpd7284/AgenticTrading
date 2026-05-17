@@ -10,9 +10,9 @@ import { api } from "@/lib/api";
 import { connect } from "@/lib/ws";
 import type { AgentEvent, AgentRun, Portfolio, StrategySchema } from "@/types";
 import { cn, fmtRel } from "@/lib/utils";
-import { useLegacyAudit } from "@/lib/legacy";
+import { useAuditFeed } from "@/lib/v2";
 
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/Card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Badge } from "@/components/ui/Badge";
@@ -50,7 +50,7 @@ export function AgentConsolePage() {
   // Legacy audit feed — shown alongside v2 runs so the console has real
   // content on day one (the legacy DB has 398 AuditLog rows from the
   // Streamlit-era pipelines).
-  const { data: legacyAudit = [] } = useLegacyAudit(50);
+  const { data: legacyAudit = [] } = useAuditFeed(50);
 
   /* ---------- selected run + stream ---------- */
   const [events, setEvents] = React.useState<AgentEvent[]>([]);
@@ -64,7 +64,7 @@ export function AgentConsolePage() {
     wsRef.current?.close();
     if (!selected) return;
     wsRef.current = connect(`/ws/agents/${selected.id}/`, (msg) => {
-      setEvents((prev) => [...prev, msg as AgentEvent]);
+      setEvents((prev) => [...prev, msg as unknown as AgentEvent]);
     });
     return () => wsRef.current?.close();
   }, [selected?.id]);

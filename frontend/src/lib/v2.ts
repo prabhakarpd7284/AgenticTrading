@@ -1,0 +1,286 @@
+/**
+ * Typed React-Query client for the v2-native top-level endpoints that
+ * absorbed the old /api/v1/legacy/* surface in the v1→v2 migration.
+ *
+ * Hook names dropped the "Legacy" prefix; shapes stay identical because
+ * the underlying view functions are the same (apps.trading.api.
+ * legacy_compat_views) — only the URL prefix changed.
+ *
+ * This file replaces the old `lib/legacy.ts`; once Wave 3 deletes that
+ * file, the only thing left to do is to move these hooks into per-domain
+ * files (lib/portfolios.ts, lib/system.ts, …) if the organisation grows.
+ */
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { api } from "./api";
+
+/* --------------------------------------------------------------- */
+/* Types — match the JSON shapes from legacy_compat_views.py        */
+/* --------------------------------------------------------------- */
+export interface PortfolioSummary {
+  capital: number;
+  invested: number;
+  available_cash: number;
+  daily_pnl: number;
+  total_pnl: number;
+  daily_loss: number;
+  open_positions: number;
+  snapshot_date: string;
+  straddle_count: number;
+  straddle_pnl: number;
+  straddle_premium_sold: number;
+  today_trades: number;
+  today_wins: number;
+  today_losses: number;
+  combined_pnl: number;
+  combined: { equity_pnl: number; options_pnl: number; total_pnl: number };
+}
+
+export interface EquityPosition {
+  id: number;
+  symbol: string;
+  side: "BUY" | "SELL";
+  entry_price: number;
+  stop_loss: number;
+  target: number;
+  quantity: number;
+  pnl: number | null;
+  status: string;
+  confidence: number;
+  fill_price: number | null;
+}
+
+export interface OptionPosition {
+  id: number;
+  underlying: string;
+  strike: number;
+  ce_strike: number;
+  pe_strike: number;
+  expiry: string;
+  lots: number;
+  lot_size: number;
+  ce_sell: number;
+  pe_sell: number;
+  ce_current: number;
+  pe_current: number;
+  net_delta: number;
+  pnl_inr: number;
+  realized_pnl: number;
+  unrealized_pnl: number;
+  status: string;
+  dte: number;
+}
+
+export interface PositionsOverview {
+  equity: EquityPosition[];
+  options: OptionPosition[];
+}
+
+export interface Trade {
+  id: number;
+  trade_date: string;
+  symbol: string;
+  side: "BUY" | "SELL";
+  status: string;
+  entry_price: number;
+  stop_loss: number;
+  target: number;
+  quantity: number;
+  fill_price: number | null;
+  pnl: number | null;
+  confidence: number;
+  reasoning: string;
+  exit_reason: string;
+  created_at: string;
+}
+
+export interface AuditEntry {
+  time: string;
+  type: string;
+  symbol: string;
+  detail: string;
+}
+
+export interface RiskOverview {
+  capital: number;
+  daily_loss: number;
+  daily_loss_pct: number;
+  max_daily_loss: number;
+  daily_loss_limit_pct: number;
+  capital_deployed: number;
+  capital_deployed_pct: number;
+  max_position_value: number;
+  open_positions: number;
+  max_open_positions: number;
+  underwater_options: number;
+  active_straddles: number;
+  options_margin_exposure: number;
+  total_exposure: number;
+  total_exposure_pct: number;
+  status: "GREEN" | "YELLOW" | "RED";
+}
+
+export interface RiskAlert {
+  severity: "info" | "warning" | "critical";
+  message: string;
+  action: string;
+}
+
+export interface SystemStatus {
+  ai_paused: boolean;
+  is_market_open: boolean;
+  trading_mode: "paper" | "live";
+  session: {
+    is_open: boolean;
+    is_weekday: boolean;
+    current_time: string;
+    market_open: string;
+    market_close: string;
+    elapsed_minutes: number;
+    remaining_minutes: number;
+    progress_pct: number;
+    session_phase: string;
+  };
+}
+
+export interface KnowledgeDoc {
+  id: number;
+  title: string;       // (legacy.ts incorrectly called this "name")
+  category: string;
+  content: string;     // (legacy.ts incorrectly called this "description")
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface OptionsPositionRow {
+  id: number;
+  underlying: string;
+  strike: number;
+  expiry: string;
+  trade_date: string;
+  status: string;
+  lots: number;
+  lot_size: number;
+  ce_symbol: string;
+  pe_symbol: string;
+  ce_sell: number;
+  pe_sell: number;
+  ce_current: number;
+  pe_current: number;
+  premium_sold: number;
+  pnl_inr: number;
+  net_delta: number;
+  action_taken: string;
+}
+
+/* --------------------------------------------------------------- */
+/* Hooks                                                           */
+/* --------------------------------------------------------------- */
+const REFETCH_MS = 15_000;
+
+export function usePortfolioSummary() {
+  return useQuery({
+    queryKey: ["portfolio-summary"],
+    queryFn: () => api.get<PortfolioSummary>("/portfolios/summary/").then((r) => r.data),
+    refetchInterval: REFETCH_MS,
+  });
+}
+
+export function usePositions() {
+  return useQuery({
+    queryKey: ["positions"],
+    queryFn: () => api.get<PositionsOverview>("/positions/").then((r) => r.data),
+    refetchInterval: REFETCH_MS,
+  });
+}
+
+export function useTrades(opts?: { limit?: number; symbol?: string }) {
+  const params = new URLSearchParams();
+  if (opts?.limit) params.set("limit", String(opts.limit));
+  if (opts?.symbol) params.set("symbol", opts.symbol);
+  const qs = params.toString();
+  return useQuery({
+    queryKey: ["trades", opts],
+    queryFn: () =>
+      api
+        .get<{ count: number; results: Trade[] }>(`/trades/${qs ? "?" + qs : ""}`)
+        .then((r) => r.data),
+  });
+}
+
+export function useAuditFeed(limit = 25) {
+  return useQuery({
+    queryKey: ["audit", limit],
+    queryFn: () =>
+      api
+        .get<{ results: AuditEntry[] }>(`/events/audit/?limit=${limit}`)
+        .then((r) => r.data.results),
+    refetchInterval: REFETCH_MS,
+  });
+}
+
+export function useRiskOverview() {
+  return useQuery({
+    queryKey: ["risk"],
+    queryFn: () => api.get<RiskOverview>("/risk/").then((r) => r.data),
+    refetchInterval: REFETCH_MS,
+  });
+}
+
+export function useRiskAlerts() {
+  return useQuery({
+    queryKey: ["risk-alerts"],
+    queryFn: () => api.get<{ results: RiskAlert[] }>("/risk/alerts/").then((r) => r.data.results),
+    refetchInterval: REFETCH_MS,
+  });
+}
+
+export function useSystemStatus() {
+  return useQuery({
+    queryKey: ["system-status"],
+    queryFn: () => api.get<SystemStatus>("/system/").then((r) => r.data),
+    refetchInterval: 30_000,
+  });
+}
+
+export function useKnowledgeDocs() {
+  return useQuery({
+    queryKey: ["knowledge"],
+    queryFn: () =>
+      api
+        .get<{ count: number; results: KnowledgeDoc[] }>("/rag/knowledge/")
+        .then((r) => r.data.results),
+  });
+}
+
+export function useOptionsPositions(status?: string) {
+  return useQuery({
+    queryKey: ["options-positions", status],
+    queryFn: () =>
+      api
+        .get<{ count: number; results: OptionsPositionRow[] }>(
+          `/options-positions/${status ? "?status=" + status : ""}`,
+        )
+        .then((r) => r.data),
+    refetchInterval: REFETCH_MS,
+  });
+}
+
+/* --------------------------------------------------------------- */
+/* Mutations                                                       */
+/* --------------------------------------------------------------- */
+export function usePauseAi() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.post("/system/pause/").then((r) => r.data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["system-status"] }),
+  });
+}
+
+export function useResumeAi() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.post("/system/resume/").then((r) => r.data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["system-status"] }),
+  });
+}

@@ -4,10 +4,10 @@ import { Briefcase, Download, LineChart as LineIcon, PauseCircle, X } from "luci
 import { connect } from "@/lib/ws";
 import { clsPnl, fmtInr } from "@/lib/utils";
 import {
-  useLegacyPositions, useLegacyTrades, useLegacyStraddles,
-  type LegacyEquityPosition, type LegacyOptionPosition, type LegacyTrade,
-  type LegacyStraddle,
-} from "@/lib/legacy";
+  usePositions, useTrades, useOptionsPositions,
+  type EquityPosition, type OptionPosition, type Trade,
+  type OptionsPositionRow,
+} from "@/lib/v2";
 
 import {
   Card, CardContent, CardDescription, CardHeader, CardTitle,
@@ -17,13 +17,15 @@ import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/Tabs";
+import { FreshnessIndicator } from "@/components/ui/FreshnessIndicator";
 
-type EnrichedEquity = LegacyEquityPosition & { ltp: number | null; liveUnrealized: number };
+type EnrichedEquity = EquityPosition & { ltp: number | null; liveUnrealized: number };
 
 export function PositionsPage() {
-  const { data: positions, isLoading: posLoading } = useLegacyPositions();
-  const { data: tradesBundle } = useLegacyTrades({ limit: 200 });
-  const { data: straddleBundle } = useLegacyStraddles();
+  const { data: positions, isLoading: posLoading, dataUpdatedAt: posUpdatedAt } =
+    usePositions();
+  const { data: tradesBundle } = useTrades({ limit: 200 });
+  const { data: straddleBundle } = useOptionsPositions();
 
   const equityOpen  = positions?.equity  ?? [];
   const optionsOpen = positions?.options ?? [];
@@ -36,6 +38,14 @@ export function PositionsPage() {
 
   /* -------- live ticks -> ltp map -------- */
   const [ltps, setLtps] = React.useState<Record<string, number>>({});
+  // Tracks the wall-clock time of the most recent tick — drives the
+  // FreshnessIndicator in the header so the operator can see at a glance
+  // if the broker tape has stalled.
+  const [lastTickAt, setLastTickAt] = React.useState<number | null>(null);
+  // Cleared LTPs are honest; a stale-but-shown LTP could mislead an exit
+  // decision, so we drop the map on disconnect rather than silently keeping
+  // old values around.
+  const [wsLive, setWsLive] = React.useState(false);
   React.useEffect(() => {
     if (equityOpen.length === 0) return;
     const ws = connect(
@@ -43,9 +53,21 @@ export function PositionsPage() {
       (m) => {
         const t = m as { token: string; symbol?: string; ltp: number };
         const key = t.symbol ?? t.token;
-        if (key) setLtps((prev) => ({ ...prev, [key]: t.ltp }));
+        if (key) {
+          setLtps((prev) => ({ ...prev, [key]: t.ltp }));
+          setLastTickAt(Date.now());
+        }
       },
-      { onOpen: () => ws.send({ op: "subscribe", tokens: equityOpen.map((p) => p.symbol) }) },
+      {
+        onOpen: () => {
+          setWsLive(true);
+          ws.send({ op: "subscribe", tokens: equityOpen.map((p) => p.symbol) });
+        },
+        onClose: () => {
+          setWsLive(false);
+          setLtps({});
+        },
+      },
     );
     return () => ws.close();
   }, [equityOpen.length]);
@@ -123,7 +145,7 @@ export function PositionsPage() {
   ];
 
   /* -------- options columns -------- */
-  const optionColumns: Column<LegacyOptionPosition>[] = [
+  const optionColumns: Column<OptionPosition>[] = [
     {
       key: "underlying", header: "Position", sortable: true,
       render: (p) => (
@@ -139,13 +161,13 @@ export function PositionsPage() {
     },
     {
       key: "ce_sell" as any, header: "Premium sold",
-      render: (p: LegacyOptionPosition) => (
+      render: (p: OptionPosition) => (
         <span className="font-mono tabular">{fmtInr((p.ce_sell + p.pe_sell) * p.lot_size * p.lots)}</span>
       ),
     },
     {
       key: "ce_current" as any, header: "Combined LTP",
-      render: (p: LegacyOptionPosition) => (
+      render: (p: OptionPosition) => (
         <span className="font-mono tabular">{fmtInr(p.ce_current + p.pe_current)}</span>
       ),
     },
@@ -170,7 +192,7 @@ export function PositionsPage() {
   ];
 
   /* -------- closed trades columns -------- */
-  const closedColumns: Column<LegacyTrade>[] = [
+  const closedColumns: Column<Trade>[] = [
     { key: "trade_date", header: "Date", sortable: true },
     {
       key: "symbol", header: "Symbol",
@@ -199,7 +221,7 @@ export function PositionsPage() {
     },
   ];
 
-  const closedStraddleColumns: Column<LegacyStraddle>[] = [
+  const closedStraddleColumns: Column<OptionsPositionRow>[] = [
     { key: "trade_date", header: "Date", sortable: true },
     {
       key: "underlying", header: "Position",
@@ -240,7 +262,23 @@ export function PositionsPage() {
             </span>
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Two freshness signals: the broker tick stream and the legacy
+              positions snapshot. Both matter for an exit decision. */}
+          {equityOpen.length > 0 && (
+            <FreshnessIndicator
+              label={wsLive ? "Last tick" : "Tick stream offline"}
+              timestamp={lastTickAt}
+              freshMs={3_000}
+              staleMs={30_000}
+            />
+          )}
+          <FreshnessIndicator
+            label="Snapshot"
+            timestamp={posUpdatedAt}
+            freshMs={20_000}
+            staleMs={60_000}
+          />
           <Button variant="secondary" leading={<Download className="h-4 w-4" />}>Export CSV</Button>
         </div>
       </header>
@@ -287,7 +325,7 @@ export function PositionsPage() {
                   description="Short-straddle positions registered via manage_straddle will appear here."
                 />
               ) : (
-                <DataTable<LegacyOptionPosition>
+                <DataTable<OptionPosition>
                   columns={optionColumns}
                   rows={optionsOpen}
                   rowKey={(r) => String(r.id)}
@@ -309,7 +347,7 @@ export function PositionsPage() {
                       <h3 className="text-caption uppercase tracking-wider text-fg-subtle mb-2">
                         Equity trades ({closedTrades.length})
                       </h3>
-                      <DataTable<LegacyTrade>
+                      <DataTable<Trade>
                         columns={closedColumns}
                         rows={closedTrades}
                         rowKey={(r) => String(r.id)}
@@ -321,7 +359,7 @@ export function PositionsPage() {
                       <h3 className="text-caption uppercase tracking-wider text-fg-subtle mb-2">
                         Closed straddles ({closedStraddles.length})
                       </h3>
-                      <DataTable<LegacyStraddle>
+                      <DataTable<OptionsPositionRow>
                         columns={closedStraddleColumns}
                         rows={closedStraddles}
                         rowKey={(r) => String(r.id)}

@@ -14,9 +14,9 @@ import { connect } from "@/lib/ws";
 import type { AgentRun, Portfolio } from "@/types";
 import { clsPnl, fmtInr } from "@/lib/utils";
 import {
-  useLegacyAudit, useLegacyAlerts, useLegacyPortfolio, useLegacyPositions,
-  useLegacyRisk, useLegacySystem,
-} from "@/lib/legacy";
+  useAuditFeed, useRiskAlerts, usePortfolioSummary, usePositions,
+  useRiskOverview, useSystemStatus,
+} from "@/lib/v2";
 
 import {
   Card, CardContent, CardDescription, CardHeader, CardTitle,
@@ -26,6 +26,7 @@ import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Skeleton } from "@/components/ui/Skeleton";
+import { FreshnessIndicator } from "@/components/ui/FreshnessIndicator";
 
 type PnlMsg = { portfolio_id: string; mtm: number; day_pnl: number; unrealized: number };
 
@@ -35,12 +36,16 @@ export function DashboardPage() {
   /* ------------------------------------------------------------ */
   /* Legacy-bridge queries — these return the REAL sqlite data.    */
   /* ------------------------------------------------------------ */
-  const { data: legacyPortfolio, isLoading: pfLoading } = useLegacyPortfolio();
-  const { data: legacyPositions }  = useLegacyPositions();
-  const { data: auditFeed = [] }   = useLegacyAudit(8);
-  const { data: alerts = [] }      = useLegacyAlerts();
-  const { data: risk }             = useLegacyRisk();
-  const { data: system }           = useLegacySystem();
+  const {
+    data: legacyPortfolio,
+    isLoading: pfLoading,
+    dataUpdatedAt: portfolioUpdatedAt,
+  } = usePortfolioSummary();
+  const { data: legacyPositions }  = usePositions();
+  const { data: auditFeed = [] }   = useAuditFeed(8);
+  const { data: alerts = [] }      = useRiskAlerts();
+  const { data: risk }             = useRiskOverview();
+  const { data: system }           = useSystemStatus();
 
   /* v2 queries — kept so the page still works once the native v2   */
   /* schema is populated. These are currently empty for most users.  */
@@ -59,11 +64,16 @@ export function DashboardPage() {
   /* ------------------------------------------------------------ */
   const [live, setLive] = React.useState<PnlMsg | null>(null);
   const [curve, setCurve] = React.useState<{ t: number; v: number }[]>([]);
+  // Last PnL push time — drives the freshness pill on the equity-curve card
+  // so the operator can tell the difference between "flat market" and
+  // "WebSocket has been silent for 3 minutes".
+  const [lastPnlAt, setLastPnlAt] = React.useState<number | null>(null);
   React.useEffect(() => {
     const ws = connect("/ws/pnl/", (msg) => {
       const m = msg as PnlMsg;
       setLive(m);
       setCurve((c) => [...c.slice(-199), { t: Date.now(), v: m.mtm }]);
+      setLastPnlAt(Date.now());
     });
     return () => ws.close();
   }, []);
@@ -105,6 +115,14 @@ export function DashboardPage() {
             NIFTY50
             <span aria-hidden>·</span>
             capital {fmtInr(capital)}
+            <span aria-hidden>·</span>
+            <FreshnessIndicator
+              variant="muted"
+              label="Portfolio"
+              timestamp={portfolioUpdatedAt}
+              freshMs={20_000}
+              staleMs={60_000}
+            />
           </p>
         </div>
 
@@ -205,7 +223,15 @@ export function DashboardPage() {
                   Mark-to-market since market open, updated live.
                 </CardDescription>
               </div>
-              <Badge tone="info" dot>Live</Badge>
+              <div className="flex items-center gap-2">
+                <FreshnessIndicator
+                  label="Last tick"
+                  timestamp={lastPnlAt}
+                  freshMs={5_000}
+                  staleMs={30_000}
+                />
+                <Badge tone="info" dot>Live</Badge>
+              </div>
             </div>
           </CardHeader>
           <CardContent className="h-64">

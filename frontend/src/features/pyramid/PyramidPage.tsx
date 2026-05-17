@@ -16,6 +16,7 @@ import { KPI } from "@/components/ui/KPI";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
+import { FreshnessIndicator } from "@/components/ui/FreshnessIndicator";
 import { cn, fmtInr, fmtNum, clsPnl } from "@/lib/utils";
 import { api } from "@/lib/api";
 import { INDICES, INDEX_LIST, getLotSize, isMonthlyOnly, getExpiryWeekday } from "@/lib/market-config";
@@ -99,9 +100,11 @@ function usePyramid(params: Record<string, string>, enabled: boolean) {
   return useQuery<PyramidData>({
     queryKey: ["pyramid", params],
     queryFn: async () => {
-      // Route through /legacy/ so the vite proxy sends to port 8001
-      // where the v2 backend (with DRF + auth) actually runs.
-      const r = await api.get<PyramidData>("/legacy/pyramid/", {
+      // Synchronous backtest — the v2 native endpoint at
+      // /strategies/pyramid/backtest/ runs the engine in-process and
+      // returns the chart payload. For long iterations use the Ops
+      // Console (run_pyramid via /ws/ops/).
+      const r = await api.get<PyramidData>("/strategies/pyramid/backtest/", {
         params,
         timeout: 120_000,
       });
@@ -279,7 +282,7 @@ export default function PyramidPage() {
     return p;
   }, [strike, optType, underlying, expiry, date, capital, riskPct, profitRisk, maxPyramids, lotSize, dryRun, telegram]);
 
-  const { data, isLoading, isError, error } = usePyramid(params, run);
+  const { data, isLoading, isError, error, dataUpdatedAt } = usePyramid(params, run);
 
   // Reset run flag after data loads or errors
   React.useEffect(() => {
@@ -422,7 +425,14 @@ export default function PyramidPage() {
       )}
 
       {/* ── Results ── */}
-      {data && <PyramidResults data={data} showLog={showLog} setShowLog={setShowLog} />}
+      {data && (
+        <PyramidResults
+          data={data}
+          showLog={showLog}
+          setShowLog={setShowLog}
+          dataUpdatedAt={dataUpdatedAt}
+        />
+      )}
 
       {/* ── Empty state ── */}
       {!data && !isLoading && !isError && (
@@ -451,10 +461,12 @@ function PyramidResults({
   data,
   showLog,
   setShowLog,
+  dataUpdatedAt,
 }: {
   data: PyramidData;
   showLog: boolean;
   setShowLog: (v: boolean) => void;
+  dataUpdatedAt: number;
 }) {
   const { kpis, entries, exit, candles, trail_sl, position } = data;
   const won = kpis.won;
@@ -462,7 +474,7 @@ function PyramidResults({
   return (
     <div className="space-y-4">
       {/* ── Symbol + Result badge ── */}
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3 flex-wrap">
         <h2 className="text-h3 font-semibold text-fg">{data.symbol}</h2>
         <Badge tone={won ? "success" : "danger"} dot>
           {won ? "WINNER" : "LOSS"}
@@ -473,6 +485,15 @@ function PyramidResults({
             <CheckCircle2 className="h-3 w-3" /> Sent to Telegram
           </Badge>
         )}
+        {/* Pyramid is a one-shot backtest, not a stream — generous thresholds
+            (1min fresh, 10min stale) flag re-run if the operator left it up
+            for a while. */}
+        <FreshnessIndicator
+          label="Simulated"
+          timestamp={dataUpdatedAt}
+          freshMs={60_000}
+          staleMs={10 * 60_000}
+        />
       </div>
 
       {/* ── KPIs ── */}

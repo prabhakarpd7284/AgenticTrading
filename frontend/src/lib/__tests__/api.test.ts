@@ -12,7 +12,7 @@
  * regress silently.  Uses axios's built-in `adapter` override — no
  * extra dev-deps required.
  */
-import { describe, expect, it, beforeEach, afterEach } from "vitest";
+import { describe, expect, it, afterEach } from "vitest";
 import type { AxiosRequestConfig, AxiosResponse } from "axios";
 import { api, list } from "../api";
 
@@ -48,13 +48,13 @@ describe("api interceptor", () => {
 
   it("leaves detail responses alone (no next/previous keys)", async () => {
     restore = stubOnce(200, { results: [{ event: "x" }] });
-    const { data } = await api.get("/legacy/audit/");
+    const { data } = await api.get("/events/audit/");
     expect(data).toEqual({ results: [{ event: "x" }] });
   });
 
   it("leaves bare-object responses alone", async () => {
     restore = stubOnce(200, { capital: 500000, daily_pnl: 0 });
-    const { data } = await api.get("/legacy/portfolio/");
+    const { data } = await api.get("/portfolios/summary/");
     expect(data).toEqual({ capital: 500000, daily_pnl: 0 });
   });
 
