@@ -38,6 +38,11 @@ import { Skeleton } from "@/components/ui/Skeleton";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { DataTable, type Column } from "@/components/ui/DataTable";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/Tabs";
+import {
+  listHistory, recordRun, deleteHistoryEntry, clearHistory,
+  type BacktestHistoryEntry,
+} from "./history";
+import { Clock, History, Trash2, X } from "lucide-react";
 
 export function BacktesterPage() {
   return (
@@ -64,6 +69,9 @@ export function BacktesterPage() {
           <TabsTrigger value="daily">Daily Swing</TabsTrigger>
           <TabsTrigger value="intraday">Intraday Multi-TF</TabsTrigger>
           <TabsTrigger value="basket">Morning Basket</TabsTrigger>
+          <TabsTrigger value="history" className="gap-1.5">
+            <History className="h-3.5 w-3.5" /> History
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="daily">
@@ -74,6 +82,9 @@ export function BacktesterPage() {
         </TabsContent>
         <TabsContent value="basket">
           <BacktestTab mode="basket" />
+        </TabsContent>
+        <TabsContent value="history">
+          <HistoryTab />
         </TabsContent>
       </Tabs>
     </div>
@@ -98,6 +109,13 @@ function BacktestTab({ mode }: { mode: "daily" | "intraday" | "basket" }) {
     to_date: to,
     enabled: run,
   });
+
+  // Snapshot every completed run into localStorage so the History tab can
+  // replay it without re-paying broker cost. recordRun() de-dups identical
+  // mode+window pairs within 10s (React Query refetch quirk).
+  React.useEffect(() => {
+    if (data && !isLoading) recordRun(mode, data);
+  }, [data, isLoading, mode]);
 
   return (
     <div className="space-y-6">
@@ -168,7 +186,10 @@ function BacktestTab({ mode }: { mode: "daily" | "intraday" | "basket" }) {
 /* ================================================================== */
 
 function BacktestResults({ data }: { data: OKBacktestPayload }) {
-  const [showTrades, setShowTrades] = React.useState(false);
+  // Default to OPEN — operators couldn't find the trade list before because
+  // the chevron was easy to miss. Win-rate / PF means nothing without seeing
+  // which stocks traded.
+  const [showTrades, setShowTrades] = React.useState(true);
   const [tradeSort, setTradeSort] = React.useState<{ key: string; dir: "asc" | "desc" }>({ key: "pnl", dir: "desc" });
 
   if (data.errors.length > 0 && data.total_trades === 0) {
@@ -435,6 +456,134 @@ function BacktestResults({ data }: { data: OKBacktestPayload }) {
             </ul>
           </CardContent>
         </Card>
+      )}
+    </div>
+  );
+}
+
+/* ================================================================== */
+/* History tab — last 20 runs from localStorage                        */
+/* ================================================================== */
+
+function HistoryTab() {
+  const [entries, setEntries] = React.useState<BacktestHistoryEntry[]>(() => listHistory());
+  const [open, setOpen] = React.useState<BacktestHistoryEntry | null>(null);
+
+  const refresh = () => setEntries(listHistory());
+
+  const handleDelete = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    deleteHistoryEntry(id);
+    refresh();
+    if (open?.id === id) setOpen(null);
+  };
+
+  const handleClear = () => {
+    if (!confirm("Clear all backtest history? This can't be undone.")) return;
+    clearHistory();
+    refresh();
+    setOpen(null);
+  };
+
+  if (entries.length === 0) {
+    return (
+      <Card>
+        <CardContent className="py-12">
+          <EmptyState
+            title="No backtest history yet"
+            description="Run a Daily Swing, Intraday Multi-TF, or Morning Basket backtest — every result is logged here for the last 20 runs, replayable without re-fetching."
+          />
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between gap-2">
+          <div>
+            <CardTitle>Past runs</CardTitle>
+            <CardDescription>
+              Last {entries.length} backtest{entries.length === 1 ? "" : "s"} on this device. Click any row to re-display its full result.
+            </CardDescription>
+          </div>
+          <Button variant="ghost" size="sm" onClick={handleClear} leading={<Trash2 className="h-3.5 w-3.5" />}>
+            Clear all
+          </Button>
+        </CardHeader>
+        <CardContent className="p-0">
+          <table className="w-full text-body-sm">
+            <thead>
+              <tr className="border-b border-border text-fg-subtle">
+                <th className="text-left p-2 pl-4">Ran</th>
+                <th className="text-left p-2">Mode</th>
+                <th className="text-left p-2">Window</th>
+                <th className="text-right p-2">Symbols</th>
+                <th className="text-right p-2">Trades</th>
+                <th className="text-right p-2">Win%</th>
+                <th className="text-right p-2">PF</th>
+                <th className="text-right p-2">P&L</th>
+                <th className="text-right p-2 pr-4"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {entries.map((e) => {
+                const isOpen = open?.id === e.id;
+                const pfColor = e.profit_factor >= 1.5 ? "text-pnl-up"
+                  : e.profit_factor >= 1.0 ? "text-fg" : "text-pnl-down";
+                return (
+                  <tr key={e.id}
+                      onClick={() => setOpen(isOpen ? null : e)}
+                      className={cn(
+                        "border-b border-border/40 cursor-pointer hover:bg-surface-2/40",
+                        isOpen && "bg-accent/5",
+                      )}>
+                    <td className="p-2 pl-4 text-fg-muted">
+                      <span className="inline-flex items-center gap-1">
+                        <Clock className="h-3 w-3" />
+                        {new Date(e.ran_at).toLocaleString()}
+                      </span>
+                    </td>
+                    <td className="p-2"><Badge tone="brand">{e.mode}</Badge></td>
+                    <td className="p-2 font-mono text-caption">{e.from_date} → {e.to_date}</td>
+                    <td className="p-2 text-right font-mono">{e.symbols_count}</td>
+                    <td className="p-2 text-right font-mono">{e.total_trades}</td>
+                    <td className="p-2 text-right font-mono">{(e.win_rate * 100).toFixed(0)}%</td>
+                    <td className={cn("p-2 text-right font-mono", pfColor)}>{e.profit_factor.toFixed(2)}</td>
+                    <td className={cn("p-2 text-right font-mono", e.total_pnl >= 0 ? "text-pnl-up" : "text-pnl-down")}>
+                      {fmtInr(e.total_pnl)}
+                    </td>
+                    <td className="p-2 pr-4 text-right">
+                      <button
+                        onClick={(ev) => handleDelete(e.id, ev)}
+                        className="text-fg-subtle hover:text-danger p-1"
+                        aria-label="Delete run"
+                        title="Delete"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </CardContent>
+      </Card>
+
+      {open && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between gap-2 px-1">
+            <h3 className="text-body font-semibold">
+              Replay: {open.mode} · {open.from_date} → {open.to_date}
+            </h3>
+            <Button variant="ghost" size="sm" onClick={() => setOpen(null)} leading={<X className="h-3.5 w-3.5" />}>
+              Close replay
+            </Button>
+          </div>
+          <BacktestResults data={open.payload} />
+        </div>
       )}
     </div>
   );
