@@ -160,7 +160,20 @@ CHANNEL_LAYERS = {
     },
 }
 
+# Django cache → Redis. Default LocMemCache is per-process, so the Celery
+# worker / beat / web server each had their own isolated cache — the
+# persistent candle store and Pulse warmer writes were invisible across
+# processes. Shared Redis fixes both. Django 5 ships RedisCache, no extra
+# package required (the `redis` python pkg is already a Celery dep).
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.redis.RedisCache",
+        "LOCATION": REDIS_URL,
+    },
+}
+
 # Celery ---------------------------------------------------------------
+from celery.schedules import crontab  # noqa: E402 — used in CELERY_BEAT_SCHEDULE below
 CELERY_BROKER_URL = env("CELERY_BROKER_URL", default=REDIS_URL)
 CELERY_RESULT_BACKEND = env("CELERY_RESULT_BACKEND", default=REDIS_URL)
 CELERY_TASK_ACKS_LATE = True
@@ -193,6 +206,20 @@ CELERY_BEAT_SCHEDULE = {
     "warm-rotation-cache": {
         "task": "apps.market_data.tasks.warmers.warm_rotation",
         "schedule": 55.0,
+    },
+    # Persist today's 1-min bars into the candle store right after market
+    # close so tomorrow's cockpit time-travel hits a 30-day Redis cache
+    # instead of the broker's 400ms rate limit. crontab() respects
+    # TIME_ZONE = "Asia/Kolkata" set below.
+    "warm-historical-bars-1m": {
+        "task": "apps.market_data.tasks.warmers.warm_historical_bars",
+        "schedule": crontab(hour=15, minute=35, day_of_week="mon-fri"),
+        "args": ("1m",),
+    },
+    "warm-historical-bars-5m": {
+        "task": "apps.market_data.tasks.warmers.warm_historical_bars",
+        "schedule": crontab(hour=15, minute=37, day_of_week="mon-fri"),
+        "args": ("5m",),
     },
 }
 

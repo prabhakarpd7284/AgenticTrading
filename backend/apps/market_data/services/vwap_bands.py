@@ -23,45 +23,16 @@ _TTL = 30
 
 
 def _fetch_1m_today(symbol: str) -> list[dict]:
-    """1-min OHLCV bars for the active intraday session.
-
-    "Active" = today on a weekday after 9:16 IST, otherwise the last
-    completed trading day — so weekends and pre-market still render
-    yesterday's tape instead of blanking the panel.
-
-    Cached 30s so a 10-symbol scan stays cheap.
-    """
-    session = intraday_session_date()
-    key = f"vwap:1m:{symbol}:{session.isoformat()}"
-    cached = cache.get(key)
-    if cached is not None:
-        return cached
-    try:
-        from trading.services.data_service import BrokerClient
-        from trading.services.ticker_service import ticker_service
-
-        broker = BrokerClient.get_instance(); broker.ensure_login()
-        token = ticker_service.get_token(symbol)
-        if not token:
-            cache.set(key, [], _TTL); return []
-
-        start = session.strftime("%Y-%m-%d 09:15")
-        end = session.strftime("%Y-%m-%d 15:30")
-        try:
-            raw = broker.fetch_candles(token, start, end, "ONE_MINUTE", exchange=ticker_service.resolve_exchange(symbol)) or []
-        except TypeError:
-            raw = broker.fetch_candles(token, start, end, "ONE_MINUTE") or []
-        out = [
-            {"t": str(r[0]), "o": float(r[1]), "h": float(r[2]),
-             "l": float(r[3]), "c": float(r[4]),
-             "v": int(r[5]) if len(r) > 5 else 0}
-            for r in raw if len(r) >= 5
-        ]
-        cache.set(key, out, _TTL)
-        return out
-    except Exception:  # noqa: BLE001
-        cache.set(key, [], _TTL)
-        return []
+    """1-min OHLCV bars for the active intraday session — closed sessions
+    read from the persistent candle_store (30-day Redis TTL), today/live
+    sessions share a short-TTL key with all other intraday panels."""
+    from apps.market_data.services import candle_store
+    from trading.services.ticker_service import ticker_service
+    return candle_store.fetch_intraday_bars(
+        symbol, "1m", "ONE_MINUTE",
+        ticker_service.resolve_exchange,
+        short_ttl=_TTL,
+    )
 
 
 def _build_anchored_vwap(bars: list[dict]) -> list[dict]:

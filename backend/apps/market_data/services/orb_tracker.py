@@ -43,37 +43,14 @@ def _watchlist_symbols() -> list[str]:
 
 
 def _fetch_1m(symbol: str) -> list[dict]:
-    """Today's 1-min candles. Caller deals with empty lists."""
-    key = f"orb:1m:{symbol}:{intraday_session_date().isoformat()}"
-    cached = cache.get(key)
-    if cached is not None:
-        return cached
-    try:
-        from trading.services.data_service import BrokerClient
-        from trading.services.ticker_service import ticker_service
-
-        broker = BrokerClient.get_instance(); broker.ensure_login()
-        token = ticker_service.get_token(symbol)
-        if not token:
-            cache.set(key, [], _TTL); return []
-
-        today = intraday_session_date()
-        start = today.strftime("%Y-%m-%d 09:15")
-        end = today.strftime("%Y-%m-%d 15:30")
-        try:
-            raw = broker.fetch_candles(token, start, end, "ONE_MINUTE", exchange=ticker_service.resolve_exchange(symbol)) or []
-        except TypeError:
-            raw = broker.fetch_candles(token, start, end, "ONE_MINUTE") or []
-        out = [
-            {"t": str(r[0]), "o": float(r[1]), "h": float(r[2]),
-             "l": float(r[3]), "c": float(r[4])}
-            for r in raw if len(r) >= 5
-        ]
-        cache.set(key, out, _TTL)
-        return out
-    except Exception:  # noqa: BLE001
-        cache.set(key, [], _TTL)
-        return []
+    """Today's 1-min candles via the shared candle store."""
+    from apps.market_data.services import candle_store
+    from trading.services.ticker_service import ticker_service
+    return candle_store.fetch_intraday_bars(
+        symbol, "1m", "ONE_MINUTE",
+        ticker_service.resolve_exchange,
+        short_ttl=_TTL,
+    )
 
 
 def _parse_minute(ts: str) -> time | None:
