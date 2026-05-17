@@ -2,11 +2,11 @@ import * as React from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
-  AlertTriangle, Bot, ChevronRight, CircleDot, Clock, Play, Send, ShieldCheck, Sparkles,
+  AlertTriangle, Bot, ChevronRight, CircleDot, Clock, Layers, Play, Send, ShieldCheck, Sparkles, Triangle,
 } from "lucide-react";
 import { toast } from "sonner";
 
-import { api } from "@/lib/api";
+import { api, legacyApi } from "@/lib/api";
 import { connect } from "@/lib/ws";
 import type { AgentEvent, AgentRun, Portfolio, StrategySchema } from "@/types";
 import { cn, fmtRel } from "@/lib/utils";
@@ -209,6 +209,21 @@ function RunDetail({
 
   const result = (run.result ?? {}) as RunResult;
   const isStraddle = run.strategy_name === "short_straddle";
+  const isPyramid = run.strategy_name === "pyramid";
+  const isVerticalSpread = run.strategy_name === "vertical_spread";
+
+  // Merge persisted steps from the detail endpoint with live WS events,
+  // de-duplicated by seq. This makes the Stream tab populated for
+  // completed runs even though the WS doesn't replay history.
+  const mergedEvents = React.useMemo(() => {
+    const replay: AgentEvent[] = (run.steps ?? []).map((s) => ({
+      seq: s.seq, node: s.node, type: s.event_type, payload: s.payload,
+    }));
+    const seen = new Map<number, AgentEvent>();
+    for (const e of replay) seen.set(e.seq, e);
+    for (const e of events) seen.set(e.seq, e);
+    return Array.from(seen.values()).sort((a, b) => a.seq - b.seq);
+  }, [run.steps, events]);
 
   // Risk verdict — directional has .risk.approved, straddle has .validated.approved
   const riskApproved = isStraddle
@@ -280,6 +295,10 @@ function RunDetail({
             />
           ) : isStraddle ? (
             <StraddleOverview result={result} />
+          ) : isPyramid ? (
+            <PyramidOverview result={result} />
+          ) : isVerticalSpread ? (
+            <VerticalSpreadOverview result={result} />
           ) : (
             <DirectionalOverview result={result} />
           )}
@@ -292,21 +311,34 @@ function RunDetail({
         )}
 
         <TabsContent value="stream" className="flex-1 min-h-0 px-5 pb-5">
-          <div
-            ref={feedRef}
-            className="h-full overflow-auto rounded-md border border-border bg-surface p-4 space-y-3"
-            aria-live="polite"
-            aria-label="Agent event stream"
-          >
-            {events.length === 0 ? (
-              <div className="text-body-sm text-fg-subtle">
-                {isLive
-                  ? "Waiting for events — the desk will stream reasoning, tool calls, and decisions here."
-                  : "Run completed. Open Overview for the structured result."}
+          <div className="h-full flex flex-col gap-2">
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-caption text-fg-subtle font-mono">
+                {mergedEvents.length} event{mergedEvents.length === 1 ? "" : "s"}
+                {(run.steps?.length ?? 0) > 0 && events.length === 0 && (
+                  <> · {run.steps!.length} replayed from history</>
+                )}
               </div>
-            ) : (
-              events.map((e) => <EventBubble key={e.seq} ev={e} />)
-            )}
+              {mergedEvents.length > 0 && (
+                <CopyButton value={JSON.stringify(mergedEvents, null, 2)} label="Copy events JSON" />
+              )}
+            </div>
+            <div
+              ref={feedRef}
+              className="flex-1 overflow-auto rounded-md border border-border bg-surface p-4 space-y-3"
+              aria-live="polite"
+              aria-label="Agent event stream"
+            >
+              {mergedEvents.length === 0 ? (
+                <div className="text-body-sm text-fg-subtle">
+                  {isLive
+                    ? "Waiting for events — the desk will stream reasoning, tool calls, and decisions here."
+                    : "No events were persisted for this run."}
+                </div>
+              ) : (
+                mergedEvents.map((e) => <EventBubble key={e.seq} ev={e} />)
+              )}
+            </div>
           </div>
         </TabsContent>
 
@@ -342,7 +374,8 @@ type DirectionalRisk = {
     max_position_value?: number;
     daily_loss_so_far?: number;
     max_daily_loss?: number;
-    rr_ratio?: number;
+    risk_reward_ratio?: number;
+    rr_ratio?: number; // legacy field name in some payloads
     regime?: Record<string, unknown>;
   };
 };
@@ -386,19 +419,66 @@ type StraddleAction = {
   roll_to_strike?: number | null;
 };
 
+type StraddleScenario = {
+  label: string;
+  nifty_level: number;
+  ce_expiry_value: number;
+  pe_expiry_value: number;
+  net_pnl_inr: number;
+};
+
 type StraddleAnalysis = {
   net_pnl_inr?: number;
+  net_pnl_pts?: number;
   premium_decayed_pct?: number;
   vix_phase?: "CALM" | "ELEVATED" | "SPIKE";
+  vix_current?: number;
+  vix_prev_close?: number;
+  vix_change_pct?: number;
   market_phase?: string;
   net_delta?: number;
+  ce_delta?: number;
+  pe_delta?: number;
   delta_bias?: string;
   is_underwater?: boolean;
   stop_triggered?: boolean;
+  is_expiry_day?: boolean;
+  expiry_tomorrow?: boolean;
   days_to_expiry?: number;
   nifty_spot?: number;
+  nifty_prev_close?: number;
+  nifty_gap_pts?: number;
+  nifty_gap_pct?: number;
   combined_sold?: number;
   combined_current?: number;
+  ce_ltp?: number;
+  pe_ltp?: number;
+  ce_sell_price?: number;
+  pe_sell_price?: number;
+  ce_itm_by?: number;
+  pe_itm_by?: number;
+  nearest_itm_leg?: "CE" | "PE" | "BOTH_OTM";
+  scenarios?: StraddleScenario[];
+  summary_text?: string;
+};
+
+type StraddleSnapshotLeg = {
+  ltp?: number;
+  open?: number;
+  high?: number;
+  low?: number;
+  prev_close?: number;
+};
+
+type CandleRow = [string, number, number, number, number, number]; // [ts, o, h, l, c, v]
+type StraddleSnapshot = {
+  nifty?: StraddleSnapshotLeg;
+  vix?: StraddleSnapshotLeg;
+  ce?: StraddleSnapshotLeg;
+  pe?: StraddleSnapshotLeg;
+  candles?: CandleRow[];     // NIFTY spot 5-min
+  ce_candles?: CandleRow[];
+  pe_candles?: CandleRow[];
 };
 
 type StraddlePosition = {
@@ -414,24 +494,84 @@ type StraddlePosition = {
   pe_sell?: number;
 };
 
+type PyramidEntry = {
+  bar_index: number;
+  timestamp: string;
+  price: number;
+  lots: number;
+  sl_at_entry: number;
+  reason: string;
+};
+
+type PyramidPlan = {
+  symbol?: string;
+  entries?: PyramidEntry[];
+  exit_price?: number;
+  exit_time?: string;
+  exit_reason?: string;
+  total_lots?: number;
+  peak_lots?: number;
+  total_cost?: number;
+  realized_pnl?: number;
+  peak_unrealized?: number;
+  lot_size?: number;
+  avg_entry?: number;
+  pnl_per_lot?: number;
+  total_pnl_points?: number;
+  total_pnl_rupees?: number;
+  log_tail?: string[];
+  error?: string;
+};
+
+type VerticalSpreadPlan = {
+  underlying?: string;
+  side?: "BULL" | "BEAR";
+  option_type?: "CE" | "PE";
+  expiry?: string;
+  long_strike?: number;
+  short_strike?: number;
+  long_ltp?: number;
+  short_ltp?: number;
+  net_debit?: number;
+  net_credit?: number;
+  lots?: number;
+  lot_size?: number;
+  qty_per_leg?: number;
+  max_profit_inr?: number;
+  max_loss_inr?: number;
+  breakeven?: number;
+  capital_used?: number;
+  rr_ratio?: number;
+  spot?: number;
+  error?: string;
+};
+
 type RunResult = {
-  plan?: DirectionalPlan;
+  plan?: DirectionalPlan | PyramidPlan | VerticalSpreadPlan;
   risk?: DirectionalRisk;
   execution?: ExecutionResult;
   market_data?: MarketData;
   symbol?: string;
+  rag_context?: string;
   action?: StraddleAction;
   analysis?: StraddleAnalysis;
   position?: StraddlePosition;
+  snapshot?: StraddleSnapshot;
   validated?: { approved?: boolean; override?: string | null; reason?: string };
   error?: string;
+  // Vertical spread + pyramid extras stashed at top level:
+  underlying?: string;
+  spot?: number;
+  long_ltp?: number;
+  short_ltp?: number;
+  candles_raw?: unknown[];
 };
 
 /* =================================================================== */
 /* Directional overview                                                 */
 /* =================================================================== */
 function DirectionalOverview({ result }: { result: RunResult }) {
-  const plan = result.plan ?? {};
+  const plan = (result.plan ?? {}) as DirectionalPlan;
   const risk = result.risk ?? {};
   const exe  = result.execution ?? {};
   const md   = result.market_data ?? {};
@@ -506,20 +646,33 @@ function DirectionalOverview({ result }: { result: RunResult }) {
         </CardHeader>
         <CardContent>
           {risk.details ? (
-            <div className="grid grid-cols-2 gap-2">
-              <KvRow label="Risk amount"      value={fmtINR(risk.details.risk_amount)} />
-              <KvRow label="Max risk allowed" value={fmtINR(risk.details.max_risk_allowed)} />
-              <KvRow label="Position value"   value={fmtINR(risk.details.position_value)} />
-              <KvRow label="Max position"     value={fmtINR(risk.details.max_position_value)} />
-              <KvRow label="Daily loss"       value={fmtINR(risk.details.daily_loss_so_far)} />
-              <KvRow label="Max daily loss"   value={fmtINR(risk.details.max_daily_loss)} />
-              {risk.details.rr_ratio != null && (
-                <KvRow label="R:R" value={`${risk.details.rr_ratio.toFixed(2)}×`} />
+            <>
+              <div className="grid grid-cols-2 gap-x-4">
+                <KvRow label="Risk amount"      value={fmtINR(risk.details.risk_amount)} />
+                <KvRow label="Max risk allowed" value={fmtINR(risk.details.max_risk_allowed)} />
+                <KvRow
+                  label="Risk % of capital"
+                  value={risk.details.risk_pct_of_capital != null ? `${risk.details.risk_pct_of_capital.toFixed(2)}%` : "—"}
+                />
+                <KvRow
+                  label="R:R"
+                  value={(() => {
+                    const r = risk.details.risk_reward_ratio ?? risk.details.rr_ratio;
+                    return r != null ? `${r.toFixed(2)}×` : "—";
+                  })()}
+                />
+                <KvRow label="Position value"   value={fmtINR(risk.details.position_value)} />
+                <KvRow label="Max position"     value={fmtINR(risk.details.max_position_value)} />
+                <KvRow label="Daily loss"       value={fmtINR(risk.details.daily_loss_so_far)} />
+                <KvRow label="Max daily loss"   value={fmtINR(risk.details.max_daily_loss)} />
+              </div>
+              {risk.details.regime && (
+                <div className="mt-3 rounded-sm border border-border bg-surface-2/40 p-2.5">
+                  <div className="text-caption uppercase tracking-wider text-fg-subtle mb-1">Regime gate</div>
+                  <RegimeSummary regime={risk.details.regime} />
+                </div>
               )}
-              {(risk.details.regime as any)?.cache && (
-                <KvRow label="Regime" value={String((risk.details.regime as any).cache)} />
-              )}
-            </div>
+            </>
           ) : <p className="text-body-sm text-fg-subtle">No detail.</p>}
         </CardContent>
       </Card>
@@ -569,6 +722,78 @@ function DirectionalOverview({ result }: { result: RunResult }) {
           )}
         </CardContent>
       </Card>
+
+      {/* RAG context — recent trades + strategy rules fed to the planner */}
+      {result.rag_context && (
+        <Card className="lg:col-span-2">
+          <CardHeader>
+            <CardTitle>RAG context</CardTitle>
+            <CardDescription>Recent trades + strategy rules injected into the planner prompt.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <RagContextPanel text={result.rag_context} />
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+function RegimeSummary({ regime }: { regime: Record<string, unknown> }) {
+  // Two shapes possible: cache-miss { cache: "miss"/"bad" } or full
+  // { vol, trend, global_tone, tradeable, summary }
+  if (regime.cache) {
+    return (
+      <p className="text-body-sm text-fg-muted font-mono">
+        Pulse cache <Badge tone="warning">{String(regime.cache)}</Badge> · soft-skipped in dev
+      </p>
+    );
+  }
+  const vol = regime.vol as string | undefined;
+  const trend = regime.trend as string | undefined;
+  const tone = regime.global_tone as string | undefined;
+  const tradeable = regime.tradeable as boolean | undefined;
+  const summary = regime.summary as string | undefined;
+  return (
+    <div className="space-y-1.5">
+      <div className="flex flex-wrap gap-1.5">
+        {vol && <Badge tone={vol === "extreme" ? "danger" : vol === "elevated" ? "warning" : "neutral"}>vol: {vol}</Badge>}
+        {trend && <Badge tone="neutral">trend: {trend}</Badge>}
+        {tone && <Badge tone="neutral">global: {tone}</Badge>}
+        {tradeable != null && <Badge tone={tradeable ? "success" : "danger"}>{tradeable ? "tradeable" : "stand down"}</Badge>}
+      </div>
+      {summary && <p className="text-body-sm text-fg-muted">{summary}</p>}
+    </div>
+  );
+}
+
+function RagContextPanel({ text }: { text: string }) {
+  // The legacy retrieve_context() emits sections separated by "---" and
+  // headed by ALL-CAPS labels like "RECENT TRADES FOR ITC", "OTHER RECENT
+  // TRADES", "ACTIVE STRATEGY RULES". Split + label the sections so they
+  // render as collapsible blocks instead of one blob.
+  const sections = text.split(/\n\n---\n\n/).map((s) => s.trim()).filter(Boolean);
+  if (sections.length === 0) return null;
+
+  return (
+    <div className="space-y-3">
+      {sections.map((section, i) => {
+        const firstLine = section.split("\n", 1)[0] ?? "";
+        const titleMatch = firstLine.match(/^([A-Z][A-Z0-9_ ()/]+):/);
+        const title = titleMatch ? titleMatch[1] : `Section ${i + 1}`;
+        const body = section.slice(firstLine.length + 1).trim();
+        return (
+          <details key={i} className="rounded-sm border border-border bg-surface-2/40" open={i === 0}>
+            <summary className="cursor-pointer px-3 py-2 text-body-sm text-fg flex items-center justify-between">
+              <span className="font-medium">{title}</span>
+              <span className="text-caption text-fg-subtle font-mono">{body.length} chars</span>
+            </summary>
+            <pre className="px-3 pb-3 text-caption font-mono text-fg-muted whitespace-pre-wrap max-h-72 overflow-auto">
+              {body}
+            </pre>
+          </details>
+        );
+      })}
     </div>
   );
 }
@@ -663,11 +888,180 @@ function DirectionalChart({ result }: { result: RunResult }) {
 /* =================================================================== */
 /* Straddle overview                                                    */
 /* =================================================================== */
+/* =================================================================== */
+/* Pyramid overview                                                     */
+/* =================================================================== */
+function PyramidOverview({ result }: { result: RunResult }) {
+  const plan = (result.plan ?? {}) as PyramidPlan;
+  const entries = plan.entries ?? [];
+  const pnl = plan.total_pnl_rupees ?? 0;
+  const pnlTone = pnl >= 0 ? "success" : "danger";
+
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-5">
+      {/* Headline */}
+      <Card className="lg:col-span-2">
+        <CardHeader className="flex flex-row items-center gap-3 flex-wrap">
+          <CardTitle className="flex items-center gap-2">
+            <Triangle className="h-4 w-4 text-accent" aria-hidden />
+            <span className="font-mono text-h3">{plan.symbol ?? result.symbol ?? "—"}</span>
+            <Badge tone="info">PYRAMID</Badge>
+            {plan.exit_reason && <Badge tone="neutral">exit: {plan.exit_reason}</Badge>}
+          </CardTitle>
+          <Badge tone={pnlTone as any}>
+            P&amp;L {fmtINR(pnl)}{plan.total_pnl_points != null ? ` · ${plan.total_pnl_points.toFixed(1)} pts` : ""}
+          </Badge>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            <KvBlock label="Underlying" value={result.underlying ?? "—"} />
+            <KvBlock label="Spot at fetch" value={fmtNum(result.spot)} />
+            <KvBlock label="Candles" value={String((result.candles_raw as any[] | undefined)?.length ?? 0)} />
+            <KvBlock label="Lot size" value={String(plan.lot_size ?? 0)} />
+            <KvBlock label="Entries" value={String(entries.length)} />
+            <KvBlock label="Peak lots" value={String(plan.peak_lots ?? 0)} />
+            <KvBlock label="Total lots" value={String(plan.total_lots ?? 0)} />
+            <KvBlock label="Avg entry" value={fmtNum(plan.avg_entry)} />
+            <KvBlock label="Exit price" value={fmtNum(plan.exit_price)} />
+            <KvBlock label="Exit time" value={plan.exit_time ?? "—"} />
+            <KvBlock label="Peak unrealized" value={plan.peak_unrealized != null ? `${plan.peak_unrealized.toFixed(1)} pts` : "—"} />
+            <KvBlock label="P&L / lot" value={plan.pnl_per_lot != null ? plan.pnl_per_lot.toFixed(2) : "—"} tone={pnlTone} />
+          </div>
+          {plan.error && (
+            <div className="mt-3 rounded-sm border border-warning/40 bg-warning/5 p-2.5 text-body-sm text-fg-muted">
+              <strong className="text-fg">No simulation:</strong> {plan.error}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Entries table */}
+      {entries.length > 0 && (
+        <Card className="lg:col-span-2">
+          <CardHeader className="flex flex-row items-center justify-between gap-2">
+            <CardTitle>Entries ({entries.length})</CardTitle>
+            <CopyButton value={safeStringify(entries)} label="Copy entries" />
+          </CardHeader>
+          <CardContent>
+            <div className="overflow-x-auto">
+              <table className="w-full text-body-sm">
+                <thead>
+                  <tr className="text-caption uppercase tracking-wider text-fg-subtle border-b border-border">
+                    <th className="text-right py-2 px-3">#</th>
+                    <th className="text-left py-2 px-3">Time</th>
+                    <th className="text-right py-2 px-3">Price</th>
+                    <th className="text-right py-2 px-3">Lots</th>
+                    <th className="text-right py-2 px-3">SL at entry</th>
+                    <th className="text-left py-2 px-3">Reason</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {entries.map((e, i) => (
+                    <tr key={i} className="border-b border-border last:border-b-0 hover:bg-surface-2">
+                      <td className="text-right py-2 px-3 font-mono text-fg-subtle">{e.bar_index}</td>
+                      <td className="py-2 px-3 font-mono text-caption">{e.timestamp}</td>
+                      <td className="text-right py-2 px-3 font-mono">{fmtNum(e.price)}</td>
+                      <td className="text-right py-2 px-3 font-mono">{e.lots}</td>
+                      <td className="text-right py-2 px-3 font-mono text-pnl-down">{fmtNum(e.sl_at_entry)}</td>
+                      <td className="py-2 px-3 text-fg-muted">{e.reason}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Simulator log */}
+      {plan.log_tail && plan.log_tail.length > 0 && (
+        <Card className="lg:col-span-2">
+          <CardHeader className="flex flex-row items-center justify-between gap-2">
+            <div>
+              <CardTitle>Simulator log (tail)</CardTitle>
+              <CardDescription>Last {plan.log_tail.length} lines from the pure-Python pyramid run.</CardDescription>
+            </div>
+            <CopyButton value={(plan.log_tail ?? []).join("\n")} label="Copy log" />
+          </CardHeader>
+          <CardContent>
+            <pre className="text-caption font-mono text-fg-muted whitespace-pre-wrap max-h-80 overflow-auto bg-surface-2/40 border border-border rounded-sm p-3">
+              {plan.log_tail.join("\n")}
+            </pre>
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+/* =================================================================== */
+/* Vertical spread overview                                             */
+/* =================================================================== */
+function VerticalSpreadOverview({ result }: { result: RunResult }) {
+  const plan = (result.plan ?? {}) as VerticalSpreadPlan;
+  const debit = plan.net_debit ?? 0;
+  const credit = plan.net_credit ?? 0;
+  const rr = plan.rr_ratio;
+
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-5">
+      <Card className="lg:col-span-2">
+        <CardHeader className="flex flex-row items-center gap-3 flex-wrap">
+          <CardTitle className="flex items-center gap-2">
+            <Layers className="h-4 w-4 text-accent" aria-hidden />
+            <Badge tone={plan.side === "BULL" ? "success" : "danger"}>{plan.side ?? "—"}</Badge>
+            <span className="font-mono text-h3">{plan.underlying ?? result.underlying ?? "—"}</span>
+            <span className="text-fg-subtle">
+              {plan.long_strike ?? "—"}/{plan.short_strike ?? "—"} {plan.option_type}
+            </span>
+            <Badge tone="neutral">{plan.expiry}</Badge>
+          </CardTitle>
+          {rr != null && <Badge tone={rr >= 1.5 ? "success" : rr >= 1 ? "warning" : "danger"}>R:R {rr.toFixed(2)}×</Badge>}
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
+            <KvBlock label="Spot" value={fmtNum(plan.spot ?? result.spot)} />
+            <KvBlock label="Long LTP" value={fmtNum(plan.long_ltp)} />
+            <KvBlock label="Short LTP" value={fmtNum(plan.short_ltp)} />
+            <KvBlock label={debit > 0 ? "Net debit" : "Net credit"} value={fmtNum(debit > 0 ? debit : credit)} />
+            <KvBlock label="Breakeven" value={fmtNum(plan.breakeven)} />
+            <KvBlock label="Lots" value={String(plan.lots ?? "—")} />
+            <KvBlock label="Capital used" value={fmtINR(plan.capital_used)} />
+            <KvBlock label="Qty per leg" value={String(plan.qty_per_leg ?? "—")} />
+            <KvBlock label="Max profit" value={fmtINR(plan.max_profit_inr)} tone="success" />
+            <KvBlock label="Max loss" value={fmtINR(plan.max_loss_inr)} tone="danger" />
+          </div>
+          {plan.error && (
+            <div className="rounded-sm border border-warning/40 bg-warning/5 p-2.5 text-body-sm text-fg-muted">
+              <strong className="text-fg">Couldn't size:</strong> {plan.error}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 function StraddleOverview({ result }: { result: RunResult }) {
   const pos = result.position ?? {};
   const an  = result.analysis ?? {};
   const act = result.action ?? {};
   const v   = result.validated ?? {};
+  const snap = result.snapshot ?? {};
+
+  // Pull every run that has touched this position so we can plot the
+  // lifecycle on the intraday chart ("when + which trade taken").
+  const { data: allRuns = [] } = useQuery({
+    queryKey: ["agent-runs", "for-position", pos.id],
+    queryFn: () => api.get<AgentRun[]>("/agents/runs/?limit=500").then((r) => r.data),
+    enabled: pos.id != null,
+  });
+  const positionRuns = React.useMemo(
+    () => allRuns
+      .filter((r) => r.strategy_name === "short_straddle" && (r.config as any)?.position_id === pos.id)
+      .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()),
+    [allRuns, pos.id],
+  );
 
   const actionTone = act.action === "HOLD" ? "success"
     : act.action === "CLOSE_BOTH" ? "danger"
@@ -697,9 +1091,15 @@ function StraddleOverview({ result }: { result: RunResult }) {
           {v.override && <Badge tone="warning">override → {v.override}</Badge>}
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-2 gap-2 mb-3">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
             <KvBlock label="CE action" value={act.ce_action ?? "—"} />
             <KvBlock label="PE action" value={act.pe_action ?? "—"} />
+            {act.hedge_side && act.hedge_side !== "NONE" && (
+              <KvBlock label="Hedge" value={`${act.hedge_side} ${act.hedge_lots ?? 0}`} />
+            )}
+            {act.roll_to_strike && (
+              <KvBlock label="Roll → strike" value={String(act.roll_to_strike)} />
+            )}
           </div>
           {act.reasoning && (
             <div className="mb-3">
@@ -708,13 +1108,61 @@ function StraddleOverview({ result }: { result: RunResult }) {
             </div>
           )}
           {act.key_risk && (
-            <div>
+            <div className="mb-3">
               <div className="text-caption uppercase tracking-wider text-fg-subtle mb-1">Key risk</div>
               <p className="text-body-sm text-fg-muted whitespace-pre-wrap">{act.key_risk}</p>
             </div>
           )}
+          {v.override && v.reason && (
+            <div className="rounded-sm border border-warning/40 bg-warning/5 p-2.5">
+              <div className="text-caption uppercase tracking-wider text-warning mb-0.5">@RiskGuard override</div>
+              <p className="text-body-sm text-fg-muted">{v.reason}</p>
+            </div>
+          )}
         </CardContent>
       </Card>
+
+      {/* Expiry P&L scenarios — full-width chart */}
+      {an.scenarios && an.scenarios.length > 0 && (
+        <Card className="lg:col-span-2">
+          <CardHeader>
+            <CardTitle>Expiry P&amp;L scenarios</CardTitle>
+            <CardDescription>
+              Net P&amp;L at expiry across NIFTY levels · current spot marked.
+              Crossings of zero are the breakeven points.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="h-[280px]">
+            <ScenariosChart scenarios={an.scenarios} currentSpot={an.nifty_spot} />
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Intraday close chart — CE + PE + combined since position open */}
+      {((snap.ce_candles?.length ?? 0) > 0 || (snap.pe_candles?.length ?? 0) > 0) && (
+        <Card className="lg:col-span-2">
+          <CardHeader>
+            <CardTitle>Lifecycle — intraday close + agent actions</CardTitle>
+            <CardDescription>
+              CE / PE / combined 5-min closes since position open · NIFTY on right axis ·
+              every agent run plotted at its timestamp + action.
+              {an.days_to_expiry != null && (
+                <span className="ml-2">DTE {an.days_to_expiry}{pos.expiry ? ` · expiry ${pos.expiry}` : ""}</span>
+              )}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="h-[420px]">
+            <IntradayClosesChart
+              ceCandles={snap.ce_candles ?? []}
+              peCandles={snap.pe_candles ?? []}
+              niftyCandles={snap.candles ?? []}
+              ceSold={pos.ce_sell}
+              peSold={pos.pe_sell}
+              runs={positionRuns}
+            />
+          </CardContent>
+        </Card>
+      )}
 
       {/* Position card */}
       <Card>
@@ -726,16 +1174,17 @@ function StraddleOverview({ result }: { result: RunResult }) {
           <KvRow label="Lots"     value={`${pos.lots} × ${pos.lot_size ?? 0}`} />
           <KvRow label="CE sold @" value={fmtNum(pos.ce_sell)} />
           <KvRow label="PE sold @" value={fmtNum(pos.pe_sell)} />
-          <KvRow label="CE symbol" value={<code>{pos.ce_symbol}</code>} />
-          <KvRow label="PE symbol" value={<code>{pos.pe_symbol}</code>} />
+          <KvRow label="Combined sold" value={fmtNum(an.combined_sold)} />
+          <KvRow label="CE symbol" value={<code className="text-caption">{pos.ce_symbol}</code>} />
+          <KvRow label="PE symbol" value={<code className="text-caption">{pos.pe_symbol}</code>} />
         </CardContent>
       </Card>
 
-      {/* Analysis card */}
+      {/* P&L + Phases card */}
       <Card>
         <CardHeader>
-          <CardTitle>Analysis</CardTitle>
-          <CardDescription>Pure-Python — P&amp;L, delta, market phase</CardDescription>
+          <CardTitle>P&amp;L + phase</CardTitle>
+          <CardDescription>Live mark-to-market · regime context</CardDescription>
         </CardHeader>
         <CardContent>
           <KvRow
@@ -743,9 +1192,9 @@ function StraddleOverview({ result }: { result: RunResult }) {
             value={fmtINR(an.net_pnl_inr)}
             tone={an.net_pnl_inr != null && an.net_pnl_inr >= 0 ? "success" : "danger"}
           />
+          <KvRow label="P&L (pts)" value={an.net_pnl_pts != null ? an.net_pnl_pts.toFixed(2) : "—"} />
           <KvRow label="Premium decayed" value={an.premium_decayed_pct != null ? `${an.premium_decayed_pct.toFixed(1)}%` : "—"} />
-          <KvRow label="Net delta"  value={an.net_delta != null ? an.net_delta.toFixed(2) : "—"} />
-          <KvRow label="Delta bias" value={an.delta_bias ?? "—"} />
+          <KvRow label="Combined current" value={fmtNum(an.combined_current)} />
           <KvRow label="Market phase" value={an.market_phase ?? "—"} />
           <KvRow label="VIX phase"  value={an.vix_phase ?? "—"} />
           <KvRow label="DTE"        value={an.days_to_expiry != null ? String(an.days_to_expiry) : "—"} />
@@ -754,9 +1203,304 @@ function StraddleOverview({ result }: { result: RunResult }) {
             value={an.is_underwater ? "Yes" : "No"}
             tone={an.is_underwater ? "danger" : "success"}
           />
+          <KvRow
+            label="Stop triggered?"
+            value={an.stop_triggered ? "Yes" : "No"}
+            tone={an.stop_triggered ? "danger" : "success"}
+          />
         </CardContent>
       </Card>
+
+      {/* Greeks + ITM exposure */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Greeks &amp; moneyness</CardTitle>
+          <CardDescription>Delta exposure · which leg is in-the-money</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <KvRow label="CE delta"   value={an.ce_delta != null ? an.ce_delta.toFixed(3) : "—"} />
+          <KvRow label="PE delta"   value={an.pe_delta != null ? an.pe_delta.toFixed(3) : "—"} />
+          <KvRow
+            label="Net delta"
+            value={an.net_delta != null ? an.net_delta.toFixed(3) : "—"}
+            tone={
+              an.net_delta == null ? "neutral"
+              : Math.abs(an.net_delta) > 0.5 ? "danger"
+              : Math.abs(an.net_delta) > 0.25 ? "warning" : "success"
+            }
+          />
+          <KvRow label="Delta bias" value={an.delta_bias ?? "—"} />
+          <KvRow
+            label="CE ITM by"
+            value={an.ce_itm_by != null && an.ce_itm_by > 0 ? `+${an.ce_itm_by.toFixed(1)} pts` : "OTM"}
+            tone={an.ce_itm_by != null && an.ce_itm_by > 0 ? "danger" : "success"}
+          />
+          <KvRow
+            label="PE ITM by"
+            value={an.pe_itm_by != null && an.pe_itm_by > 0 ? `+${an.pe_itm_by.toFixed(1)} pts` : "OTM"}
+            tone={an.pe_itm_by != null && an.pe_itm_by > 0 ? "danger" : "success"}
+          />
+          <KvRow label="Nearest ITM leg" value={an.nearest_itm_leg ?? "—"} />
+        </CardContent>
+      </Card>
+
+      {/* Live snapshot */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Snapshot</CardTitle>
+          <CardDescription>NIFTY · VIX · CE · PE — live broker pull</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <SnapshotRow label="NIFTY" leg={snap.nifty} fallbackLTP={an.nifty_spot} prev={an.nifty_prev_close} changePct={an.nifty_gap_pct} />
+          <SnapshotRow label="VIX"   leg={snap.vix}   fallbackLTP={an.vix_current} prev={an.vix_prev_close} changePct={an.vix_change_pct} />
+          <SnapshotRow label="CE"    leg={snap.ce}    fallbackLTP={an.ce_ltp} prev={an.ce_sell_price} changeLabel="vs sold" />
+          <SnapshotRow label="PE"    leg={snap.pe}    fallbackLTP={an.pe_ltp} prev={an.pe_sell_price} changeLabel="vs sold" />
+        </CardContent>
+      </Card>
+
+      {/* The exact text the LLM saw */}
+      {an.summary_text && (
+        <Card className="lg:col-span-2">
+          <CardHeader>
+            <CardTitle>LLM analysis input</CardTitle>
+            <CardDescription>The summary text passed verbatim to Claude before the action was generated.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <pre className="text-caption font-mono text-fg-muted whitespace-pre-wrap max-h-80 overflow-auto bg-surface-2/40 border border-border rounded-sm p-3">
+              {an.summary_text}
+            </pre>
+          </CardContent>
+        </Card>
+      )}
     </div>
+  );
+}
+
+function SnapshotRow({
+  label, leg, fallbackLTP, prev, changePct, changeLabel,
+}: {
+  label: string;
+  leg?: StraddleSnapshotLeg;
+  fallbackLTP?: number;
+  prev?: number;
+  changePct?: number;
+  changeLabel?: string;
+}) {
+  const ltp = leg?.ltp ?? fallbackLTP;
+  const prevVal = leg?.prev_close ?? prev;
+  const pct = changePct != null ? changePct : (ltp != null && prevVal && prevVal !== 0) ? ((ltp - prevVal) / prevVal) * 100 : null;
+  const pctTone = pct == null ? "neutral" : pct >= 0 ? "success" : "danger";
+  return (
+    <div className="flex items-center justify-between py-1.5 border-b border-border last:border-b-0">
+      <div className="text-caption text-fg-subtle uppercase tracking-wider w-12 shrink-0">{label}</div>
+      <div className="flex-1 grid grid-cols-3 gap-3 ml-3 text-body-sm font-mono">
+        <div><span className="text-fg-subtle text-caption">LTP </span>{fmtNum(ltp)}</div>
+        <div><span className="text-fg-subtle text-caption">{leg?.high || leg?.low ? "H/L " : "Prev "}</span>{leg?.high != null && leg?.low != null ? `${fmtNum(leg.high)} / ${fmtNum(leg.low)}` : fmtNum(prevVal)}</div>
+        <div className={cn(
+          pctTone === "success" ? "text-pnl-up" : pctTone === "danger" ? "text-pnl-down" : "text-fg-subtle",
+        )}>
+          {pct != null ? `${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%` : "—"}
+          {changeLabel && <span className="text-fg-subtle text-caption ml-1">{changeLabel}</span>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function IntradayClosesChart({
+  ceCandles, peCandles, niftyCandles, ceSold, peSold, runs = [],
+}: {
+  ceCandles: CandleRow[];
+  peCandles: CandleRow[];
+  niftyCandles?: CandleRow[];
+  ceSold?: number;
+  peSold?: number;
+  runs?: AgentRun[];
+}) {
+  const [R, setR] = React.useState<any>(null);
+  React.useEffect(() => { import("recharts").then(setR); }, []);
+
+  // Merge candles on timestamp so the series has {t, ce, pe, combined, nifty}.
+  const data = React.useMemo(() => {
+    const map = new Map<string, { t: number; ce?: number; pe?: number; combined?: number; nifty?: number }>();
+    const push = (rows: CandleRow[] | undefined, key: "ce" | "pe" | "nifty") => {
+      if (!rows) return;
+      for (const row of rows) {
+        const [ts, , , , close] = row;
+        const t = new Date(ts).getTime();
+        if (!Number.isFinite(t)) continue;
+        const existing = map.get(ts) ?? { t };
+        existing[key] = close;
+        map.set(ts, existing);
+      }
+    };
+    push(ceCandles, "ce");
+    push(peCandles, "pe");
+    push(niftyCandles, "nifty");
+    const out = Array.from(map.values()).sort((a, b) => a.t - b.t);
+    for (const row of out) {
+      if (row.ce != null && row.pe != null) row.combined = +(row.ce + row.pe).toFixed(2);
+    }
+    return out;
+  }, [ceCandles, peCandles, niftyCandles]);
+
+  // Map every agent run to a data point on the combined series so it
+  // renders as a colored dot at the closest 5-min bar to its timestamp.
+  const lifecyclePoints = React.useMemo(() => {
+    if (data.length === 0) return [];
+    return runs
+      .map((r) => {
+        const at = new Date(r.completed_at ?? r.started_at ?? r.created_at).getTime();
+        if (!Number.isFinite(at)) return null;
+        // nearest bar (binary search would be fine; linear is fine for ~300)
+        let nearest = data[0];
+        let nearestDiff = Math.abs(data[0].t - at);
+        for (let i = 1; i < data.length; i++) {
+          const d = Math.abs(data[i].t - at);
+          if (d < nearestDiff) { nearest = data[i]; nearestDiff = d; }
+        }
+        const action = ((r.result ?? {}) as any).action?.action as string | undefined;
+        return {
+          t: nearest.t,
+          combined: nearest.combined,
+          ce: nearest.ce,
+          pe: nearest.pe,
+          action: action ?? "?",
+          confidence: ((r.result ?? {}) as any).action?.confidence as number | undefined,
+          runId: r.id,
+        };
+      })
+      .filter(Boolean) as Array<{ t: number; combined?: number; ce?: number; pe?: number; action: string; confidence?: number; runId: string }>;
+  }, [runs, data]);
+
+  if (data.length === 0) {
+    return <EmptyState icon={<Sparkles />} title="No intraday candles" description="The broker returned no 5-min candles for this position." />;
+  }
+  if (!R) return <div className="h-full flex items-center justify-center text-fg-subtle text-body-sm">Loading…</div>;
+
+  const sold = (ceSold ?? 0) + (peSold ?? 0);
+  const hasNifty = data.some((d) => d.nifty != null);
+
+  const {
+    ResponsiveContainer, ComposedChart, Line, Scatter, XAxis, YAxis, Tooltip,
+    CartesianGrid, ReferenceLine, Legend,
+  } = R;
+
+  // Action → dot color
+  const actionColor = (a: string): string => {
+    if (a === "HOLD") return "#3fb950";
+    if (a === "CLOSE_BOTH" || a === "CLOSE_CE" || a === "CLOSE_PE") return "#f85149";
+    if (a === "MONITOR") return "#79c0ff";
+    if (a === "SHIFT_TO_ATM" || a === "ROLL_PE" || a === "ROLL_CE") return "#a371f7";
+    if (a === "HEDGE_FUTURES") return "#d29922";
+    return "#8b949e";
+  };
+
+  return (
+    <ResponsiveContainer width="100%" height="100%">
+      <ComposedChart data={data} margin={{ top: 12, right: hasNifty ? 56 : 24, left: 8, bottom: 8 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke="#161b22" />
+        <XAxis
+          dataKey="t"
+          type="number"
+          scale="time"
+          domain={["dataMin", "dataMax"]}
+          tick={{ fill: "#8b949e", fontSize: 11 }}
+          tickFormatter={(v: number) => {
+            const d = new Date(v);
+            const dd = String(d.getDate()).padStart(2, "0");
+            const mm = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][d.getMonth()];
+            const hh = String(d.getHours()).padStart(2, "0");
+            const mi = String(d.getMinutes()).padStart(2, "0");
+            return `${dd}${mm} ${hh}:${mi}`;
+          }}
+          minTickGap={70}
+        />
+        <YAxis yAxisId="opt" tick={{ fill: "#8b949e", fontSize: 11 }} width={48} label={{ value: "Option ₹", angle: -90, position: "insideLeft", fill: "#6e7681", fontSize: 11 }} />
+        {hasNifty && (
+          <YAxis yAxisId="nifty" orientation="right" tick={{ fill: "#8b949e", fontSize: 11 }} width={56} tickFormatter={(v: number) => v.toFixed(0)} label={{ value: "NIFTY", angle: 90, position: "insideRight", fill: "#6e7681", fontSize: 11 }} />
+        )}
+        <Tooltip
+          contentStyle={{ background: "#161b22", border: "1px solid #30363d", borderRadius: 6, fontSize: 12 }}
+          labelFormatter={(v: number) => new Date(v).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}
+          formatter={(v: number, name: string) => v != null ? [name === "NIFTY" ? v.toFixed(2) : v.toFixed(2), name] : ["—", name]}
+        />
+        <Legend wrapperStyle={{ fontSize: 12 }} />
+        {sold > 0 && (
+          <ReferenceLine yAxisId="opt" y={sold} stroke="#d29922" strokeDasharray="4 2" label={{ value: `sold ${sold.toFixed(0)}`, fill: "#d29922", fontSize: 11, position: "insideTopRight" }} />
+        )}
+        <Line yAxisId="opt" type="monotone" dataKey="ce"       name="CE close"   stroke="#79c0ff" strokeWidth={1.5} dot={false} connectNulls />
+        <Line yAxisId="opt" type="monotone" dataKey="pe"       name="PE close"   stroke="#a371f7" strokeWidth={1.5} dot={false} connectNulls />
+        <Line yAxisId="opt" type="monotone" dataKey="combined" name="Combined"   stroke="#3fb950" strokeWidth={2}   dot={false} connectNulls />
+        {hasNifty && (
+          <Line yAxisId="nifty" type="monotone" dataKey="nifty" name="NIFTY" stroke="#8b949e" strokeWidth={1} dot={false} connectNulls strokeDasharray="2 4" />
+        )}
+        {lifecyclePoints.length > 0 && (
+          <Scatter
+            yAxisId="opt"
+            name="Agent action"
+            data={lifecyclePoints}
+            shape={(props: any) => {
+              const { cx, cy, payload } = props;
+              if (cx == null || cy == null) return null;
+              const c = actionColor(payload.action);
+              return (
+                <g>
+                  <circle cx={cx} cy={cy} r={6} fill={c} stroke="#0d1117" strokeWidth={1.5} />
+                  <text x={cx} y={cy - 10} fill={c} fontSize={10} textAnchor="middle" style={{ fontFamily: "JetBrains Mono, monospace" }}>
+                    {payload.action}
+                  </text>
+                </g>
+              );
+            }}
+          />
+        )}
+      </ComposedChart>
+    </ResponsiveContainer>
+  );
+}
+
+function ScenariosChart({ scenarios, currentSpot }: { scenarios: StraddleScenario[]; currentSpot?: number }) {
+  // Lazy import recharts so we don't bloat the auth bundle.
+  const [R, setR] = React.useState<any>(null);
+  React.useEffect(() => { import("recharts").then(setR); }, []);
+  if (!R) return <div className="h-full flex items-center justify-center text-fg-subtle text-body-sm">Loading chart…</div>;
+
+  const { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, ReferenceLine, ReferenceDot, CartesianGrid } = R;
+
+  const sorted = [...scenarios].sort((a, b) => a.nifty_level - b.nifty_level);
+  // Identify breakeven crossings (sign change between adjacent points)
+  const breakevens: number[] = [];
+  for (let i = 1; i < sorted.length; i++) {
+    const a = sorted[i - 1], b = sorted[i];
+    if ((a.net_pnl_inr <= 0) !== (b.net_pnl_inr <= 0) && a.net_pnl_inr !== b.net_pnl_inr) {
+      const t = -a.net_pnl_inr / (b.net_pnl_inr - a.net_pnl_inr);
+      breakevens.push(a.nifty_level + t * (b.nifty_level - a.nifty_level));
+    }
+  }
+
+  return (
+    <ResponsiveContainer width="100%" height="100%">
+      <LineChart data={sorted} margin={{ top: 16, right: 24, left: 8, bottom: 8 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke="#161b22" />
+        <XAxis dataKey="nifty_level" tick={{ fill: "#8b949e", fontSize: 11 }} tickFormatter={(v: number) => v.toLocaleString("en-IN")} />
+        <YAxis tick={{ fill: "#8b949e", fontSize: 11 }} tickFormatter={(v: number) => `${(v / 1000).toFixed(0)}k`} width={50} />
+        <Tooltip
+          contentStyle={{ background: "#161b22", border: "1px solid #30363d", borderRadius: 6, fontSize: 12 }}
+          labelStyle={{ color: "#e6edf3" }}
+          formatter={(v: number, _name: string, props: any) => [`₹${Math.round(v).toLocaleString("en-IN")}`, props.payload.label]}
+          labelFormatter={(v: number) => `NIFTY ${v.toLocaleString("en-IN")}`}
+        />
+        <ReferenceLine y={0} stroke="#484f58" />
+        {currentSpot != null && currentSpot > 0 && (
+          <ReferenceLine x={currentSpot} stroke="#58a6ff" strokeDasharray="3 3" label={{ value: `spot ${currentSpot.toFixed(0)}`, fill: "#58a6ff", fontSize: 11, position: "top" }} />
+        )}
+        {breakevens.map((b, i) => (
+          <ReferenceDot key={i} x={b} y={0} r={4} fill="#d29922" stroke="none" />
+        ))}
+        <Line type="monotone" dataKey="net_pnl_inr" stroke="#58a6ff" strokeWidth={2} dot={{ r: 3, fill: "#58a6ff" }} activeDot={{ r: 5 }} />
+      </LineChart>
+    </ResponsiveContainer>
   );
 }
 
@@ -844,19 +1588,54 @@ function EventBubble({ ev }: { ev: AgentEvent }) {
 }
 
 function JsonCard({ title, payload, emptyHint }: { title: string; payload?: unknown; emptyHint: string }) {
+  const json = payload ? safeStringify(payload) : "";
   return (
     <Card>
-      <CardHeader><CardTitle>{title}</CardTitle></CardHeader>
+      <CardHeader className="flex flex-row items-center justify-between gap-2">
+        <CardTitle>{title}</CardTitle>
+        {payload != null && <CopyButton value={json} />}
+      </CardHeader>
       <CardContent>
-        {payload ? (
-          <pre className="text-caption font-mono text-fg whitespace-pre-wrap max-h-96 overflow-auto">
-            {safeStringify(payload)}
+        {payload != null ? (
+          <pre className="text-caption font-mono text-fg whitespace-pre-wrap max-h-[600px] overflow-auto">
+            {json}
           </pre>
         ) : (
           <p className="text-body-sm text-fg-subtle">{emptyHint}</p>
         )}
       </CardContent>
     </Card>
+  );
+}
+
+export function CopyButton({ value, label = "Copy" }: { value: string; label?: string }) {
+  const [copied, setCopied] = React.useState(false);
+  return (
+    <button
+      type="button"
+      onClick={async () => {
+        try {
+          await navigator.clipboard.writeText(value);
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1500);
+        } catch {
+          // Some browsers block clipboard outside https/localhost — fall back to a textarea hack
+          const ta = document.createElement("textarea");
+          ta.value = value; document.body.appendChild(ta); ta.select();
+          try { document.execCommand("copy"); setCopied(true); setTimeout(() => setCopied(false), 1500); }
+          finally { document.body.removeChild(ta); }
+        }
+      }}
+      className={cn(
+        "px-2 py-1 rounded-sm border text-caption font-mono inline-flex items-center gap-1 transition",
+        copied
+          ? "border-pnl-up/40 bg-pnl-up/10 text-pnl-up"
+          : "border-border bg-surface hover:bg-surface-2 text-fg-muted hover:text-fg",
+      )}
+      aria-label={label}
+    >
+      {copied ? "Copied" : label}
+    </button>
   );
 }
 
@@ -1002,6 +1781,7 @@ function NewRunDialog({
                   required={required.includes(key)}
                   value={config[key]}
                   onChange={(v) => setField(key, v)}
+                  formValues={config}
                 />
               ))}
             </div>
@@ -1037,13 +1817,14 @@ function NewRunDialog({
 }
 
 function SchemaField({
-  name, prop, required, value, onChange,
+  name, prop, required, value, onChange, formValues,
 }: {
   name: string;
   prop: SchemaProp;
   required: boolean;
   value: unknown;
   onChange: (v: unknown) => void;
+  formValues?: Record<string, unknown>;
 }) {
   const label = (
     <span className="text-body-sm text-fg">
@@ -1051,6 +1832,30 @@ function SchemaField({
       {required && <span className="text-danger ml-1">*</span>}
     </span>
   );
+
+  // ── Special case: position_id → live picker of existing straddles ──
+  if (name === "position_id") {
+    return (
+      <StraddlePositionPicker
+        value={typeof value === "number" ? value : undefined}
+        onChange={onChange}
+        required={required}
+      />
+    );
+  }
+
+  // ── Special case: expiry → dropdown of real expiries for the underlying ──
+  if (name === "expiry") {
+    const underlying = String(formValues?.underlying ?? formValues?.symbol ?? "NIFTY").toUpperCase();
+    return (
+      <ExpiryPicker
+        underlying={underlying}
+        value={typeof value === "string" ? value : ""}
+        onChange={(v) => onChange(v || undefined)}
+        required={required}
+      />
+    );
+  }
 
   // Boolean → checkbox
   if (prop.type === "boolean") {
@@ -1123,6 +1928,189 @@ function defaultHint(prop: SchemaProp): string | undefined {
   if (prop.default !== undefined) return `default: ${String(prop.default)}`;
   if (prop.minimum != null && prop.maximum != null) return `${prop.minimum} – ${prop.maximum}`;
   return undefined;
+}
+
+type LegacyStraddle = {
+  id: number;
+  underlying: string;
+  strike: string | number;
+  expiry: string;
+  trade_date: string;
+  status: "ACTIVE" | "PARTIAL" | "HEDGED" | "CLOSED";
+  lots: number;
+  ce_symbol?: string;
+  pe_symbol?: string;
+  premium_sold?: number;
+  pnl_inr?: number;
+};
+
+function StraddlePositionPicker({
+  value, onChange, required,
+}: {
+  value?: number;
+  onChange: (v: number | undefined) => void;
+  required: boolean;
+}) {
+  const { data, isLoading, error } = useQuery({
+    queryKey: ["legacy", "straddles"],
+    queryFn: () => legacyApi.get<{ results: LegacyStraddle[] }>("/legacy/straddles/").then((r) => r.data.results ?? []),
+  });
+
+  // Default to the first ACTIVE position once data lands.
+  React.useEffect(() => {
+    if (value != null || !data || data.length === 0) return;
+    const active = data.find((p) => p.status === "ACTIVE") ?? data[0];
+    if (active) onChange(active.id);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data]);
+
+  if (isLoading) {
+    return (
+      <div className="block">
+        <span className="text-body-sm text-fg">
+          position_id{required && <span className="text-danger ml-1">*</span>}
+        </span>
+        <div className="mt-1 h-9 bg-surface-2 border border-border rounded-sm animate-pulse" />
+        <p className="text-caption text-fg-subtle mt-1">Loading positions…</p>
+      </div>
+    );
+  }
+
+  if (error || !data || data.length === 0) {
+    return (
+      <div className="block">
+        <span className="text-body-sm text-fg">
+          position_id{required && <span className="text-danger ml-1">*</span>}
+        </span>
+        <div className="mt-1 rounded-sm border border-warning/40 bg-warning/5 p-3 text-body-sm text-fg-muted">
+          No straddle positions found. Register one with{" "}
+          <code className="text-caption">python manage.py manage_straddle --register ...</code>{" "}
+          (or use the Django shell), then reopen this dialog.
+        </div>
+      </div>
+    );
+  }
+
+  // ACTIVE first, then by trade_date desc.
+  const sorted = [...data].sort((a, b) => {
+    if (a.status !== b.status) return a.status === "ACTIVE" ? -1 : 1;
+    return (b.trade_date ?? "").localeCompare(a.trade_date ?? "");
+  });
+
+  const selected = sorted.find((p) => p.id === value);
+
+  return (
+    <div className="block">
+      <span className="text-body-sm text-fg">
+        Position{required && <span className="text-danger ml-1">*</span>}
+        <span className="text-fg-subtle font-mono ml-2 text-caption">position_id</span>
+      </span>
+      <select
+        value={value == null ? "" : String(value)}
+        onChange={(e) => onChange(e.target.value === "" ? undefined : Number(e.target.value))}
+        className="mt-1 w-full bg-surface border border-border rounded-sm px-3 py-2 text-body-sm text-fg font-mono"
+      >
+        <option value="" disabled>Select a position…</option>
+        {sorted.map((p) => {
+          const dte = daysBetween(new Date(), new Date(p.expiry));
+          return (
+            <option key={p.id} value={p.id}>
+              #{p.id} · {p.underlying} {p.strike} · {p.expiry} (DTE {dte}) · {p.lots}L · {p.status}
+            </option>
+          );
+        })}
+      </select>
+      {selected && (
+        <div className="mt-2 grid grid-cols-2 gap-2 rounded-sm border border-border bg-surface-2/40 p-2.5">
+          <KvRow label="Underlying" value={`${selected.underlying} ${selected.strike}`} />
+          <KvRow label="Expiry"     value={`${selected.expiry} (DTE ${daysBetween(new Date(), new Date(selected.expiry))})`} />
+          <KvRow label="Premium sold" value={fmtINR(selected.premium_sold)} />
+          <KvRow label="Live P&L"     value={fmtINR(selected.pnl_inr)} tone={(selected.pnl_inr ?? 0) >= 0 ? "success" : "danger"} />
+          <KvRow label="CE leg" value={<code className="text-caption">{selected.ce_symbol}</code>} />
+          <KvRow label="PE leg" value={<code className="text-caption">{selected.pe_symbol}</code>} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function daysBetween(a: Date, b: Date): number {
+  return Math.max(0, Math.ceil((b.getTime() - a.getTime()) / (1000 * 60 * 60 * 24)));
+}
+
+type LegacyExpiry = {
+  expiry: string;       // DDMMMYY
+  iso: string;          // YYYY-MM-DD
+  dte: number;
+  kind: "weekly" | "monthly";
+  strikes: number;
+};
+
+function ExpiryPicker({
+  underlying, value, onChange, required,
+}: {
+  underlying: string;
+  value: string;
+  onChange: (v: string) => void;
+  required: boolean;
+}) {
+  const { data, isLoading, error } = useQuery({
+    queryKey: ["legacy", "expiries", underlying],
+    queryFn: () =>
+      legacyApi
+        .get<{ results: LegacyExpiry[] }>(`/legacy/expiries/?underlying=${underlying}&limit=12`)
+        .then((r) => r.data.results ?? []),
+    enabled: !!underlying,
+  });
+
+  // Default to nearest monthly when data lands, if user hasn't picked.
+  React.useEffect(() => {
+    if (value || !data || data.length === 0) return;
+    const nearest = data.find((e) => e.kind === "monthly") ?? data[0];
+    onChange(nearest.expiry);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data]);
+
+  if (isLoading) {
+    return (
+      <div className="block">
+        <span className="text-body-sm text-fg">expiry{required && <span className="text-danger ml-1">*</span>}</span>
+        <div className="mt-1 h-9 bg-surface-2 border border-border rounded-sm animate-pulse" />
+      </div>
+    );
+  }
+  if (error || !data || data.length === 0) {
+    return (
+      <Input
+        label={`expiry${required ? " *" : ""}`}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder="DDMMMYY (e.g. 29MAY26)"
+        hint={`No expiries found for ${underlying} in the scrip master. Falling back to free text.`}
+      />
+    );
+  }
+
+  return (
+    <label className="block">
+      <span className="text-body-sm text-fg">
+        Expiry{required && <span className="text-danger ml-1">*</span>}
+        <span className="text-fg-subtle font-mono ml-2 text-caption">{underlying}</span>
+      </span>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="mt-1 w-full bg-surface border border-border rounded-sm px-3 py-2 text-body-sm text-fg font-mono"
+      >
+        <option value="" disabled>Select an expiry…</option>
+        {data.map((e) => (
+          <option key={e.expiry} value={e.expiry}>
+            {e.expiry} · {e.iso} · DTE {e.dte} · {e.kind} ({e.strikes} strikes)
+          </option>
+        ))}
+      </select>
+    </label>
+  );
 }
 
 /* =================================================================== */

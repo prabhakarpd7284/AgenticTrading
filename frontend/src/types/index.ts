@@ -30,6 +30,14 @@ export interface AgentRun {
   created_at: string;
   started_at: string | null;
   completed_at: string | null;
+  // Only populated on the detail endpoint (/agents/runs/{id}/) — null on lists.
+  steps?: Array<{
+    seq: number;
+    node: string;
+    event_type: "token" | "state" | "result" | "error" | "info";
+    payload: Record<string, unknown>;
+    created_at: string;
+  }> | null;
 }
 
 export interface StrategySchema {
