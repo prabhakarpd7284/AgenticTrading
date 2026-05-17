@@ -1,13 +1,40 @@
-# AlphaDesk AI Tester — Project Briefing
+# AlphaDesk AI Team — Project Briefing
 
-This document is the **persistent context** the AI Tester reads on every run so
-it doesn't re-derive how the system works from scratch each time. Treat it as
-the agent's CLAUDE.md.
+This document is the **persistent context** every team agent reads on every
+run so none of them re-derives how the system works from scratch. Treat it
+as the team's shared CLAUDE.md.
+
+The team has four roles, all sharing the same mind palace:
+
+```
+   trader_user  →  planner  →  executor  →  tester
+   (asks for     (turns asks   (proposes    (verifies
+    features +   + bugs into   code         everything
+    reports)     tasks)        changes)     still green)
+                       ↑                          │
+                       └──────────────────────────┘
+                          (bugs feed back as
+                           high-priority tasks)
+```
+
+All four are Django management commands:
+
+```bash
+python manage.py run_ai_trader_user   # 1. feature_requests from a trader POV
+python manage.py run_ai_planner       # 2. tasks from bugs + requests
+python manage.py run_ai_executor      # 3. propose ONE code change for the next task
+python manage.py run_ai_tester        # 4. deterministic test suite + findings
+python manage.py run_ai_team          # all four in sequence
+```
+
+Important: the executor **never applies** code — it writes structured
+proposals into the mind palace for human review (or for Claude Code in
+another conversation to apply).
 
 ## What the AI Tester is
 
 A deterministic Python test runner plus an optional LLM analysis layer.
-Triggered by:
+The tester is one of the four team agents.
 
 ```bash
 python manage.py run_ai_tester                   # quiet, exit code 0/1
@@ -17,24 +44,30 @@ python manage.py run_ai_tester --only plan_stock # filter to one suite
 python manage.py run_ai_tester --reset           # wipe mind palace, start fresh
 ```
 
-State lives at `docs/AI_TESTER_MIND_PALACE.json` — read first, written last.
+State lives at `docs/AI_TESTER_MIND_PALACE.json` — read first, written last,
+shared by ALL four agents.
 
-## Mind palace contract
+## Mind palace contract (shared by all four agents)
 
-The mind palace stores three things, all token-cheap on re-read:
+The mind palace is the team's common memory. It stores:
 
-1. **`fingerprint`** — sha256 of (registered strategies + endpoint list +
-   plugin file mtimes). When the fingerprint matches, the agent knows the
-   surface hasn't shifted and can skip re-discovery.
-2. **`open_bugs`** — `[{id, title, severity, evidence, suggested_fix,
-   first_seen, last_seen, occurrences}]`. New runs **dedupe by title** —
-   if a bug with the same title resurfaces, only `last_seen` + `occurrences`
-   update.
-3. **`runs`** — last 20 test runs (id, started_at, total/passed/failed,
-   findings ids). Older runs roll off.
+1. **`fingerprint`** — sha256 of (registered strategies + plugin file
+   mtimes). When the fingerprint matches, the agents know the surface
+   hasn't shifted.
+2. **`open_bugs`** — findings the tester produces. Deduped by `slug(title)`.
+3. **`fixed_bugs`** — closed findings.
+4. **`runs`** — last 20 tester runs.
+5. **`feature_requests`** — items the **trader_user** agent produces
+   (what reports/charts/data the operator wants next).
+6. **`tasks`** — items the **planner** agent produces (one per bug or
+   feature request, ordered by priority, with files-to-touch + acceptance).
+7. **`proposals`** — items the **executor** agent produces (structured
+   code-change proposals, never auto-applied).
+8. **`agent_runs`** — meta log of every run by every agent.
+9. **`notes`** — short summaries each agent leaves between cycles.
 
-When the agent finds a new failure it appends a finding **with a stable id**
-(slug of title) so re-runs idempotently update the same record.
+All collections dedupe by stable `slug(title)` ids so re-running any agent
+idempotently updates instead of duplicating.
 
 ## Test plan policy
 

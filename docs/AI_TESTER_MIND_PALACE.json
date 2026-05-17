@@ -1,8 +1,9 @@
 {
-  "context_version": 1,
+  "context_version": 2,
   "fingerprint": "16440204a7bfb31e",
-  "last_run_at": "2026-05-17T11:19:40Z",
-  "open_bugs": [
+  "last_run_at": "2026-05-17T11:54:04Z",
+  "open_bugs": [],
+  "fixed_bugs": [
     {
       "id": "ui-plumbing-pyramid-intraday-chart-component-exists-with-entries-markers",
       "title": "[ui_plumbing] Pyramid intraday chart component exists (with entries markers)",
@@ -13,7 +14,7 @@
       "first_seen": "2026-05-17T11:19:40Z",
       "last_seen": "2026-05-17T11:19:40Z",
       "occurrences": 1,
-      "status": "open"
+      "status": "fixed"
     },
     {
       "id": "ui-plumbing-vertical-spread-payoff-diagram-component-exists",
@@ -25,10 +26,9 @@
       "first_seen": "2026-05-17T11:19:40Z",
       "last_seen": "2026-05-17T11:19:40Z",
       "occurrences": 1,
-      "status": "open"
+      "status": "fixed"
     }
   ],
-  "fixed_bugs": [],
   "runs": [
     {
       "id": "140a0e3f2412",
@@ -41,7 +41,269 @@
         "ui-plumbing-pyramid-intraday-chart-component-exists-with-entries-markers",
         "ui-plumbing-vertical-spread-payoff-diagram-component-exists"
       ]
+    },
+    {
+      "id": "88a53914a12c",
+      "started_at": "2026-05-17T11:52:28Z",
+      "ended_at": "2026-05-17T11:52:37Z",
+      "total": 12,
+      "passed": 12,
+      "failed": 0,
+      "finding_ids": []
+    },
+    {
+      "id": "d7a013add350",
+      "started_at": "2026-05-17T11:52:47Z",
+      "ended_at": "2026-05-17T11:52:54Z",
+      "total": 12,
+      "passed": 12,
+      "failed": 0,
+      "finding_ids": []
+    },
+    {
+      "id": "c8dbd37c52de",
+      "started_at": "2026-05-17T11:53:20Z",
+      "ended_at": "2026-05-17T11:53:28Z",
+      "total": 12,
+      "passed": 12,
+      "failed": 0,
+      "finding_ids": []
     }
   ],
-  "notes": []
+  "notes": [
+    "[trader_user @ 2026-05-17T11:53:28Z] Mind palace is empty (no existing requests/bugs). Focused on whole-picture views: capital deployment, leverage exposure, edge decay, and plan-vs-actual reconciliation across equity + F&O.",
+    "[planner @ 2026-05-17T11:53:37Z] Translated 5 open feature_requests into prioritised tasks. No open bugs to address. Risk/report categories that unlock decisions promoted to high.",
+    "[executor @ 2026-05-17T11:53:46Z] proposed prop-unified-capital-leverage-cockpit-001 for unified-capital-leverage-cockpit"
+  ],
+  "feature_requests": [
+    {
+      "id": "unified-capital-leverage-cockpit",
+      "title": "Unified Capital & Leverage Cockpit",
+      "rationale": "Single screen showing deployed capital, free margin, notional exposure (delta-adjusted for options), and leverage ratio across equity intraday + monthly F&O + weekly index options. Unlocks the 'am I over-leveraged right now?' decision before adding any new position \u2014 critical when straddles and pyramids stack silently.",
+      "category": "report",
+      "status": "open",
+      "created_at": "2026-05-17T11:53:37Z",
+      "requested_by": "trader_user"
+    },
+    {
+      "id": "strategy-edge-decay-chart-rolling-expectancy-by-strategy",
+      "title": "Strategy Edge Decay Chart (rolling expectancy by strategy)",
+      "rationale": "Rolling 20/60-trade expectancy, win-rate, and avg R per strategy plotted over time, with a regime overlay (trending vs choppy NIFTY). Lets me kill or down-size strategies whose edge has decayed before the monthly P&L tells me. Today the monthly report is lagging \u2014 this is the leading indicator.",
+      "category": "chart",
+      "status": "open",
+      "created_at": "2026-05-17T11:53:37Z",
+      "requested_by": "trader_user"
+    },
+    {
+      "id": "plan-vs-actual-reconciliation-report",
+      "title": "Plan vs Actual Reconciliation Report",
+      "rationale": "For every AI-generated plan (directional, straddle, pyramid, spread), compare planned entry/SL/target/size vs what actually executed and the realised outcome. Surfaces slippage, sizing drift, and SL-honour rate. Without this I can't tell if the AI plans are good and execution is bad, or vice versa.",
+      "category": "report",
+      "status": "open",
+      "created_at": "2026-05-17T11:53:37Z",
+      "requested_by": "trader_user"
+    },
+    {
+      "id": "options-greeks-heatmap-portfolio-level-delta-gamma-theta-vega",
+      "title": "Options Greeks Heatmap (portfolio-level delta/gamma/theta/vega)",
+      "rationale": "Live aggregated Greeks across ALL open option positions (straddles + pyramids + spreads) by underlying and expiry bucket, with a gamma-risk badge for expiry-day positions. Unlocks the 'should I hedge or close before 3:15' decision \u2014 currently I have to eyeball positions one-by-one.",
+      "category": "risk",
+      "status": "open",
+      "created_at": "2026-05-17T11:53:37Z",
+      "requested_by": "trader_user"
+    },
+    {
+      "id": "signal-to-trade-funnel-capture-rate-breakdown",
+      "title": "Signal-to-Trade Funnel (capture-rate breakdown)",
+      "rationale": "Funnel view: signals fired \u2192 passed risk gate \u2192 executed \u2192 profitable, sliced by strategy and rejection reason from @RiskGuard. Tells me whether I'm leaving edge on the table due to over-tight risk limits or capital cap. Complements the monthly capture matrix but live/intraday instead of EOD.",
+      "category": "data",
+      "status": "open",
+      "created_at": "2026-05-17T11:53:37Z",
+      "requested_by": "trader_user"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "unified-capital-leverage-cockpit",
+      "title": "Unified Capital & Leverage Cockpit",
+      "priority": "high",
+      "scope": "Add a single screen aggregating deployed capital, free margin, notional exposure (delta-adjusted for options), and leverage ratio across equity intraday, monthly F&O, and weekly index options.",
+      "files": [
+        "backend/apps/portfolio/services/capital_cockpit.py",
+        "backend/apps/portfolio/api/views.py",
+        "backend/apps/portfolio/api/urls.py",
+        "frontend/src/features/dashboard/CapitalCockpit.tsx",
+        "frontend/src/lib/api.ts"
+      ],
+      "acceptance": "GET /api/v1/portfolios/capital-cockpit/ returns deployed_capital, free_margin, notional_exposure, delta_adjusted_exposure, and leverage_ratio fields with non-null numeric values.",
+      "source": "feature_request",
+      "source_id": "unified-capital-leverage-cockpit",
+      "status": "proposed",
+      "created_at": "2026-05-17T11:53:46Z"
+    },
+    {
+      "id": "plan-vs-actual-reconciliation-report",
+      "title": "Plan vs Actual Reconciliation Report",
+      "priority": "high",
+      "scope": "For every AI-generated plan (directional, straddle, pyramid, spread), compare planned entry/SL/target/size vs executed and realised outcome to surface slippage, sizing drift, and SL-handling errors.",
+      "files": [
+        "backend/apps/portfolio/services/plan_vs_actual.py",
+        "backend/apps/portfolio/api/views.py",
+        "backend/apps/portfolio/api/urls.py",
+        "frontend/src/features/monthly/PlanVsActualReport.tsx"
+      ],
+      "acceptance": "GET /api/v1/portfolios/plan-vs-actual/ returns a list of plans with planned vs actual entry/SL/target/size/outcome and a computed slippage_bps field per row.",
+      "source": "feature_request",
+      "source_id": "plan-vs-actual-reconciliation-report",
+      "status": "open",
+      "created_at": "2026-05-17T11:53:46Z"
+    },
+    {
+      "id": "options-greeks-heatmap-portfolio-level",
+      "title": "Options Greeks Heatmap (portfolio-level)",
+      "priority": "high",
+      "scope": "Aggregate live delta/gamma/theta/vega across all open option positions (straddles + pyramids + spreads) bucketed by underlying and expiry, with a gamma-risk badge for expiry-day positions.",
+      "files": [
+        "backend/apps/portfolio/services/greeks_aggregator.py",
+        "backend/apps/portfolio/api/views.py",
+        "backend/apps/portfolio/api/urls.py",
+        "frontend/src/features/positions/GreeksHeatmap.tsx",
+        "trading/options/data_service.py"
+      ],
+      "acceptance": "GET /api/v1/portfolios/greeks-heatmap/ returns rows keyed by (underlying, expiry) with delta/gamma/theta/vega aggregates and a gamma_risk flag set true when expiry == today.",
+      "source": "feature_request",
+      "source_id": "options-greeks-heatmap-portfolio-level-delta-gamma-theta-vega",
+      "status": "open",
+      "created_at": "2026-05-17T11:53:46Z"
+    },
+    {
+      "id": "signal-to-trade-funnel-capture-rate-breakdown",
+      "title": "Signal-to-Trade Funnel capture-rate breakdown",
+      "priority": "high",
+      "scope": "Build a funnel report: signals fired \u2192 passed risk gate \u2192 executed \u2192 profitable, sliced by strategy and @RiskGuard rejection reason, to surface where edge is being lost.",
+      "files": [
+        "backend/apps/portfolio/services/signal_funnel.py",
+        "backend/apps/portfolio/api/views.py",
+        "backend/apps/portfolio/api/urls.py",
+        "frontend/src/features/monthly/SignalFunnel.tsx",
+        "trading/models.py"
+      ],
+      "acceptance": "GET /api/v1/portfolios/signal-funnel/ returns counts for fired, risk_passed, executed, profitable and a rejection_reasons breakdown per strategy.",
+      "source": "feature_request",
+      "source_id": "signal-to-trade-funnel-capture-rate-breakdown",
+      "status": "open",
+      "created_at": "2026-05-17T11:53:46Z"
+    },
+    {
+      "id": "strategy-edge-decay-chart",
+      "title": "Strategy Edge Decay Chart",
+      "priority": "medium",
+      "scope": "Compute rolling 20/60-trade expectancy, win-rate, and avg R per strategy over time with a NIFTY regime overlay (trending vs choppy) so decayed strategies can be down-sized.",
+      "files": [
+        "backend/apps/portfolio/services/edge_decay.py",
+        "backend/apps/portfolio/api/views.py",
+        "backend/apps/portfolio/api/urls.py",
+        "frontend/src/features/monthly/EdgeDecayChart.tsx"
+      ],
+      "acceptance": "GET /api/v1/portfolios/edge-decay/?window=20 returns a time series per strategy with expectancy, win_rate, avg_r, and regime fields.",
+      "source": "feature_request",
+      "source_id": "strategy-edge-decay-chart-rolling-expectancy-by-strategy",
+      "status": "open",
+      "created_at": "2026-05-17T11:53:46Z"
+    }
+  ],
+  "proposals": [
+    {
+      "id": "prop-unified-capital-leverage-cockpit-001",
+      "task_id": "unified-capital-leverage-cockpit",
+      "summary": "Add a Capital & Leverage Cockpit endpoint and dashboard tile that aggregates deployed capital, free margin, notional exposure (delta-adjusted for options), and leverage ratio across equity intraday, monthly F&O, and weekly index options.",
+      "files_changed": [
+        {
+          "path": "backend/apps/portfolio/services/capital_cockpit.py",
+          "change_kind": "create",
+          "approach": "New service module that walks open Position rows for the tenant's portfolio(s), buckets them into equity-intraday / monthly-FNO / weekly-index-options, computes notional + delta-adjusted notional using cached option Greeks (fallback delta=1.0 for equity, 0.5 for ATM options when Greeks unavailable), and returns a single dict consumed by the view. Keeps all aggregation logic out of the view layer f",
+          "code_outline": "from dataclasses import dataclass\nfrom apps.portfolio.models import Portfolio, Position\n\nBUCKET_EQUITY = 'equity_intraday'\nBUCKET_FNO_MONTHLY = 'fno_monthly'\nBUCKET_OPT_WEEKLY = 'options_weekly'\n\ndef _classify(position) -> str: ...   # by instrument_type + expiry distance\ndef _delta_for(position) -> float: ...# greeks cache lookup, fallback by moneyness\ndef _notional(position) -> Decimal: ...# qty * ltp * lot_size\n\ndef build_capital_cockpit(tenant, portfolio: Portfolio | None = None) -> dict:\n    portfolios = [portfolio] if portfolio else list(Portfolio.objects.filter(tenant=tenant))\n    deployed = Decimal('0'); notional = Decimal('0'); delta_notional = Decimal('0')\n    per_bucket = {b: {'notional': 0, 'delta_notional': 0, 'count': 0} for b in (BUCKET_EQUITY, BUCKET_FNO_MONTHLY, BUCKET_OPT_WEEKLY)}\n    total_capital = sum((p.capital for p in portfolios), Decimal('0'))\n    for pos in Position.objects.filter(portfolio__in=portfolios, status='OPEN'):\n        bucket = _classify(pos)\n        n = _notional(pos); d = n * Decimal(_delta_for(pos))\n        deployed += pos.margin_used or Decimal('0')\n        notional += n; delta_notional += abs(d)\n        per_bucket[bucket]['notional'] += float(n)\n        per_bucket[bucket]['delta_notional'] += float(abs(d))\n        per_bucket[bucket]['count'] += 1\n    free_margin = max(total_capital - deployed, Decimal('0'))\n    leverage = float(delta_notional / total_capital) if total_capital else 0.0\n    return {\n        'as_of': now_iso(),\n        'total_capital': float(total_capital),\n        'deployed_capital': float(deployed),\n        'free_mar"
+        },
+        {
+          "path": "backend/apps/portfolio/api/views.py",
+          "change_kind": "modify",
+          "approach": "Add a CapitalCockpitView (APIView, IsAuthenticated) mirroring MonthlyReportView's tenant + auto-create-default-portfolio pattern. Delegates entirely to build_capital_cockpit; supports optional ?portfolio=<id> filter.",
+          "code_outline": "from apps.portfolio.services.capital_cockpit import build_capital_cockpit\n\nclass CapitalCockpitView(APIView):\n    permission_classes = [IsAuthenticated]\n    def get(self, request):\n        portfolio_id = request.query_params.get('portfolio')\n        qs = Portfolio.objects.filter(tenant=request.tenant)\n        portfolio = qs.filter(id=portfolio_id).first() if portfolio_id else qs.first()\n        # auto-create default like MonthlyReportView so the page never 404s\n        if not portfolio:\n            portfolio = Portfolio.objects.create(tenant=request.tenant, name='Default', capital=500_000, mode='paper')\n        return Response(build_capital_cockpit(request.tenant, portfolio))"
+        },
+        {
+          "path": "backend/apps/portfolio/api/urls.py",
+          "change_kind": "modify",
+          "approach": "Register the new view under 'capital-cockpit/' BEFORE the catchall PortfolioViewSet router (same ordering rule the docstring warns about), so the detail route doesn't swallow it.",
+          "code_outline": "from apps.portfolio.api.views import CapitalCockpitView, MonthlyReportView, ...\n\nurlpatterns = [\n    path('monthly/', MonthlyReportView.as_view(), name='portfolio-monthly'),\n    path('capital-cockpit/', CapitalCockpitView.as_view(), name='portfolio-capital-cockpit'),\n    path('positions/', include(position_router.urls)),\n    path('snapshots/', include(snapshot_router.urls)),\n    path('', include(portfolio_router.urls)),\n]"
+        },
+        {
+          "path": "frontend/src/features/dashboard/CapitalCockpit.tsx",
+          "change_kind": "create",
+          "approach": "New React component (TanStack Query hook on /portfolios/capital-cockpit/) rendering KPI tiles for total capital, deployed, free margin, notional, delta-adjusted notional, leverage ratio, plus a small per-bucket table. Uses existing Card/KPI primitives + fmtInr/fmtPct from lib/utils. Wire it into DashboardPage as a top tile.",
+          "code_outline": "import { useQuery } from '@tanstack/react-query';\nimport { fetchCapitalCockpit, type CapitalCockpit } from '@/lib/api';\nimport { Card, KPI } from '@/components/ui';\nimport { fmtInr, fmtPct } from '@/lib/utils';\n\nexport function CapitalCockpit() {\n  const { data, isLoading } = useQuery<CapitalCockpit>({\n    queryKey: ['capital-cockpit'],\n    queryFn: fetchCapitalCockpit,\n    refetchInterval: 15_000,\n  });\n  if (isLoading || !data) return <Card>Loading\u2026</Card>;\n  return (\n    <Card title='Capital & Leverage'>\n      <div className='grid grid-cols-2 md:grid-cols-6 gap-3'>\n        <KPI label='Capital' value={fmtInr(data.total_capital)} />\n        <KPI label='Deployed' value={fmtInr(data.deployed_capital)} />\n        <KPI label='Free Margin' value={fmtInr(data.free_margin)} />\n        <KPI label='Notional' value={fmtInr(data.notional_exposure)} />\n        <KPI label='\u0394-Adj Notional' value={fmtInr(data.delta_adjusted_exposure)} />\n        <KPI label='Leverage' value={`${data.leverage_ratio.toFixed(2)}x`} tone={data.leverage_ratio > 3 ? 'warn' : 'ok'} />\n      </div>\n      <BucketTable rows={Object.entries(data.by_bucket)} />\n    </Card>\n  );\n}"
+        },
+        {
+          "path": "frontend/src/lib/api.ts",
+          "change_kind": "modify",
+          "approach": "Add a typed fetcher + interface for the cockpit endpoint. Uses the existing `api` axios instance (v2 backend); no envelope unwrap needed since the response is a single object.",
+          "code_outline": "export interface CapitalCockpit {\n  as_of: string;\n  total_capital: number;\n  deployed_capital: number;\n  free_margin: number;\n  notional_exposure: number;\n  delta_adjusted_exposure: number;\n  leverage_ratio: number;\n  by_bucket: Record<string, { notional: number; delta_notional: number; count: number }>;\n}\n\nexport async function fetchCapitalCockpit(portfolioId?: string): Promise<CapitalCockpit> {\n  const { data } = await api.get<CapitalCockpit>('/portfolios/capital-cockpit/', {\n    params: portfolioId ? { portfolio: portfolioId } : undefined,\n  });\n  return data;\n}"
+        }
+      ],
+      "risks": [
+        "Delta fallback heuristic (0.5 ATM, 1.0 equity) may understate gamma-day exposure if greeks cache is cold \u2014 leverage_ratio could look artificially low on expiry day.",
+        "URL ordering: if 'capital-cockpit/' is registered after the PortfolioViewSet catchall router, the detail route `(?P<pk>[^/.]+)/` will swallow it and return 404 / wrong-shape payload.",
+        "Position.margin_used may be null for paper/legacy rows \u2014 deployed_capital would be zero and free_margin would equal total_capital, masking actual deployment. Need an explicit COALESCE or fallback to n"
+      ],
+      "tests_needed": [
+        "API contract: GET /api/v1/portfolios/capital-cockpit/ returns 200 with all 5 required fields (deployed_capital, free_margin, notional_exposure, delta_adjusted_exposure, leverage_ratio) as non-null num",
+        "Aggregation correctness: seed one equity-intraday + one weekly-CE + one monthly-FUT position and assert each bucket's notional + delta_notional match hand-computed values, and totals equal the bucket ",
+        "URL routing: assert reverse('portfolio-capital-cockpit') resolves and that the route is NOT shadowed by PortfolioViewSet's detail route (request against `/capital-cockpit/` doesn't hit the portfolio r"
+      ],
+      "status": "proposed",
+      "created_at": "2026-05-17T11:54:04Z"
+    }
+  ],
+  "agent_runs": [
+    {
+      "id": "trader_user-2026-05-17t11-53-28z",
+      "agent_kind": "trader_user",
+      "started_at": "2026-05-17T11:53:28Z",
+      "ended_at": "2026-05-17T11:53:37Z",
+      "ok": true,
+      "summary": "Mind palace is empty (no existing requests/bugs). Focused on whole-picture views: capital deployment, leverage exposure, edge decay, and plan-vs-actual reconciliation across equity + F&O.",
+      "produced_ids": [
+        "unified-capital-leverage-cockpit",
+        "strategy-edge-decay-chart-rolling-expectancy-by-strategy",
+        "plan-vs-actual-reconciliation-report",
+        "options-greeks-heatmap-portfolio-level-delta-gamma-theta-vega",
+        "signal-to-trade-funnel-capture-rate-breakdown"
+      ]
+    },
+    {
+      "id": "planner-2026-05-17t11-53-37z",
+      "agent_kind": "planner",
+      "started_at": "2026-05-17T11:53:37Z",
+      "ended_at": "2026-05-17T11:53:46Z",
+      "ok": true,
+      "summary": "Translated 5 open feature_requests into prioritised tasks. No open bugs to address. Risk/report categories that unlock decisions promoted to high.",
+      "produced_ids": [
+        "unified-capital-leverage-cockpit",
+        "plan-vs-actual-reconciliation-report",
+        "options-greeks-heatmap-portfolio-level",
+        "signal-to-trade-funnel-capture-rate-breakdown",
+        "strategy-edge-decay-chart"
+      ]
+    },
+    {
+      "id": "executor-2026-05-17t11-53-46z",
+      "agent_kind": "executor",
+      "started_at": "2026-05-17T11:53:46Z",
+      "ended_at": "2026-05-17T11:54:04Z",
+      "ok": true,
+      "summary": "Proposed change for task 'Unified Capital & Leverage Cockpit'",
+      "produced_ids": [
+        "prop-unified-capital-leverage-cockpit-001"
+      ]
+    }
+  ]
 }
