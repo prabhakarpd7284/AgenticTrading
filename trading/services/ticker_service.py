@@ -309,9 +309,11 @@ class TickerService:
         for option_type in ["CE", "PE"]:
             for key, inst in self._nfo_by_key.items():
                 sym = inst.get("symbol", "")
+                # OPTIDX = index options (NIFTY/BANKNIFTY/SENSEX)
+                # OPTSTK = stock options (HDFCBANK/RELIANCE/etc.)
                 if (
                     inst.get("name") == underlying
-                    and inst.get("instrumenttype") == "OPTIDX"
+                    and inst.get("instrumenttype") in ("OPTIDX", "OPTSTK")
                     and sym.endswith(option_type)
                 ):
                     # Match strike from metadata (exact, no substring ambiguity)
