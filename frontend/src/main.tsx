@@ -12,6 +12,12 @@ import { TooltipProvider } from "@/components/ui/Tooltip";
 const qc = new QueryClient({
   defaultOptions: {
     queries: {
+      // Trading data goes stale fast — show cache instantly on mount, but
+      // *always* fire a background refetch so navigating to a route never
+      // shows numbers older than ~RTT. Without this, clicking a navbar
+      // link with cache still inside staleTime serves the stale view
+      // and no network call happens until staleTime expires.
+      refetchOnMount: "always",
       staleTime: 30_000,
       retry: 1,
       refetchOnWindowFocus: false,

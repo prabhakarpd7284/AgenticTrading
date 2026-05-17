@@ -1,8 +1,8 @@
 import * as React from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import {
-  Activity, AlertTriangle, ArrowRight, Bot, Briefcase, ShieldCheck, Sparkles,
+  Activity, AlertTriangle, ArrowRight, Bot, Briefcase, RefreshCcw, ShieldCheck, Sparkles,
 } from "lucide-react";
 import {
   LineChart, Line, ResponsiveContainer, YAxis, Tooltip as ReTooltip,
@@ -32,32 +32,59 @@ type PnlMsg = { portfolio_id: string; mtm: number; day_pnl: number; unrealized: 
 
 export function DashboardPage() {
   const nav = useNavigate();
+  const qc = useQueryClient();
 
   /* ------------------------------------------------------------ */
-  /* Legacy-bridge queries — these return the REAL sqlite data.    */
+  /* Page queries — each panel below pulls from one of these.      */
   /* ------------------------------------------------------------ */
+  const portfolioQ = usePortfolioSummary();
+  const positionsQ = usePositions();
+  const auditQ     = useAuditFeed(8);
+  const alertsQ    = useRiskAlerts();
+  const riskQ      = useRiskOverview();
+  const systemQ    = useSystemStatus();
   const {
     data: legacyPortfolio,
     isLoading: pfLoading,
     dataUpdatedAt: portfolioUpdatedAt,
-  } = usePortfolioSummary();
-  const { data: legacyPositions }  = usePositions();
-  const { data: auditFeed = [] }   = useAuditFeed(8);
-  const { data: alerts = [] }      = useRiskAlerts();
-  const { data: risk }             = useRiskOverview();
-  const { data: system }           = useSystemStatus();
+  } = portfolioQ;
+  const { data: legacyPositions }  = positionsQ;
+  const { data: auditFeed = [] }   = auditQ;
+  const { data: alerts = [] }      = alertsQ;
+  const { data: risk }             = riskQ;
+  const { data: system }           = systemQ;
 
   /* v2 queries — kept so the page still works once the native v2   */
   /* schema is populated. These are currently empty for most users.  */
-  const { data: v2portfolios } = useQuery({
+  const portfoliosQ = useQuery({
     queryKey: ["portfolios"],
     queryFn: () => api.get<Portfolio[]>("/portfolios/").then((r) => r.data),
   });
-  const { data: v2runs = [] } = useQuery({
+  const runsQ = useQuery({
     queryKey: ["agent-runs", "recent"],
     queryFn: () => api.get<AgentRun[]>("/agents/runs/?limit=5").then((r) => r.data),
   });
+  const { data: v2portfolios } = portfoliosQ;
+  const { data: v2runs = [] } = runsQ;
   const primary = v2portfolios?.[0];
+
+  /* ── Manual refresh: refetch every panel on the page in one go.  */
+  const isAnyFetching =
+    portfolioQ.isFetching || positionsQ.isFetching || auditQ.isFetching ||
+    alertsQ.isFetching   || riskQ.isFetching     || systemQ.isFetching ||
+    portfoliosQ.isFetching || runsQ.isFetching;
+  const refreshAll = React.useCallback(() => {
+    // Invalidate by prefix so the page picks up data from *any* in-flight
+    // op (e.g. an enrich_signals run that touched the audit feed).
+    qc.invalidateQueries({ queryKey: ["portfolio-summary"] });
+    qc.invalidateQueries({ queryKey: ["positions"] });
+    qc.invalidateQueries({ queryKey: ["audit"] });
+    qc.invalidateQueries({ queryKey: ["risk-alerts"] });
+    qc.invalidateQueries({ queryKey: ["risk"] });
+    qc.invalidateQueries({ queryKey: ["system-status"] });
+    qc.invalidateQueries({ queryKey: ["portfolios"] });
+    qc.invalidateQueries({ queryKey: ["agent-runs"] });
+  }, [qc]);
 
   /* ------------------------------------------------------------ */
   /* Live MTM curve from WebSocket                                 */
@@ -127,6 +154,16 @@ export function DashboardPage() {
         </div>
 
         <div className="flex items-center gap-2">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={refreshAll}
+            disabled={isAnyFetching}
+            aria-label="Refresh desk data"
+            title="Refetch every panel on this page"
+          >
+            <RefreshCcw className={`h-4 w-4 ${isAnyFetching ? "animate-spin" : ""}`} />
+          </Button>
           <Button
             variant="secondary"
             leading={<ShieldCheck className="h-4 w-4" />}
