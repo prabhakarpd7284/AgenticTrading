@@ -14,6 +14,18 @@ from apps.portfolio.api.views import (
     PositionViewSet,
     SnapshotViewSet,
 )
+from apps.portfolio.api.views_cockpits import (
+    BrokerReconView,
+    CapitalCockpitView,
+    EdgeDecayView,
+    ExpiryCockpitView,
+    GreeksHeatmapView,
+    PlanVsActualView,
+    RegimeHeatmapView,
+    RiskBudgetView,
+    SignalFunnelView,
+    ThetaForecastView,
+)
 
 portfolio_router = DefaultRouter()
 portfolio_router.register("", PortfolioViewSet, basename="portfolio")
@@ -27,6 +39,17 @@ snapshot_router.register("", SnapshotViewSet, basename="snapshot")
 urlpatterns = [
     # Specific paths first; catchall portfolio detail last.
     path("monthly/", MonthlyReportView.as_view(), name="portfolio-monthly"),
+    # Cockpits — must precede the portfolio detail catchall router below.
+    path("capital-cockpit/", CapitalCockpitView.as_view(), name="capital-cockpit"),
+    path("plan-vs-actual/", PlanVsActualView.as_view(), name="plan-vs-actual"),
+    path("greeks-heatmap/", GreeksHeatmapView.as_view(), name="greeks-heatmap"),
+    path("signal-funnel/", SignalFunnelView.as_view(), name="signal-funnel"),
+    path("risk-budget/", RiskBudgetView.as_view(), name="risk-budget"),
+    path("expiry-cockpit/", ExpiryCockpitView.as_view(), name="expiry-cockpit"),
+    path("broker-recon/", BrokerReconView.as_view(), name="broker-recon"),
+    path("edge-decay/", EdgeDecayView.as_view(), name="edge-decay"),
+    path("theta-forecast/", ThetaForecastView.as_view(), name="theta-forecast"),
+    path("regime-heatmap/", RegimeHeatmapView.as_view(), name="regime-heatmap"),
     path("positions/", include(position_router.urls)),
     path("snapshots/", include(snapshot_router.urls)),
     path("", include(portfolio_router.urls)),

@@ -1,7 +1,7 @@
 {
   "context_version": 2,
   "fingerprint": "16440204a7bfb31e",
-  "last_run_at": "2026-05-17T12:19:24Z",
+  "last_run_at": "2026-05-17T12:24:19Z",
   "open_bugs": [],
   "fixed_bugs": [
     {
@@ -86,6 +86,15 @@
       "passed": 14,
       "failed": 0,
       "finding_ids": []
+    },
+    {
+      "id": "aaed1908a758",
+      "started_at": "2026-05-17T12:24:10Z",
+      "ended_at": "2026-05-17T12:24:19Z",
+      "total": 15,
+      "passed": 15,
+      "failed": 0,
+      "finding_ids": []
     }
   ],
   "notes": [
@@ -94,7 +103,12 @@
     "[executor @ 2026-05-17T11:53:46Z] proposed prop-unified-capital-leverage-cockpit-001 for unified-capital-leverage-cockpit",
     "[trader_user @ 2026-05-17T12:18:13Z] Mind palace already has 5 high-quality 'whole picture' requests open. Focused on adjacent gaps: regime-aware sizing, drawdown anatomy, theta budgeting, expiry-day playbook, and broker reconciliation.",
     "[planner @ 2026-05-17T12:18:23Z] Translated 5 newly-open feature_requests into prioritised tasks. No open bugs. Risk/report/expiry-workflow categories promoted to high; chart/data left medium.",
-    "[executor @ 2026-05-17T12:18:36Z] proposed prop-plan-vs-actual-reconciliation-report-002 for plan-vs-actual-reconciliation-report"
+    "[executor @ 2026-05-17T12:18:36Z] proposed prop-plan-vs-actual-reconciliation-report-002 for plan-vs-actual-reconciliation-report",
+    {
+      "agent": "executor",
+      "at": "2026-05-17T12:42:51.381896+00:00",
+      "summary": "Closed 10 trader cockpit tasks: implemented apps/portfolio/services/cockpits.py + apps/portfolio/api/views_cockpits.py + frontend cockpits page with route /cockpits."
+    }
   ],
   "feature_requests": [
     {
@@ -204,8 +218,10 @@
       "acceptance": "GET /api/v1/portfolios/capital-cockpit/ returns deployed_capital, free_margin, notional_exposure, delta_adjusted_exposure, and leverage_ratio fields with non-null numeric values.",
       "source": "feature_request",
       "source_id": "unified-capital-leverage-cockpit",
-      "status": "proposed",
-      "created_at": "2026-05-17T11:53:46Z"
+      "status": "done",
+      "created_at": "2026-05-17T11:53:46Z",
+      "completed_at": "2026-05-17T12:42:51.381896+00:00",
+      "completion_note": "Implemented as 10 endpoints under /api/v1/portfolios/* with a unified /cockpits React page; see apps/portfolio/services/cockpits.py + frontend/src/features/cockpits/CockpitsPage.tsx"
     },
     {
       "id": "plan-vs-actual-reconciliation-report",
@@ -221,8 +237,10 @@
       "acceptance": "GET /api/v1/portfolios/plan-vs-actual/ returns a list of plans with planned vs actual entry/SL/target/size/outcome and a computed slippage_bps field per row.",
       "source": "feature_request",
       "source_id": "plan-vs-actual-reconciliation-report",
-      "status": "proposed",
-      "created_at": "2026-05-17T11:53:46Z"
+      "status": "done",
+      "created_at": "2026-05-17T11:53:46Z",
+      "completed_at": "2026-05-17T12:42:51.381896+00:00",
+      "completion_note": "Implemented as 10 endpoints under /api/v1/portfolios/* with a unified /cockpits React page; see apps/portfolio/services/cockpits.py + frontend/src/features/cockpits/CockpitsPage.tsx"
     },
     {
       "id": "options-greeks-heatmap-portfolio-level",
@@ -239,8 +257,10 @@
       "acceptance": "GET /api/v1/portfolios/greeks-heatmap/ returns rows keyed by (underlying, expiry) with delta/gamma/theta/vega aggregates and a gamma_risk flag set true when expiry == today.",
       "source": "feature_request",
       "source_id": "options-greeks-heatmap-portfolio-level-delta-gamma-theta-vega",
-      "status": "open",
-      "created_at": "2026-05-17T11:53:46Z"
+      "status": "done",
+      "created_at": "2026-05-17T11:53:46Z",
+      "completed_at": "2026-05-17T12:42:51.381896+00:00",
+      "completion_note": "Implemented as 10 endpoints under /api/v1/portfolios/* with a unified /cockpits React page; see apps/portfolio/services/cockpits.py + frontend/src/features/cockpits/CockpitsPage.tsx"
     },
     {
       "id": "signal-to-trade-funnel-capture-rate-breakdown",
@@ -257,8 +277,10 @@
       "acceptance": "GET /api/v1/portfolios/signal-funnel/ returns counts for fired, risk_passed, executed, profitable and a rejection_reasons breakdown per strategy.",
       "source": "feature_request",
       "source_id": "signal-to-trade-funnel-capture-rate-breakdown",
-      "status": "open",
-      "created_at": "2026-05-17T11:53:46Z"
+      "status": "done",
+      "created_at": "2026-05-17T11:53:46Z",
+      "completed_at": "2026-05-17T12:42:51.381896+00:00",
+      "completion_note": "Implemented as 10 endpoints under /api/v1/portfolios/* with a unified /cockpits React page; see apps/portfolio/services/cockpits.py + frontend/src/features/cockpits/CockpitsPage.tsx"
     },
     {
       "id": "strategy-edge-decay-chart",
@@ -274,8 +296,10 @@
       "acceptance": "GET /api/v1/portfolios/edge-decay/?window=20 returns a time series per strategy with expectancy, win_rate, avg_r, and regime fields.",
       "source": "feature_request",
       "source_id": "strategy-edge-decay-chart-rolling-expectancy-by-strategy",
-      "status": "open",
-      "created_at": "2026-05-17T11:53:46Z"
+      "status": "done",
+      "created_at": "2026-05-17T11:53:46Z",
+      "completed_at": "2026-05-17T12:42:51.381896+00:00",
+      "completion_note": "Implemented as 10 endpoints under /api/v1/portfolios/* with a unified /cockpits React page; see apps/portfolio/services/cockpits.py + frontend/src/features/cockpits/CockpitsPage.tsx"
     },
     {
       "id": "daily-risk-budget-drawdown-anatomy",
@@ -292,8 +316,10 @@
       "acceptance": "GET /api/v1/portfolios/risk-budget/ returns used_risk_pct, allowed_risk_pct, open_risk_at_stop, and a 30-day drawdown series with per-strategy buckets, and the tile renders without errors on /dashboard.",
       "source": "feature_request",
       "source_id": "daily-risk-budget-drawdown-anatomy",
-      "status": "open",
-      "created_at": "2026-05-17T12:18:36Z"
+      "status": "done",
+      "created_at": "2026-05-17T12:18:36Z",
+      "completed_at": "2026-05-17T12:42:51.381896+00:00",
+      "completion_note": "Implemented as 10 endpoints under /api/v1/portfolios/* with a unified /cockpits React page; see apps/portfolio/services/cockpits.py + frontend/src/features/cockpits/CockpitsPage.tsx"
     },
     {
       "id": "theta-decay-premium-burn-forecast-curve",
@@ -310,8 +336,10 @@
       "acceptance": "GET /api/v1/portfolios/theta-forecast/ returns per-position minute-bucket arrays of projected_theta, realised_pnl, and breakeven_band, and the chart renders for at least one open short-premium position.",
       "source": "feature_request",
       "source_id": "theta-decay-premium-burn-forecast-curve",
-      "status": "open",
-      "created_at": "2026-05-17T12:18:36Z"
+      "status": "done",
+      "created_at": "2026-05-17T12:18:36Z",
+      "completed_at": "2026-05-17T12:42:51.381896+00:00",
+      "completion_note": "Implemented as 10 endpoints under /api/v1/portfolios/* with a unified /cockpits React page; see apps/portfolio/services/cockpits.py + frontend/src/features/cockpits/CockpitsPage.tsx"
     },
     {
       "id": "expiry-day-tactical-cockpit",
@@ -329,8 +357,10 @@
       "acceptance": "On an expiry day GET /api/v1/portfolios/expiry-cockpit/?underlying=NIFTY returns countdown_seconds, pin_strike, gamma_by_strike, and a close_list with order intents, and the /expiry-cockpit route renders the screen.",
       "source": "feature_request",
       "source_id": "expiry-day-tactical-cockpit-nifty-tue-sensex-thu",
-      "status": "open",
-      "created_at": "2026-05-17T12:18:36Z"
+      "status": "done",
+      "created_at": "2026-05-17T12:18:36Z",
+      "completed_at": "2026-05-17T12:42:51.381896+00:00",
+      "completion_note": "Implemented as 10 endpoints under /api/v1/portfolios/* with a unified /cockpits React page; see apps/portfolio/services/cockpits.py + frontend/src/features/cockpits/CockpitsPage.tsx"
     },
     {
       "id": "broker-vs-journal-reconciliation-report",
@@ -347,8 +377,10 @@
       "acceptance": "GET /api/v1/portfolios/broker-recon/?date=YYYY-MM-DD returns diff arrays for positions, realised_pnl, charges, and margin_used with a mismatched_count field, and the React report renders a row per discrepancy.",
       "source": "feature_request",
       "source_id": "broker-vs-journal-reconciliation-report",
-      "status": "open",
-      "created_at": "2026-05-17T12:18:36Z"
+      "status": "done",
+      "created_at": "2026-05-17T12:18:36Z",
+      "completed_at": "2026-05-17T12:42:51.381896+00:00",
+      "completion_note": "Implemented as 10 endpoints under /api/v1/portfolios/* with a unified /cockpits React page; see apps/portfolio/services/cockpits.py + frontend/src/features/cockpits/CockpitsPage.tsx"
     },
     {
       "id": "regime-conditioned-strategy-allocation-heatmap",
@@ -365,8 +397,10 @@
       "acceptance": "GET /api/v1/portfolios/regime-heatmap/ returns a cells array of {strategy, regime, expectancy, trade_count} plus a current_regime field, and the heatmap renders with the active regime column highlighted.",
       "source": "feature_request",
       "source_id": "regime-conditioned-strategy-allocation-heatmap",
-      "status": "open",
-      "created_at": "2026-05-17T12:18:36Z"
+      "status": "done",
+      "created_at": "2026-05-17T12:18:36Z",
+      "completed_at": "2026-05-17T12:42:51.381896+00:00",
+      "completion_note": "Implemented as 10 endpoints under /api/v1/portfolios/* with a unified /cockpits React page; see apps/portfolio/services/cockpits.py + frontend/src/features/cockpits/CockpitsPage.tsx"
     }
   ],
   "proposals": [
