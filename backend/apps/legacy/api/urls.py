@@ -13,6 +13,7 @@ urlpatterns = [
     path("positions/", views.positions, name="positions"),
     path("trades/",    views.trades,    name="trades"),
     path("straddles/", views.straddles, name="straddles"),
+    path("straddles/register/", views.straddles_register, name="straddles-register"),
     path("audit/",     views.audit,     name="audit"),
     path("risk/",      views.risk,      name="risk"),
     path("alerts/",    views.alerts,    name="alerts"),

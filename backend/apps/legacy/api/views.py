@@ -324,6 +324,128 @@ def straddles(request):
 
 
 # ---------------------------------------------------------------------------
+# Register a new straddle from the UI — auto-resolves symbols, tokens,
+# and current LTPs from underlying+strike+expiry+lots. No more CLI drop.
+# ---------------------------------------------------------------------------
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+@_with_legacy
+def straddles_register(request):
+    """POST /api/v1/legacy/straddles/register/
+    Body: {
+      underlying: "NIFTY",          (required) NIFTY | BANKNIFTY | SENSEX | …
+      strike: 23650,                (required) ATM-ish whole-number strike
+      expiry: "19MAY26",            (optional) DDMMMYY; defaults to next weekly
+      lots: 1,                      (optional, default 1)
+      ce_sell_price: 150.35,        (optional) overrides live LTP fetch
+      pe_sell_price: 166.7,         (optional) overrides live LTP fetch
+    }
+    """
+    from datetime import date, datetime
+    from trading.models import StraddlePosition
+    from trading.options.data_service import OptionsDataService
+    from trading.services.ticker_service import ticker_service
+    from trading.utils.expiry_utils import next_expiry_date, iso_to_angel
+
+    body = request.data or {}
+    underlying = (body.get("underlying") or "").strip().upper()
+    strike = body.get("strike")
+    expiry = (body.get("expiry") or "").strip().upper()
+    lots = int(body.get("lots") or 1)
+
+    if not underlying:
+        return Response({"error": "underlying is required"}, status=400)
+    if strike in (None, ""):
+        return Response({"error": "strike is required"}, status=400)
+    try:
+        strike = int(strike)
+    except (TypeError, ValueError):
+        return Response({"error": "strike must be a number"}, status=400)
+    if lots < 1:
+        return Response({"error": "lots must be >= 1"}, status=400)
+
+    underlying = ticker_service.normalize_underlying(underlying)
+
+    # Resolve expiry — fall back to the next listed weekly if absent.
+    if not expiry:
+        exp_d = next_expiry_date(underlying)
+        if not exp_d:
+            return Response({"error": "could not resolve next expiry"}, status=400)
+        expiry = iso_to_angel(exp_d.isoformat()) or ""
+        if not expiry:
+            return Response({"error": "expiry conversion failed"}, status=400)
+
+    try:
+        expiry_date = datetime.strptime(expiry, "%d%b%y").date()
+    except ValueError:
+        return Response({"error": f"expiry must be DDMMMYY (got {expiry!r})"}, status=400)
+
+    # Resolve CE + PE symbols/tokens from the scrip master.
+    opts = ticker_service.get_nfo_options(underlying, strike, expiry) or {}
+    if "CE" not in opts or "PE" not in opts:
+        listed = []
+        try:
+            from trading.services.ticker_service import _available_strikes_for  # noqa: F401
+        except Exception:  # noqa: BLE001
+            pass
+        return Response({
+            "error": "strike not listed for that expiry",
+            "underlying": underlying, "strike": strike, "expiry": expiry,
+            "hint": "Check the strike grid and try a nearby whole number.",
+        }, status=400)
+    ce_sym, ce_tok = opts["CE"]
+    pe_sym, pe_tok = opts["PE"]
+
+    # Resolve sell prices — caller can override, else fetch live LTP.
+    ce_sell = body.get("ce_sell_price")
+    pe_sell = body.get("pe_sell_price")
+    if ce_sell in (None, "") or pe_sell in (None, ""):
+        ods = OptionsDataService()
+        if ce_sell in (None, ""):
+            ce_sell = float(ods.fetch_option_ltp(ce_sym, ce_tok).get("ltp", 0.0) or 0.0)
+        if pe_sell in (None, ""):
+            pe_sell = float(ods.fetch_option_ltp(pe_sym, pe_tok).get("ltp", 0.0) or 0.0)
+    try:
+        ce_sell = float(ce_sell); pe_sell = float(pe_sell)
+    except (TypeError, ValueError):
+        return Response({"error": "ce_sell_price / pe_sell_price must be numbers"}, status=400)
+    if ce_sell <= 0 or pe_sell <= 0:
+        return Response({
+            "error": "live LTP returned 0 — broker may be paused or strike illiquid",
+            "ce_sell": ce_sell, "pe_sell": pe_sell,
+            "hint": "Pass explicit ce_sell_price + pe_sell_price to override.",
+        }, status=400)
+
+    # Lot size — fall back to the scrip master's hint, then a hard-coded
+    # post-Jan-2026 SEBI map for the three big indices.
+    lot_size = body.get("lot_size")
+    if not lot_size:
+        info = ticker_service.get_info(ce_sym) or {}
+        lot_size = info.get("lot_size") or {
+            "NIFTY": 65, "BANKNIFTY": 30, "SENSEX": 20,
+            "FINNIFTY": 25, "MIDCPNIFTY": 50,
+        }.get(underlying, 75)
+
+    pos = StraddlePosition.objects.create(
+        underlying=underlying, strike=strike, expiry=expiry_date,
+        lot_size=int(lot_size), lots=lots,
+        ce_symbol=ce_sym, ce_token=ce_tok, ce_sell_price=ce_sell,
+        pe_symbol=pe_sym, pe_token=pe_tok, pe_sell_price=pe_sell,
+        trade_date=date.today(),
+    )
+    return Response({
+        "id": pos.id,
+        "underlying": pos.underlying, "strike": pos.display_strike,
+        "expiry": pos.expiry.isoformat(), "status": pos.status,
+        "lots": pos.lots, "lot_size": pos.lot_size,
+        "ce_symbol": pos.ce_symbol, "ce_sell": pos.ce_sell_price,
+        "pe_symbol": pos.pe_symbol, "pe_sell": pos.pe_sell_price,
+        "premium_sold_pts": pos.combined_sell_pts,
+        "premium_sold_inr": pos.total_premium_sold,
+    }, status=201)
+
+
+# ---------------------------------------------------------------------------
 # Audit log → AI activity feed for the Agent Console
 # ---------------------------------------------------------------------------
 def _format_audit_detail(entry) -> str:

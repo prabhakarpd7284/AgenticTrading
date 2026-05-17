@@ -2160,6 +2160,9 @@ function StraddlePositionPicker({
   onChange: (v: number | undefined) => void;
   required: boolean;
 }) {
+  const qc = useQueryClient();
+  const [showRegister, setShowRegister] = React.useState(false);
+
   const { data, isLoading, error } = useQuery({
     queryKey: ["legacy", "straddles"],
     queryFn: () => legacyApi.get<{ results: LegacyStraddle[] }>("/legacy/straddles/").then((r) => r.data.results ?? []),
@@ -2173,6 +2176,12 @@ function StraddlePositionPicker({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data]);
 
+  const handleRegistered = (newId: number) => {
+    qc.invalidateQueries({ queryKey: ["legacy", "straddles"] });
+    onChange(newId);
+    setShowRegister(false);
+  };
+
   if (isLoading) {
     return (
       <div className="block">
@@ -2185,17 +2194,31 @@ function StraddlePositionPicker({
     );
   }
 
-  if (error || !data || data.length === 0) {
+  const isEmpty = error || !data || data.length === 0;
+
+  // Empty state OR explicit register click → show the inline form
+  if (isEmpty || showRegister) {
     return (
-      <div className="block">
+      <div className="block space-y-2">
         <span className="text-body-sm text-fg">
-          position_id{required && <span className="text-danger ml-1">*</span>}
+          Position{required && <span className="text-danger ml-1">*</span>}
         </span>
-        <div className="mt-1 rounded-sm border border-warning/40 bg-warning/5 p-3 text-body-sm text-fg-muted">
-          No straddle positions found. Register one with{" "}
-          <code className="text-caption">python manage.py manage_straddle --register ...</code>{" "}
-          (or use the Django shell), then reopen this dialog.
-        </div>
+        {isEmpty && (
+          <p className="text-caption text-fg-muted">
+            No straddle positions yet — register one below. CE/PE symbols, tokens,
+            and current premiums are auto-resolved from the scrip master.
+          </p>
+        )}
+        <RegisterStraddleForm onRegistered={handleRegistered} />
+        {!isEmpty && (
+          <button
+            type="button"
+            onClick={() => setShowRegister(false)}
+            className="text-caption text-fg-subtle hover:text-fg"
+          >
+            ← Back to picker
+          </button>
+        )}
       </div>
     );
   }
@@ -2210,10 +2233,19 @@ function StraddlePositionPicker({
 
   return (
     <div className="block">
-      <span className="text-body-sm text-fg">
-        Position{required && <span className="text-danger ml-1">*</span>}
-        <span className="text-fg-subtle font-mono ml-2 text-caption">position_id</span>
-      </span>
+      <div className="flex items-center justify-between">
+        <span className="text-body-sm text-fg">
+          Position{required && <span className="text-danger ml-1">*</span>}
+          <span className="text-fg-subtle font-mono ml-2 text-caption">position_id</span>
+        </span>
+        <button
+          type="button"
+          onClick={() => setShowRegister(true)}
+          className="text-caption text-accent hover:underline"
+        >
+          + Register new
+        </button>
+      </div>
       <select
         value={value == null ? "" : String(value)}
         onChange={(e) => onChange(e.target.value === "" ? undefined : Number(e.target.value))}
@@ -2240,6 +2272,104 @@ function StraddlePositionPicker({
         </div>
       )}
     </div>
+  );
+}
+
+/** Inline form to register a straddle from the picker.
+ * Backend (POST /legacy/straddles/register/) auto-resolves symbols + tokens
+ * + current LTPs given underlying + strike + expiry — operator only enters
+ * the four inputs they actually care about. */
+function RegisterStraddleForm({ onRegistered }: { onRegistered: (id: number) => void }) {
+  const [underlying, setUnderlying] = React.useState("NIFTY");
+  const [strike, setStrike] = React.useState<string>("");
+  const [expiry, setExpiry] = React.useState("");
+  const [lots, setLots] = React.useState<number>(1);
+  const [err, setErr] = React.useState<string | null>(null);
+
+  const mut = useMutation({
+    mutationFn: (payload: { underlying: string; strike: number; expiry?: string; lots: number }) =>
+      legacyApi.post<{ id: number; underlying: string; strike: string; expiry: string }>(
+        "/legacy/straddles/register/", payload,
+      ).then((r) => r.data),
+    onSuccess: (data) => {
+      toast.success(`Registered #${data.id}: ${data.underlying} ${data.strike} ${data.expiry}`);
+      onRegistered(data.id);
+    },
+    onError: (e: { response?: { data?: { error?: string; hint?: string } } }) => {
+      const body = e?.response?.data;
+      setErr(`${body?.error ?? "Register failed"}${body?.hint ? ` — ${body.hint}` : ""}`);
+    },
+  });
+
+  const onSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setErr(null);
+    const n = parseInt(strike, 10);
+    if (!Number.isFinite(n)) { setErr("Strike must be a whole number"); return; }
+    mut.mutate({
+      underlying,
+      strike: n,
+      expiry: expiry.trim() || undefined,
+      lots,
+    });
+  };
+
+  return (
+    <form onSubmit={onSubmit} className="space-y-2 rounded-sm border border-border bg-surface p-3">
+      <div className="grid grid-cols-2 gap-2">
+        <label className="block">
+          <span className="text-caption text-fg-subtle">Underlying</span>
+          <select
+            value={underlying}
+            onChange={(e) => setUnderlying(e.target.value)}
+            className="mt-0.5 w-full bg-surface-2 border border-border rounded-sm px-2 py-1.5 text-body-sm text-fg font-mono"
+          >
+            {["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX"].map((u) => (
+              <option key={u} value={u}>{u}</option>
+            ))}
+          </select>
+        </label>
+        <label className="block">
+          <span className="text-caption text-fg-subtle">Strike</span>
+          <input
+            type="number" inputMode="numeric"
+            value={strike}
+            onChange={(e) => setStrike(e.target.value)}
+            placeholder="e.g. 23650"
+            className="mt-0.5 w-full bg-surface-2 border border-border rounded-sm px-2 py-1.5 text-body-sm text-fg font-mono"
+            required
+          />
+        </label>
+        <label className="block">
+          <span className="text-caption text-fg-subtle">Expiry (DDMMMYY)</span>
+          <input
+            type="text"
+            value={expiry}
+            onChange={(e) => setExpiry(e.target.value.toUpperCase())}
+            placeholder="blank = next weekly"
+            className="mt-0.5 w-full bg-surface-2 border border-border rounded-sm px-2 py-1.5 text-body-sm text-fg font-mono"
+          />
+        </label>
+        <label className="block">
+          <span className="text-caption text-fg-subtle">Lots</span>
+          <input
+            type="number" min={1} max={100}
+            value={lots}
+            onChange={(e) => setLots(Math.max(1, parseInt(e.target.value, 10) || 1))}
+            className="mt-0.5 w-full bg-surface-2 border border-border rounded-sm px-2 py-1.5 text-body-sm text-fg font-mono"
+          />
+        </label>
+      </div>
+      {err && (
+        <p className="text-caption text-danger">{err}</p>
+      )}
+      <p className="text-caption text-fg-subtle">
+        CE/PE symbols + tokens + live LTPs auto-resolved. Both legs sold at market.
+      </p>
+      <Button type="submit" size="sm" loading={mut.isPending}>
+        Register straddle
+      </Button>
+    </form>
   );
 }
 
