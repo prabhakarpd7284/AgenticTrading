@@ -37,3 +37,14 @@ dependencies = [
 [project.optional-dependencies]
 postgres = ["psycopg2-binary>=2.9"]
 celery = ["celery>=5.3", "redis>=5.0"]
+
+# Setuptools package discovery — the `backend/` and `frontend/` siblings
+# would otherwise confuse the flat-layout finder. We only ship the legacy
+# `trading` Django app + `config` settings shim from this pyproject.
+[tool.setuptools.packages.find]
+include = ["trading*", "config*"]
+exclude = ["backend*", "frontend*", "docker*", "infra*", "logs*", "scripts*", "tests*"]
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
