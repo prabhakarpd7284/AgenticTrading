@@ -596,3 +596,199 @@ export const useEdgeLedger = () =>
     queryFn: () => api.get<EdgeLedger>("/portfolios/edge-ledger/").then((r) => r.data),
     ...COMMON,
   });
+
+// ---------------------------------------------------------------------------
+// Cycle-6 cockpits — 11 new tabs covering pure-compute, sector, and stubbed
+// external-feed views. Stubs return the same shape they will once a feed is
+// wired, so the panels never need a rewrite.
+// ---------------------------------------------------------------------------
+export interface IntradayBucket {
+  slot: string; deployed: number; gross: number;
+  realised_pnl: number; trades_open: number; idle_pct: number;
+  sector_breakdown: Record<string, number>;
+}
+export interface IntradayRotation {
+  date: string; capital: number; peak_deployed: number;
+  peak_utilisation_pct: number; total_realised_pnl: number;
+  buckets: IntradayBucket[]; note?: string;
+}
+
+export const useIntradayRotation = (on?: string) =>
+  useQuery({
+    queryKey: ["cockpits", "intraday-rotation", on ?? ""],
+    queryFn: () => {
+      const q = on ? `?date=${encodeURIComponent(on)}` : "";
+      return api.get<IntradayRotation>(`/portfolios/intraday-rotation/${q}`).then((r) => r.data);
+    },
+    ...COMMON,
+  });
+
+export interface GapFillRow {
+  symbol: string; prev_close?: number; open?: number; high?: number; low?: number; close?: number;
+  gap_pct: number; status: "open" | "filled" | "no_gap" | "no_data";
+  filled_today: boolean; historical_fill_p: number;
+}
+export interface GapFill { count: number; rows: GapFillRow[]; note?: string; }
+
+export const useGapFill = () =>
+  useQuery({
+    queryKey: ["cockpits", "gap-fill"],
+    queryFn: () => api.get<GapFill>("/market-data/gap-fill/").then((r) => r.data),
+    ...COMMON,
+  });
+
+export interface Second5MinRow {
+  symbol: string;
+  classification: "continuation" | "reversal" | "consolidation" | "weak" | "no_data";
+  day_type_tag: string;
+  first_bar: { o: number; h: number; l: number; c: number; v: number } | null;
+  second_bar: { o: number; h: number; l: number; c: number; v: number } | null;
+  vol_ratio: number;
+}
+export interface Second5Min { count: number; rows: Second5MinRow[]; note?: string; }
+
+export const useSecond5Min = () =>
+  useQuery({
+    queryKey: ["cockpits", "second-5min"],
+    queryFn: () => api.get<Second5Min>("/market-data/second-5min/").then((r) => r.data),
+    ...COMMON,
+  });
+
+export interface VolRegimePoint {
+  t: string; c: number; realised_vol_ann: number; trades_per_sec: number;
+  regime: "TREND" | "CHOP" | "DEAD" | "SHOCK" | "no_data";
+}
+export interface VolRegime {
+  symbol: string; bar_count: number;
+  current_regime: string; current_vol_ann?: number; current_tps?: number;
+  series: VolRegimePoint[]; note?: string;
+}
+
+export const useVolRegime = (symbol: string) =>
+  useQuery({
+    queryKey: ["cockpits", "vol-regime", symbol],
+    queryFn: () =>
+      api.get<VolRegime>(`/market-data/vol-regime/?symbol=${encodeURIComponent(symbol)}`)
+         .then((r) => r.data),
+    enabled: !!symbol,
+    ...COMMON,
+  });
+
+export interface RRGTailPoint { rs_ratio: number; rs_mom: number; }
+export interface RRGRow {
+  sector: string; yf_symbol?: string;
+  rs_ratio: number; rs_momentum: number;
+  quadrant: "LEADING" | "WEAKENING" | "LAGGING" | "IMPROVING" | "no_data";
+  tail: RRGTailPoint[];
+}
+export interface SectorRRG { count: number; rows: RRGRow[]; note?: string; }
+
+export const useSectorRRG = () =>
+  useQuery({
+    queryKey: ["cockpits", "sector-rrg"],
+    queryFn: () => api.get<SectorRRG>("/market-data/sector-rrg/").then((r) => r.data),
+    ...COMMON,
+  });
+
+export interface SectorDispRow {
+  sector: string; cohort_size: number;
+  median_pct: number; dispersion_pct: number;
+  leaders: { symbol: string; pct: number }[];
+  laggards: { symbol: string; pct: number }[];
+}
+export interface SectorDispersion { count: number; rows: SectorDispRow[]; note?: string; }
+
+export const useSectorDispersion = () =>
+  useQuery({
+    queryKey: ["cockpits", "sector-dispersion"],
+    queryFn: () => api.get<SectorDispersion>("/market-data/sector-dispersion/").then((r) => r.data),
+    ...COMMON,
+  });
+
+export interface TapeSpeedPoint {
+  t: string; c: number; trades_per_sec: number; rupees_per_min: number;
+  ratio_to_baseline: number; realised_vol_pm: number;
+  state: "cold" | "normal" | "hot" | "shock";
+}
+export interface TapeSpeed {
+  symbol: string; bar_count: number; baseline_rupees_per_min: number;
+  current_state: string; current_tps?: number;
+  current_rupees_per_min?: number; current_realised_vol_pm?: number;
+  series: TapeSpeedPoint[]; note?: string;
+}
+
+export const useTapeSpeed = (symbol: string) =>
+  useQuery({
+    queryKey: ["cockpits", "tape-speed", symbol],
+    queryFn: () =>
+      api.get<TapeSpeed>(`/market-data/tape-speed/?symbol=${encodeURIComponent(symbol)}`)
+         .then((r) => r.data),
+    enabled: !!symbol,
+    ...COMMON,
+  });
+
+export interface NewsShockEvent {
+  symbol: string; severity: "info" | "warning" | "critical";
+  source?: string; headline?: string; ts?: string;
+  flatten_recommendation?: boolean;
+}
+export interface NewsShock {
+  events: NewsShockEvent[]; coverage_symbols: string[];
+  as_of: string; data_source: string; note?: string;
+}
+
+export const useNewsShock = () =>
+  useQuery({
+    queryKey: ["cockpits", "news-shock"],
+    queryFn: () => api.get<NewsShock>("/market-data/news-shocks/").then((r) => r.data),
+    ...COMMON,
+  });
+
+export interface FIIDIIPoint { date: string; value?: number; close?: number; }
+export interface FIIDIIFlow {
+  days: number;
+  fii_cash: FIIDIIPoint[]; dii_cash: FIIDIIPoint[];
+  fii_futures_oi: FIIDIIPoint[]; fii_options_premium: FIIDIIPoint[];
+  nifty_close: FIIDIIPoint[];
+  data_source: string; note?: string;
+}
+
+export const useFIIDIIFlow = () =>
+  useQuery({
+    queryKey: ["cockpits", "fii-dii-flow"],
+    queryFn: () => api.get<FIIDIIFlow>("/market-data/fii-dii-flow/").then((r) => r.data),
+    ...COMMON,
+  });
+
+export interface DepthRow {
+  symbol: string; today_volume: number; baseline_volume: number;
+  volume_ratio: number; depth_imbalance: number; iceberg_flag: boolean;
+}
+export interface DepthImbalance {
+  count: number; rows: DepthRow[]; data_source: string; note?: string;
+}
+
+export const useDepthImbalance = () =>
+  useQuery({
+    queryKey: ["cockpits", "depth-imbalance"],
+    queryFn: () => api.get<DepthImbalance>("/market-data/depth-imbalance/").then((r) => r.data),
+    ...COMMON,
+  });
+
+export interface EarningsRow {
+  trade_id: number; symbol: string; side: string; qty: number;
+  earnings_date: string | null; ex_div_date: string | null;
+  consensus_eps: number | null; avg_post_earn_gap_pct: number | null;
+  days_to_event: number | null;
+}
+export interface EarningsOverlay {
+  count: number; rows: EarningsRow[]; as_of: string;
+  data_source: string; note?: string;
+}
+
+export const useEarningsOverlay = () =>
+  useQuery({
+    queryKey: ["cockpits", "earnings-overlay"],
+    queryFn: () => api.get<EarningsOverlay>("/portfolios/earnings-overlay/").then((r) => r.data),
+    ...COMMON,
+  });

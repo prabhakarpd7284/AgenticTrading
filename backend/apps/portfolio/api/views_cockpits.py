@@ -29,8 +29,10 @@ from apps.portfolio.services.cockpits import (
     build_theta_forecast,
 )
 from apps.portfolio.services.correlation_matrix import build_correlation_report
+from apps.portfolio.services.earnings_overlay import build_earnings_overlay
 from apps.portfolio.services.edge_ledger import build_edge_ledger
 from apps.portfolio.services.forced_flat import build_forced_flat, flatten_all
+from apps.portfolio.services.intraday_rotation import build_intraday_rotation
 from apps.portfolio.services.gap_risk import build_gap_risk_report
 from apps.portfolio.services.post_mortem import build_post_mortem_report
 from apps.portfolio.services.sizer_simulator import simulate as simulate_sizer
@@ -235,3 +237,18 @@ class EdgeLedgerView(_BaseCockpitView):
         except ValueError:
             limit = 200
         return Response(build_edge_ledger(getattr(request, "tenant", None), limit=limit))
+
+
+class IntradayRotationView(_BaseCockpitView):
+    """GET /api/v1/portfolios/intraday-rotation/?date=YYYY-MM-DD"""
+    def get(self, request):
+        return Response(build_intraday_rotation(
+            getattr(request, "tenant", None),
+            on=request.query_params.get("date"),
+        ))
+
+
+class EarningsOverlayView(_BaseCockpitView):
+    """GET /api/v1/portfolios/earnings-overlay/"""
+    def get(self, request):
+        return Response(build_earnings_overlay(getattr(request, "tenant", None)))

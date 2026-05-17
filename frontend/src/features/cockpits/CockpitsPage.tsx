@@ -6,10 +6,11 @@
  */
 import * as React from "react";
 import {
-  Activity, AlertTriangle, Award, BarChart3, Briefcase, Calculator, Check,
-  Clock, Compass, Droplets, Flag, Gauge, GitCompareArrows, Grid3X3,
-  Layers, LineChart, Microscope, Pencil, Receipt, Scale, Shield, Sigma,
-  Sunrise, Sunrise as DaybreakIcon, Target, TrendingDown, X, Zap, ZapOff,
+  Activity, AlertTriangle, Award, BarChart3, Bell, BookOpen, Briefcase,
+  Calculator, Calendar, Check, Clock, Compass, Droplets, Flag, FlaskConical,
+  Gauge, GitCompareArrows, Grid3X3, Hourglass, Layers, LineChart, Microscope,
+  Pencil, Radar, Receipt, RotateCw, Scale, Shield, Sigma, Sunrise,
+  Sunrise as DaybreakIcon, Target, TrendingDown, Waves, X, Zap, ZapOff,
 } from "lucide-react";
 import {
   Bar, BarChart, CartesianGrid, Line, LineChart as RLineChart,
@@ -70,11 +71,14 @@ import { useQueryClient } from "@tanstack/react-query";
 import {
   checkSlippageEdge, flattenAll, setCapital, simulateSizer,
   useBaseQuality, useBreakoutClassifier, useBrokerRecon, useCapitalCockpit,
-  useCorrelationMatrix, useEdgeDecay, useEdgeLedger, useExpiryCockpit,
-  useFirst5Min, useForcedFlat, useGapRisk, useGreeksHeatmap, useLiquidityMap,
-  useMTFStage, useORB, useORBFailure, usePlanVsActual, usePostMortem,
-  useRegimeHeatmap, useRiskBudget, useSignalFunnel, useStructuralStops,
-  useThetaForecast, useVWAPBands,
+  useCorrelationMatrix, useDepthImbalance, useEarningsOverlay, useEdgeDecay,
+  useEdgeLedger, useExpiryCockpit, useFIIDIIFlow, useFirst5Min, useForcedFlat,
+  useGapFill, useGapRisk, useGreeksHeatmap, useIntradayRotation,
+  useLiquidityMap, useMTFStage, useNewsShock, useORB, useORBFailure,
+  usePlanVsActual, usePostMortem, useRegimeHeatmap, useRiskBudget,
+  useSecond5Min, useSectorDispersion, useSectorRRG, useSignalFunnel,
+  useStructuralStops, useTapeSpeed, useThetaForecast, useVolRegime,
+  useVWAPBands,
   type SizerResponse, type SlippageEdgeResponse,
 } from "@/lib/cockpits";
 
@@ -105,6 +109,17 @@ const TABS = [
   { id: "breakout",      label: "Fresh vs Extended", icon: Activity },
   { id: "orb-fail",      label: "OR Failure",   icon: ZapOff },
   { id: "ledger",        label: "Edge Ledger",  icon: Receipt },
+  { id: "rotation",      label: "Capital Rotation", icon: RotateCw },
+  { id: "gap-fill",      label: "Gap-Fill Prob", icon: Hourglass },
+  { id: "second5",       label: "2nd 5-min",    icon: BookOpen },
+  { id: "vol-regime",    label: "Vol Regime",   icon: Waves },
+  { id: "sector-rrg",    label: "Sector RRG",   icon: Radar },
+  { id: "dispersion",    label: "Sector Disp.", icon: FlaskConical },
+  { id: "tape",          label: "Tape Speed",   icon: Activity },
+  { id: "news-shock",    label: "News Shocks",  icon: Bell },
+  { id: "fii-dii",       label: "FII/DII Flow", icon: LineChart },
+  { id: "depth",         label: "Depth Proxy",  icon: BarChart3 },
+  { id: "earnings",      label: "Earnings",     icon: Calendar },
 ] as const;
 
 export function CockpitsPage() {
@@ -157,6 +172,17 @@ export function CockpitsPage() {
         <TabsContent value="breakout"><BreakoutClassifierPanel /></TabsContent>
         <TabsContent value="orb-fail"><ORBFailurePanel /></TabsContent>
         <TabsContent value="ledger"><EdgeLedgerPanel /></TabsContent>
+        <TabsContent value="rotation"><IntradayRotationPanel /></TabsContent>
+        <TabsContent value="gap-fill"><GapFillPanel /></TabsContent>
+        <TabsContent value="second5"><Second5MinPanel /></TabsContent>
+        <TabsContent value="vol-regime"><VolRegimePanel /></TabsContent>
+        <TabsContent value="sector-rrg"><SectorRRGPanel /></TabsContent>
+        <TabsContent value="dispersion"><SectorDispersionPanel /></TabsContent>
+        <TabsContent value="tape"><TapeSpeedPanel /></TabsContent>
+        <TabsContent value="news-shock"><NewsShockPanel /></TabsContent>
+        <TabsContent value="fii-dii"><FIIDIIFlowPanel /></TabsContent>
+        <TabsContent value="depth"><DepthImbalancePanel /></TabsContent>
+        <TabsContent value="earnings"><EarningsOverlayPanel /></TabsContent>
       </Tabs>
     </div>
   );
@@ -2124,6 +2150,548 @@ function EdgeLedgerPanel() {
                       <td className="text-right tabular-nums">{fmtInr(r.total_cost_inr)}</td>
                       <td className={`text-right tabular-nums ${r.net_edge_inr >= 0 ? "text-pnl-up" : "text-pnl-down"}`}>{fmtInr(r.net_edge_inr)}</td>
                       <td className="text-right tabular-nums">{fmtNum(r.edge_bps, 1)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </PanelWrap>
+  );
+}
+
+/* ------------------------------ 27. Intraday Capital Rotation ------------- */
+function IntradayRotationPanel() {
+  const { data, isLoading } = useIntradayRotation();
+  if (isLoading || !data) return <LoadingPanel />;
+  return (
+    <PanelWrap>
+      <HelpBlock
+        what="5-minute buckets from 09:15 to 15:30 IST showing deployed capital, gross exposure, realised P&L, idle %, and sector breakdown."
+        why="Your worst losses live in the buckets where you were over-deployed. Your best gains live where you were idle and waited for a real signal. Seeing the day as buckets exposes the discipline gap."
+        act="If peak_utilisation > 80% on a normal day, you're too aggressive. If idle_pct > 70% across most buckets, your screening is missing — widen the watchlist or look at sectors you're not covering."
+      />
+      <section className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <KPI label="Capital" value={fmtInr(data.capital)} />
+        <KPI label="Peak deployed" value={fmtInr(data.peak_deployed)}
+             hint={`${fmtNum(data.peak_utilisation_pct, 1)}% of capital`} />
+        <KPI label="Day realised" value={fmtInr(data.total_realised_pnl)}
+             tone={data.total_realised_pnl >= 0 ? "success" : "danger"} />
+        <KPI label="Slots" value={String(data.buckets.length)} />
+      </section>
+      <Card>
+        <CardHeader><CardTitle>Deployed & realised across the day</CardTitle><CardDescription>{data.note}</CardDescription></CardHeader>
+        <CardContent>
+          {data.buckets.length === 0 ? <EmptyState title="No buckets" /> : (
+            <ResponsiveContainer width="100%" height={260}>
+              <BarChart data={data.buckets}>
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+                <XAxis dataKey="slot" tick={{ fill: "var(--color-fg-muted)", fontSize: 10 }} interval={5} />
+                <YAxis tick={{ fill: "var(--color-fg-muted)", fontSize: 11 }} />
+                <ReTooltip />
+                <Bar dataKey="deployed" fill="#3b82f6" />
+                <Bar dataKey="realised_pnl" fill="#22c55e" />
+              </BarChart>
+            </ResponsiveContainer>
+          )}
+        </CardContent>
+      </Card>
+    </PanelWrap>
+  );
+}
+
+/* ------------------------------ 28. Gap-Fill Probability ------------------ */
+function GapFillPanel() {
+  const { data, isLoading } = useGapFill();
+  if (isLoading || !data) return <LoadingPanel />;
+  const statusTone = (s: string): "success" | "warning" | "danger" | "neutral" =>
+    s === "filled" ? "success" : s === "open" ? "warning" : "neutral";
+  return (
+    <PanelWrap>
+      <HelpBlock
+        what="For every watchlist symbol with |gap| > 0.3%, today's status (open / filled / no_gap) and the historical same-day fill rate for that symbol's recent 90 sessions."
+        why="Gaps fade more often than they don't — but some symbols are 'sticky' gappers (low fill rate) while others fill almost every time. The historical_fill_p tells you which is which before you fade."
+        act="Open gap + fill_p > 60% = high-conviction fade with the prior close as target. Open gap + fill_p < 40% = let it run; don't fight a sticky gap."
+      />
+      <Card>
+        <CardHeader><CardTitle>Gap board · {data.count} symbols</CardTitle><CardDescription>{data.note}</CardDescription></CardHeader>
+        <CardContent>
+          {data.rows.length === 0 ? <EmptyState title="No watchlist symbols" /> : (
+            <div className="overflow-auto">
+              <table className="w-full text-body-sm">
+                <thead className="text-fg-subtle border-b border-border">
+                  <tr>
+                    <th className="text-left py-1.5">Symbol</th>
+                    <th className="text-right">Prev close</th>
+                    <th className="text-right">Open</th>
+                    <th className="text-right">Gap %</th>
+                    <th className="text-left">Status</th>
+                    <th className="text-right">Historical fill</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.rows.map((r) => (
+                    <tr key={r.symbol} className="border-b border-border/40">
+                      <td className="py-1.5">{r.symbol}</td>
+                      <td className="text-right tabular-nums">{r.prev_close ? fmtNum(r.prev_close, 2) : "—"}</td>
+                      <td className="text-right tabular-nums">{r.open ? fmtNum(r.open, 2) : "—"}</td>
+                      <td className={`text-right tabular-nums ${Math.abs(r.gap_pct) >= 0.5 ? "text-warning" : ""}`}>{r.gap_pct ? `${fmtNum(r.gap_pct, 2)}%` : "—"}</td>
+                      <td><Badge tone={statusTone(r.status)}>{r.status.replace("_"," ")}</Badge></td>
+                      <td className={`text-right tabular-nums ${r.historical_fill_p > 0.6 ? "text-pnl-up" : r.historical_fill_p < 0.4 && r.historical_fill_p > 0 ? "text-pnl-down" : ""}`}>
+                        {r.historical_fill_p ? `${fmtNum(r.historical_fill_p * 100, 0)}%` : "—"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </PanelWrap>
+  );
+}
+
+/* ------------------------------ 29. Second 5-min -------------------------- */
+function Second5MinPanel() {
+  const { data, isLoading } = useSecond5Min();
+  if (isLoading || !data) return <LoadingPanel />;
+  const tagTone = (t: string): "success" | "warning" | "danger" | "neutral" =>
+    t === "TREND_CONFIRMED" ? "success"
+    : t === "FAIL_DAY" ? "danger"
+    : t === "WEAKENING" ? "warning"
+    : "neutral";
+  return (
+    <PanelWrap>
+      <HelpBlock
+        what="At 09:25 IST, the 09:20-09:25 bar gets compared to the 09:15-09:20 bar — continuation (same direction, breaks extreme), reversal (opposite, breaks open), consolidation (inside), or weak (same but no break)."
+        why="The second 5-min is the trade-confirmation of the first. Continuation on rising volume = strongest 'go' signal of the day. Reversal = the first 5-min trapped traders; fade it."
+        act="Continuation + vol_ratio > 1.5 = take the breakout playbook full size. Reversal = take the fade trade. Consolidation = wait for the 09:30 break and re-classify."
+      />
+      <Card>
+        <CardHeader><CardTitle>Second 5-min classification</CardTitle><CardDescription>{data.note}</CardDescription></CardHeader>
+        <CardContent>
+          {data.rows.length === 0 ? <EmptyState title="No watchlist data" /> : (
+            <div className="overflow-auto">
+              <table className="w-full text-body-sm">
+                <thead className="text-fg-subtle border-b border-border">
+                  <tr>
+                    <th className="text-left py-1.5">Symbol</th>
+                    <th className="text-left">Classification</th>
+                    <th className="text-left">Day type</th>
+                    <th className="text-right">Vol ratio</th>
+                    <th className="text-right">2nd-bar close</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.rows.map((r) => (
+                    <tr key={r.symbol} className="border-b border-border/40">
+                      <td className="py-1.5">{r.symbol}</td>
+                      <td>{r.classification.replace("_", " ")}</td>
+                      <td><Badge tone={tagTone(r.day_type_tag)}>{r.day_type_tag}</Badge></td>
+                      <td className={`text-right tabular-nums ${r.vol_ratio >= 1.5 ? "text-pnl-up" : ""}`}>{r.vol_ratio ? `${fmtNum(r.vol_ratio, 2)}×` : "—"}</td>
+                      <td className="text-right tabular-nums">{r.second_bar ? fmtNum(r.second_bar.c, 2) : "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </PanelWrap>
+  );
+}
+
+/* ------------------------------ 30. Vol Regime Strip ---------------------- */
+function VolRegimePanel() {
+  const [symbol, setSymbol] = React.useState("HDFCBANK");
+  const [draft, setDraft] = React.useState("HDFCBANK");
+  const { data, isLoading } = useVolRegime(symbol);
+  const submit = (e: React.FormEvent) => { e.preventDefault(); setSymbol(draft.trim().toUpperCase()); };
+
+  const regimeTone = (r: string): "success" | "warning" | "danger" | "neutral" =>
+    r === "TREND" ? "success"
+    : r === "SHOCK" ? "danger"
+    : r === "DEAD" ? "warning"
+    : "neutral";
+
+  return (
+    <PanelWrap>
+      <HelpBlock
+        what="Per-minute regime classification (TREND / CHOP / DEAD / SHOCK) for a single symbol, with the annualised realised vol and trades-per-second of each bar."
+        why="A breakout in a CHOP regime fails; a mean-reversion play in a TREND regime gets steamrolled. Knowing the regime ALONG the day stops you taking the wrong shape of trade for the tape."
+        act="TREND = take direction signals at full size. CHOP = scalp ranges or skip. DEAD = stand aside, your edge needs liquidity. SHOCK = cut size 50%, wait one bar for vol to normalise."
+      />
+      <form onSubmit={submit} className="flex items-center gap-2">
+        <input value={draft} onChange={(e) => setDraft(e.target.value)}
+               placeholder="Symbol"
+               className="h-9 px-2 w-48 bg-surface border border-border rounded-sm text-body-sm" />
+        <button type="submit" className="h-9 px-3 bg-accent text-accent-fg rounded-sm text-body-sm">Load</button>
+      </form>
+      {isLoading || !data ? <LoadingPanel /> : (
+        <>
+          <section className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <KPI label="Current regime" value={data.current_regime} tone={regimeTone(data.current_regime)} />
+            <KPI label="Vol (ann %)" value={`${fmtNum(data.current_vol_ann ?? 0, 2)}%`} />
+            <KPI label="Trades/sec" value={fmtNum(data.current_tps ?? 0, 1)} />
+            <KPI label="Bars" value={String(data.bar_count)} />
+          </section>
+          <Card>
+            <CardHeader><CardTitle>{symbol} — vol & regime</CardTitle><CardDescription>{data.note}</CardDescription></CardHeader>
+            <CardContent>
+              {data.series.length === 0 ? <EmptyState title="No bars yet" /> : (
+                <ResponsiveContainer width="100%" height={240}>
+                  <RLineChart data={data.series}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+                    <XAxis dataKey="t" hide />
+                    <YAxis tick={{ fill: "var(--color-fg-muted)", fontSize: 11 }} />
+                    <ReTooltip />
+                    <Line type="monotone" dataKey="realised_vol_ann" stroke="#3b82f6" dot={false} strokeWidth={1.5} />
+                  </RLineChart>
+                </ResponsiveContainer>
+              )}
+            </CardContent>
+          </Card>
+        </>
+      )}
+    </PanelWrap>
+  );
+}
+
+/* ------------------------------ 31. Sector RRG ---------------------------- */
+function SectorRRGPanel() {
+  const { data, isLoading } = useSectorRRG();
+  if (isLoading || !data) return <LoadingPanel />;
+  const quadTone = (q: string): "success" | "warning" | "danger" | "neutral" =>
+    q === "LEADING" ? "success"
+    : q === "WEAKENING" ? "warning"
+    : q === "LAGGING" ? "danger"
+    : q === "IMPROVING" ? "neutral"
+    : "neutral";
+  return (
+    <PanelWrap>
+      <HelpBlock
+        what="Relative Rotation Graph: each NIFTY sector's 14-day relative strength vs NIFTY 50 (X) and the rate-of-change of that RS (Y). Quadrant labels: LEADING / WEAKENING / LAGGING / IMPROVING."
+        why="Sectors rotate clockwise through the quadrants. Buying LEADING and selling LAGGING is the textbook play, but the real edge is catching IMPROVING (about to lead) and avoiding WEAKENING (about to lag)."
+        act="Trade constituents from LEADING sectors long. Start scaling INTO IMPROVING for early rotation. Avoid LAGGING entirely. Short opportunities live in WEAKENING."
+      />
+      <Card>
+        <CardHeader><CardTitle>Sector quadrants</CardTitle><CardDescription>{data.note}</CardDescription></CardHeader>
+        <CardContent>
+          {data.rows.length === 0 ? <EmptyState title="No sector data (yfinance unavailable?)" /> : (
+            <div className="overflow-auto">
+              <table className="w-full text-body-sm">
+                <thead className="text-fg-subtle border-b border-border">
+                  <tr>
+                    <th className="text-left py-1.5">Sector</th>
+                    <th className="text-left">Quadrant</th>
+                    <th className="text-right">RS ratio</th>
+                    <th className="text-right">RS momentum</th>
+                    <th className="text-left">Tail (last 10)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.rows.map((r) => (
+                    <tr key={r.sector} className="border-b border-border/40">
+                      <td className="py-1.5">{r.sector.replace("NIFTY_", "")}</td>
+                      <td><Badge tone={quadTone(r.quadrant)}>{r.quadrant}</Badge></td>
+                      <td className={`text-right tabular-nums ${r.rs_ratio >= 100 ? "text-pnl-up" : "text-pnl-down"}`}>{fmtNum(r.rs_ratio, 2)}</td>
+                      <td className={`text-right tabular-nums ${r.rs_momentum > 0 ? "text-pnl-up" : "text-pnl-down"}`}>{fmtNum(r.rs_momentum, 2)}</td>
+                      <td>
+                        {r.tail.length > 0 ? (
+                          <span className="text-fg-subtle text-caption">
+                            {r.tail.map((p) => `${p.rs_ratio.toFixed(0)}`).join("→")}
+                          </span>
+                        ) : "—"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </PanelWrap>
+  );
+}
+
+/* ------------------------------ 32. Sector Dispersion --------------------- */
+function SectorDispersionPanel() {
+  const { data, isLoading } = useSectorDispersion();
+  if (isLoading || !data) return <LoadingPanel />;
+  return (
+    <PanelWrap>
+      <HelpBlock
+        what="Per-sector cross-sectional dispersion of constituent % change today + the top-3 leaders and bottom-3 laggards inside each sector."
+        why="High dispersion (>1.5%) means stocks INSIDE a sector are diverging — you can trade the strongest long vs weakest short and harvest the spread. Low dispersion (<0.5%) means sector beta is dominant; pick the sector ETF instead of individual names."
+        act="Sort by dispersion (top of table) — those are today's stock-picker sectors. Pair the leader with the laggard for a delta-neutral trade. If everything's low dispersion, take the index trade."
+      />
+      <Card>
+        <CardHeader><CardTitle>Dispersion + leaders/laggards</CardTitle><CardDescription>{data.note}</CardDescription></CardHeader>
+        <CardContent>
+          {data.rows.length === 0 ? <EmptyState title="No sector data" /> : (
+            <div className="overflow-auto">
+              <table className="w-full text-body-sm">
+                <thead className="text-fg-subtle border-b border-border">
+                  <tr>
+                    <th className="text-left py-1.5">Sector</th>
+                    <th className="text-right">N</th>
+                    <th className="text-right">Median %</th>
+                    <th className="text-right">Dispersion</th>
+                    <th className="text-left">Leaders</th>
+                    <th className="text-left">Laggards</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.rows.map((r) => (
+                    <tr key={r.sector} className="border-b border-border/40">
+                      <td className="py-1.5">{r.sector.replace("NIFTY_", "")}</td>
+                      <td className="text-right tabular-nums">{r.cohort_size}</td>
+                      <td className={`text-right tabular-nums ${r.median_pct >= 0 ? "text-pnl-up" : "text-pnl-down"}`}>{fmtNum(r.median_pct, 2)}%</td>
+                      <td className={`text-right tabular-nums ${r.dispersion_pct >= 1.5 ? "text-pnl-up" : ""}`}>{fmtNum(r.dispersion_pct, 2)}%</td>
+                      <td className="text-fg-subtle text-caption">
+                        {r.leaders.map((l) => `${l.symbol} +${l.pct}%`).join(" · ")}
+                      </td>
+                      <td className="text-fg-subtle text-caption">
+                        {r.laggards.map((l) => `${l.symbol} ${l.pct}%`).join(" · ")}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </PanelWrap>
+  );
+}
+
+/* ------------------------------ 33. Tape Speed ---------------------------- */
+function TapeSpeedPanel() {
+  const [symbol, setSymbol] = React.useState("HDFCBANK");
+  const [draft, setDraft] = React.useState("HDFCBANK");
+  const { data, isLoading } = useTapeSpeed(symbol);
+  const submit = (e: React.FormEvent) => { e.preventDefault(); setSymbol(draft.trim().toUpperCase()); };
+  const tone = (s: string): "success" | "warning" | "danger" | "neutral" =>
+    s === "hot" ? "success" : s === "shock" ? "danger" : s === "cold" ? "warning" : "neutral";
+  return (
+    <PanelWrap>
+      <HelpBlock
+        what="Per-minute turnover (₹/min) and trades-per-sec for one symbol vs its 20-day same-time-of-day baseline. Hot tape ≥ 1.5×, cold ≤ 0.5×, shock > 2.5×."
+        why="A breakout on COLD tape means nobody believes it — it'll fail. A move on HOT tape has institutional flow behind it. Knowing the tape state at the moment of entry is the difference between a winning and losing scalp."
+        act="Take breakouts only when tape ≥ 1.5× baseline. SHOCK = cut size 50% and wait one minute. COLD = your entry won't follow through; skip."
+      />
+      <form onSubmit={submit} className="flex items-center gap-2">
+        <input value={draft} onChange={(e) => setDraft(e.target.value)}
+               className="h-9 px-2 w-48 bg-surface border border-border rounded-sm text-body-sm" />
+        <button type="submit" className="h-9 px-3 bg-accent text-accent-fg rounded-sm text-body-sm">Load</button>
+      </form>
+      {isLoading || !data ? <LoadingPanel /> : (
+        <>
+          <section className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <KPI label="State" value={data.current_state} tone={tone(data.current_state)} />
+            <KPI label="₹/min" value={fmtInr(data.current_rupees_per_min ?? 0)}
+                 hint={`baseline ${fmtInr(data.baseline_rupees_per_min)}`} />
+            <KPI label="Trades/sec" value={fmtNum(data.current_tps ?? 0, 1)} />
+            <KPI label="Vol/min %" value={fmtNum(data.current_realised_vol_pm ?? 0, 3)} />
+          </section>
+          <Card>
+            <CardHeader><CardTitle>{symbol} — tape speed</CardTitle><CardDescription>{data.note}</CardDescription></CardHeader>
+            <CardContent>
+              {data.series.length === 0 ? <EmptyState title="No bars yet" /> : (
+                <ResponsiveContainer width="100%" height={240}>
+                  <RLineChart data={data.series}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+                    <XAxis dataKey="t" hide />
+                    <YAxis tick={{ fill: "var(--color-fg-muted)", fontSize: 11 }} />
+                    <ReTooltip />
+                    <Line type="monotone" dataKey="ratio_to_baseline" stroke="#22c55e" dot={false} strokeWidth={1.5} />
+                  </RLineChart>
+                </ResponsiveContainer>
+              )}
+            </CardContent>
+          </Card>
+        </>
+      )}
+    </PanelWrap>
+  );
+}
+
+/* ------------------------------ 34. News Shocks --------------------------- */
+function NewsShockPanel() {
+  const { data, isLoading } = useNewsShock();
+  if (isLoading || !data) return <LoadingPanel />;
+  return (
+    <PanelWrap>
+      <HelpBlock
+        what="Real-time NSE corporate-action + LULD/circuit/halt monitor for every held + watchlisted symbol, with a flatten-recommendation flag per shock event."
+        why="A halted stock is a position you can neither size nor exit. Knowing about it within seconds, not minutes, is the difference between paper risk and realised loss."
+        act="Critical event = flatten the position immediately, even if at a loss. Warning = cut size 50% pending clarity. Info = note the event, hold position."
+      />
+      <Card>
+        <CardHeader>
+          <CardTitle>Active shocks · {data.events.length}</CardTitle>
+          <CardDescription>{data.note}</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {data.events.length === 0 ? (
+            <EmptyState
+              title="No active shocks"
+              description={`Monitoring ${data.coverage_symbols.length} symbols (data source: ${data.data_source}).`}
+            />
+          ) : (
+            <table className="w-full text-body-sm">
+              <thead className="text-fg-subtle border-b border-border">
+                <tr>
+                  <th className="text-left py-1.5">Symbol</th>
+                  <th className="text-left">Severity</th>
+                  <th className="text-left">Source</th>
+                  <th className="text-left">Headline</th>
+                  <th className="text-left">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.events.map((e, i) => (
+                  <tr key={i} className="border-b border-border/40">
+                    <td className="py-1.5">{e.symbol}</td>
+                    <td><Badge tone={e.severity === "critical" ? "danger" : e.severity === "warning" ? "warning" : "neutral"}>{e.severity}</Badge></td>
+                    <td className="text-fg-muted">{e.source ?? "—"}</td>
+                    <td>{e.headline ?? "—"}</td>
+                    <td>{e.flatten_recommendation ? <Badge tone="danger">FLATTEN</Badge> : <span className="text-fg-subtle">hold</span>}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </CardContent>
+      </Card>
+    </PanelWrap>
+  );
+}
+
+/* ------------------------------ 35. FII/DII Flow -------------------------- */
+function FIIDIIFlowPanel() {
+  const { data, isLoading } = useFIIDIIFlow();
+  if (isLoading || !data) return <LoadingPanel />;
+  return (
+    <PanelWrap>
+      <HelpBlock
+        what="Daily FII + DII cash buy/sell, FII index-futures net OI change, and FII index-options net premium, overlaid on NIFTY 50 closing series for context."
+        why="When FIIs sell into rallies for 5+ sessions while NIFTY makes new highs, distribution is happening — and the rally usually breaks within 10 sessions. Conversely, FII buying through a dip is the bottom signal that beats every chart pattern."
+        act="If FII cash is net-selling and NIFTY is up 5+ days, halve long exposure. If FII cash is net-buying through a 3% drawdown, add longs aggressively."
+      />
+      <Card>
+        <CardHeader><CardTitle>NIFTY {data.days}-day overlay</CardTitle><CardDescription>{data.note}</CardDescription></CardHeader>
+        <CardContent>
+          {data.nifty_close.length === 0 ? <EmptyState title="NIFTY series unavailable" /> : (
+            <ResponsiveContainer width="100%" height={240}>
+              <RLineChart data={data.nifty_close}>
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+                <XAxis dataKey="date" tick={{ fill: "var(--color-fg-muted)", fontSize: 10 }} />
+                <YAxis tick={{ fill: "var(--color-fg-muted)", fontSize: 11 }} domain={["auto","auto"]} />
+                <ReTooltip />
+                <Line type="monotone" dataKey="close" stroke="#3b82f6" dot={false} strokeWidth={2} />
+              </RLineChart>
+            </ResponsiveContainer>
+          )}
+        </CardContent>
+      </Card>
+    </PanelWrap>
+  );
+}
+
+/* ------------------------------ 36. Depth Proxy --------------------------- */
+function DepthImbalancePanel() {
+  const { data, isLoading } = useDepthImbalance();
+  if (isLoading || !data) return <LoadingPanel />;
+  return (
+    <PanelWrap>
+      <HelpBlock
+        what="Volume vs 20-day median proxy for level-2 depth (until the WS DEPTH feed lands). Iceberg-likely flag fires when today's volume is ≥ 5× baseline."
+        why="A stock trading 5× baseline volume has hidden buyers or sellers — somebody big is in the tape. That's the moment to either ride alongside (matches your direction) or get out of the way (against you)."
+        act="Iceberg + your position is profitable + same direction = trail more aggressively, you have wind in the sails. Iceberg + against you = exit, you're not winning that fight."
+      />
+      <Card>
+        <CardHeader><CardTitle>Volume ratio scan</CardTitle><CardDescription>{data.note}</CardDescription></CardHeader>
+        <CardContent>
+          {data.rows.length === 0 ? <EmptyState title="No data" /> : (
+            <div className="overflow-auto">
+              <table className="w-full text-body-sm">
+                <thead className="text-fg-subtle border-b border-border">
+                  <tr>
+                    <th className="text-left py-1.5">Symbol</th>
+                    <th className="text-right">Today vol</th>
+                    <th className="text-right">Baseline</th>
+                    <th className="text-right">Ratio</th>
+                    <th className="text-left">Iceberg?</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.rows.map((r) => (
+                    <tr key={r.symbol} className="border-b border-border/40">
+                      <td className="py-1.5">{r.symbol}</td>
+                      <td className="text-right tabular-nums">{r.today_volume.toLocaleString("en-IN")}</td>
+                      <td className="text-right tabular-nums">{r.baseline_volume.toLocaleString("en-IN")}</td>
+                      <td className={`text-right tabular-nums ${r.volume_ratio >= 5 ? "text-warning" : ""}`}>{fmtNum(r.volume_ratio, 2)}×</td>
+                      <td>{r.iceberg_flag ? <Badge tone="warning">ICEBERG?</Badge> : <span className="text-fg-subtle">—</span>}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </PanelWrap>
+  );
+}
+
+/* ------------------------------ 37. Earnings overlay ---------------------- */
+function EarningsOverlayPanel() {
+  const { data, isLoading } = useEarningsOverlay();
+  if (isLoading || !data) return <LoadingPanel />;
+  return (
+    <PanelWrap>
+      <HelpBlock
+        what="For every open position, the next 30 days of corporate events — earnings date, ex-div date, consensus EPS, average post-earnings gap %."
+        why="Holding a position into earnings is binary risk — the chart and the thesis don't matter, only the print does. Knowing the date forces a decision: keep, hedge, or close before the event."
+        act="3 days before earnings: decide keep / hedge / close. Hedge via a protective long put if delta < 1.5× cost. Close if the post-earnings gap distribution is wider than your stop."
+      />
+      <Card>
+        <CardHeader>
+          <CardTitle>Open positions · {data.count}</CardTitle>
+          <CardDescription>{data.note}</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {data.rows.length === 0 ? <EmptyState title="No open positions" /> : (
+            <div className="overflow-auto">
+              <table className="w-full text-body-sm">
+                <thead className="text-fg-subtle border-b border-border">
+                  <tr>
+                    <th className="text-left py-1.5">Symbol</th>
+                    <th className="text-left">Side</th>
+                    <th className="text-right">Qty</th>
+                    <th className="text-left">Earnings date</th>
+                    <th className="text-left">Ex-div date</th>
+                    <th className="text-right">Days to event</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.rows.map((r) => (
+                    <tr key={r.trade_id} className="border-b border-border/40">
+                      <td className="py-1.5">{r.symbol}</td>
+                      <td>{r.side}</td>
+                      <td className="text-right tabular-nums">{r.qty}</td>
+                      <td className="text-fg-muted">{r.earnings_date ?? "—"}</td>
+                      <td className="text-fg-muted">{r.ex_div_date ?? "—"}</td>
+                      <td className={`text-right tabular-nums ${r.days_to_event !== null && r.days_to_event <= 3 ? "text-warning" : ""}`}>
+                        {r.days_to_event ?? "—"}
+                      </td>
                     </tr>
                   ))}
                 </tbody>

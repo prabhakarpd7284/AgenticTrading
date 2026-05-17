@@ -148,6 +148,11 @@
       "agent": "executor",
       "at": "2026-05-17T13:37:37.203458+00:00",
       "summary": "Closed 4 planner tasks: MTF stage scanner, OR failure tracker, round-trip edge ledger, fresh-breakout classifier. 4 new tabs on /cockpits + endpoints under /strategies + /market-data + /portfolios."
+    },
+    {
+      "agent": "executor",
+      "at": "2026-05-17T13:50:47.043673+00:00",
+      "summary": "Closed 12 planner tasks across 3 batches: 4 pure-compute + 3 sector/index + 4 stub-with-clear-extension-path. Total 11 new cockpit tabs."
     }
   ],
   "feature_requests": [
@@ -1292,7 +1297,7 @@
       "acceptance": "GET /api/v1/market-data/rrg/?benchmark=NIFTY returns 14 sector points with rs_ratio, rs_momentum, quadrant, and tail[] of length 10.",
       "source": "feature_request",
       "source_id": "sector-rotation-rrg-relative-rotation-graph-vs-nifty",
-      "status": "open",
+      "status": "done",
       "created_at": "2026-05-17T12:53:12Z"
     },
     {
@@ -1310,7 +1315,7 @@
       "acceptance": "GET /api/v1/portfolios/earnings-overlay/ returns one row per open position with earnings_date, ex_div_date, consensus_eps, avg_gap_pct in a 30-day window.",
       "source": "feature_request",
       "source_id": "earnings-dividend-calendar-overlay-on-open-positions",
-      "status": "open",
+      "status": "done",
       "created_at": "2026-05-17T12:53:12Z"
     },
     {
@@ -1382,7 +1387,7 @@
       "acceptance": "GET /api/v1/market-data/tape-speed/?symbol=HDFCBANK returns trades_per_sec, rupees_per_min, baseline_rupees_per_min, realised_vol_per_min, state.",
       "source": "feature_request",
       "source_id": "tape-speed-volatility-per-minute-gauge",
-      "status": "open",
+      "status": "done",
       "created_at": "2026-05-17T12:53:12Z"
     },
     {
@@ -1455,7 +1460,7 @@
       "acceptance": "GET /api/v1/market-data/news-shocks/ returns active shock events per held symbol with severity and a flatten_recommendation flag.",
       "source": "feature_request",
       "source_id": "news-shock-trading-halt-monitor-with-auto-flatten-prompt",
-      "status": "proposed",
+      "status": "done",
       "created_at": "2026-05-17T12:59:29Z"
     },
     {
@@ -1509,7 +1514,7 @@
       "acceptance": "GET /api/v1/market-data/fii-dii-flow/?days=60 returns daily cash, futures-OI, options-premium series and a NIFTY close series for overlay.",
       "source": "feature_request",
       "source_id": "fii-dii-cash-f-o-flow-tape-with-index-overlay",
-      "status": "open",
+      "status": "done",
       "created_at": "2026-05-17T12:59:29Z"
     },
     {
@@ -1527,7 +1532,7 @@
       "acceptance": "GET /api/v1/market-data/sector-dispersion/?window=5m returns per-sector dispersion, leaders[3], laggards[3] and a heatmap matrix.",
       "source": "feature_request",
       "source_id": "sector-dispersion-intraday-leader-laggard-heatmap",
-      "status": "open",
+      "status": "done",
       "created_at": "2026-05-17T12:59:29Z"
     },
     {
@@ -1545,7 +1550,7 @@
       "acceptance": "GET /api/v1/portfolios/intraday-rotation/?date=YYYY-MM-DD returns 5-min buckets of {deployed, gross, realised_pnl, idle_pct, sector_breakdown}.",
       "source": "feature_request",
       "source_id": "intraday-capital-rotation-summary-where-my-rupees-are-working",
-      "status": "open",
+      "status": "done",
       "created_at": "2026-05-17T12:59:29Z"
     },
     {
@@ -1563,7 +1568,7 @@
       "acceptance": "GET /api/v1/market-data/vol-regime-strip/?symbol=XYZ returns minute series of {ts, realised_vol_ann, trades_per_sec, regime_tag} since 9:15 IST.",
       "source": "feature_request",
       "source_id": "per-minute-volatility-tape-regime-tape-strip",
-      "status": "open",
+      "status": "done",
       "created_at": "2026-05-17T12:59:29Z"
     },
     {
@@ -1581,7 +1586,7 @@
       "acceptance": "GET /api/v1/market-data/rrg/?tail=13 returns sectors+holdings with rs_ratio, rs_momentum, quadrant label; frontend renders quadrant chart at /rotation with tail toggle.",
       "source": "feature_request",
       "source_id": "relative-rotation-graph-rrg-sectors-top-holdings",
-      "status": "open",
+      "status": "done",
       "created_at": "2026-05-17T13:28:34Z"
     },
     {
@@ -1635,7 +1640,7 @@
       "acceptance": "GET /api/v1/market-data/depth-imbalance/?symbol=X returns {ratio, delta_10s, delta_30s, delta_60s, absorption:bool, iceberg_hint:bool}; UI strip updates each tick.",
       "source": "feature_request",
       "source_id": "level-2-depth-imbalance-iceberg-sniffer",
-      "status": "open",
+      "status": "done",
       "created_at": "2026-05-17T13:28:34Z"
     },
     {
@@ -1653,7 +1658,7 @@
       "acceptance": "GET /api/v1/market-data/gap-fill/ returns per-symbol {gap_pct, gap_atr, dir, fill_rate, median_min, worst_adverse_pct}; UI table sorted by fill probability.",
       "source": "feature_request",
       "source_id": "gap-fill-probability-dashboard-per-symbol-per-gap-size",
-      "status": "open",
+      "status": "done",
       "created_at": "2026-05-17T13:28:34Z"
     },
     {
@@ -1689,7 +1694,7 @@
       "acceptance": "GET /api/v1/market-data/second-5min/ returns per-symbol {first_profile, second_class, matrix_cell}; UI renders 2x2 cell badge per watchlist row at/after 9:25 IST.",
       "source": "feature_request",
       "source_id": "second-5-minute-continuation-vs-reversal-classifier",
-      "status": "open",
+      "status": "done",
       "created_at": "2026-05-17T13:28:34Z"
     }
   ],

@@ -15,10 +15,19 @@ from apps.market_data.services.shortlist_service import build_shortlist
 from apps.market_data.services.swing_scanner_service import build_swing_scanner
 from apps.market_data.services.ok_backtest_service import build_ok_backtest
 from apps.market_data.services.basket_service import build_basket_status
+from apps.market_data.services.depth_imbalance import build_depth_imbalance
+from apps.market_data.services.fii_dii_flow import build_fii_dii_flow
 from apps.market_data.services.first_5min import build_first_5min
+from apps.market_data.services.gap_fill import build_gap_fill
 from apps.market_data.services.liquidity_map import build_liquidity_map
+from apps.market_data.services.news_shock import build_news_shock
 from apps.market_data.services.orb_failure import build_orb_failure
 from apps.market_data.services.orb_tracker import build_orb
+from apps.market_data.services.second_5min import build_second_5min
+from apps.market_data.services.sector_dispersion import build_sector_dispersion
+from apps.market_data.services.sector_rrg import build_sector_rrg
+from apps.market_data.services.tape_speed import build_tape_speed
+from apps.market_data.services.vol_regime_strip import build_vol_regime
 from apps.market_data.services.vwap_bands import build_vwap_bands
 
 
@@ -493,3 +502,70 @@ class ORBFailureView(APIView):
 
     def get(self, request):
         return Response(build_orb_failure(getattr(request, "tenant", None)))
+
+
+class GapFillView(APIView):
+    """GET /api/v1/market-data/gap-fill/"""
+    permission_classes = [IsAuthenticated]
+    def get(self, request):
+        return Response(build_gap_fill(getattr(request, "tenant", None)))
+
+
+class Second5MinView(APIView):
+    """GET /api/v1/market-data/second-5min/"""
+    permission_classes = [IsAuthenticated]
+    def get(self, request):
+        return Response(build_second_5min(getattr(request, "tenant", None)))
+
+
+class VolRegimeView(APIView):
+    """GET /api/v1/market-data/vol-regime/?symbol=HDFCBANK"""
+    permission_classes = [IsAuthenticated]
+    def get(self, request):
+        return Response(build_vol_regime(request.query_params.get("symbol") or ""))
+
+
+class SectorRRGView(APIView):
+    """GET /api/v1/market-data/sector-rrg/"""
+    permission_classes = [IsAuthenticated]
+    def get(self, request):
+        return Response(build_sector_rrg(getattr(request, "tenant", None)))
+
+
+class SectorDispersionView(APIView):
+    """GET /api/v1/market-data/sector-dispersion/"""
+    permission_classes = [IsAuthenticated]
+    def get(self, request):
+        return Response(build_sector_dispersion(getattr(request, "tenant", None)))
+
+
+class TapeSpeedView(APIView):
+    """GET /api/v1/market-data/tape-speed/?symbol=HDFCBANK"""
+    permission_classes = [IsAuthenticated]
+    def get(self, request):
+        return Response(build_tape_speed(request.query_params.get("symbol") or ""))
+
+
+class NewsShockView(APIView):
+    """GET /api/v1/market-data/news-shocks/"""
+    permission_classes = [IsAuthenticated]
+    def get(self, request):
+        return Response(build_news_shock(getattr(request, "tenant", None)))
+
+
+class FIIDIIFlowView(APIView):
+    """GET /api/v1/market-data/fii-dii-flow/?days=30"""
+    permission_classes = [IsAuthenticated]
+    def get(self, request):
+        try:
+            days = int(request.query_params.get("days", 30) or 30)
+        except ValueError:
+            days = 30
+        return Response(build_fii_dii_flow(getattr(request, "tenant", None), days=days))
+
+
+class DepthImbalanceView(APIView):
+    """GET /api/v1/market-data/depth-imbalance/"""
+    permission_classes = [IsAuthenticated]
+    def get(self, request):
+        return Response(build_depth_imbalance(getattr(request, "tenant", None)))
