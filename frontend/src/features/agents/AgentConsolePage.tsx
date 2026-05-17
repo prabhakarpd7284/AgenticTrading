@@ -894,11 +894,28 @@ function DirectionalChart({ result }: { result: RunResult }) {
 function PyramidOverview({ result }: { result: RunResult }) {
   const plan = (result.plan ?? {}) as PyramidPlan;
   const entries = plan.entries ?? [];
+  const candles = (result.candles_raw ?? []) as Array<[string, number, number, number, number, number]>;
   const pnl = plan.total_pnl_rupees ?? 0;
   const pnlTone = pnl >= 0 ? "success" : "danger";
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-5">
+      {/* Intraday chart with entry/exit markers (full-width) */}
+      {candles.length > 0 && (
+        <Card className="lg:col-span-2">
+          <CardHeader>
+            <CardTitle>Intraday — entries, SL, exit</CardTitle>
+            <CardDescription>
+              5-min candlesticks for {plan.symbol ?? result.symbol}. Entries shown as colored arrows,
+              SL-at-entry as dashed lines, exit price as a horizontal reference.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="h-[420px]">
+            <PyramidIntradayChart candles={candles} entries={entries} exitPrice={plan.exit_price} />
+          </CardContent>
+        </Card>
+      )}
+
       {/* Headline */}
       <Card className="lg:col-span-2">
         <CardHeader className="flex flex-row items-center gap-3 flex-wrap">
@@ -1038,7 +1055,92 @@ function VerticalSpreadOverview({ result }: { result: RunResult }) {
           )}
         </CardContent>
       </Card>
+
+      {/* Payoff diagram — P&L at expiry vs underlying price */}
+      {plan.long_strike != null && plan.short_strike != null && plan.lots && (
+        <Card className="lg:col-span-2">
+          <CardHeader>
+            <CardTitle>Expiry payoff diagram</CardTitle>
+            <CardDescription>
+              Net P&amp;L if held to expiry across a ±10% range around current spot.
+              Vertical lines: current spot · breakeven · long/short strikes.
+              Green region = profit · red region = loss.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="h-[320px]">
+            <VerticalSpreadPayoffChart plan={plan} />
+          </CardContent>
+        </Card>
+      )}
     </div>
+  );
+}
+
+function VerticalSpreadPayoffChart({ plan }: { plan: VerticalSpreadPlan }) {
+  const [R, setR] = React.useState<any>(null);
+  React.useEffect(() => { import("recharts").then(setR); }, []);
+
+  const data = React.useMemo(() => {
+    const spot = plan.spot ?? plan.long_strike ?? 0;
+    if (!spot) return [];
+    const longK = plan.long_strike ?? 0;
+    const shortK = plan.short_strike ?? 0;
+    const isCall = plan.option_type === "CE";
+    const lotQty = (plan.lots ?? 0) * (plan.lot_size ?? 1);
+    const netDebit = plan.net_debit ?? 0;
+    const netCredit = plan.net_credit ?? 0;
+    // Bull call spread payoff at expiry per unit:
+    //   long  CE @ K_long  pays max(0, S - K_long) - long_premium
+    //   short CE @ K_short pays short_premium - max(0, S - K_short)
+    // Symmetric for bear put: long PE @ K_long, short PE @ K_short (K_long > K_short).
+    const lo = Math.max(1, spot * 0.9);
+    const hi = spot * 1.1;
+    const step = (hi - lo) / 80;
+    const out: Array<{ s: number; pnl: number }> = [];
+    for (let s = lo; s <= hi; s += step) {
+      let payoff: number;
+      if (isCall) {
+        const longPay = Math.max(0, s - longK) - (plan.long_ltp ?? 0);
+        const shortPay = (plan.short_ltp ?? 0) - Math.max(0, s - shortK);
+        payoff = (longPay + shortPay) * lotQty;
+      } else {
+        const longPay = Math.max(0, longK - s) - (plan.long_ltp ?? 0);
+        const shortPay = (plan.short_ltp ?? 0) - Math.max(0, shortK - s);
+        payoff = (longPay + shortPay) * lotQty;
+      }
+      out.push({ s: +s.toFixed(2), pnl: +payoff.toFixed(0) });
+    }
+    return out;
+  }, [plan]);
+
+  if (data.length === 0) {
+    return <EmptyState icon={<Sparkles />} title="No payoff to plot" description="Plan is missing spot or strike data." />;
+  }
+  if (!R) return <div className="h-full flex items-center justify-center text-fg-subtle text-body-sm">Loading…</div>;
+
+  const { ResponsiveContainer, ComposedChart, Area, Line, XAxis, YAxis, Tooltip, CartesianGrid, ReferenceLine } = R;
+  const spot = plan.spot ?? plan.long_strike ?? 0;
+  return (
+    <ResponsiveContainer width="100%" height="100%">
+      <ComposedChart data={data} margin={{ top: 12, right: 32, left: 8, bottom: 8 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke="#161b22" />
+        <XAxis dataKey="s" type="number" domain={["dataMin", "dataMax"]}
+               tick={{ fill: "#8b949e", fontSize: 11 }}
+               tickFormatter={(v: number) => v.toLocaleString("en-IN", { maximumFractionDigits: 0 })} />
+        <YAxis tick={{ fill: "#8b949e", fontSize: 11 }}
+               tickFormatter={(v: number) => `${(v / 1000).toFixed(0)}k`} width={50} />
+        <Tooltip
+          contentStyle={{ background: "#161b22", border: "1px solid #30363d", borderRadius: 6, fontSize: 12 }}
+          formatter={(v: number) => [`₹${Math.round(v).toLocaleString("en-IN")}`, "P&L at expiry"]}
+          labelFormatter={(v: number) => `Underlying ${v.toLocaleString("en-IN")}`} />
+        <ReferenceLine y={0} stroke="#484f58" />
+        {spot > 0 && <ReferenceLine x={spot} stroke="#58a6ff" strokeDasharray="3 3" label={{ value: `spot ${spot.toFixed(0)}`, fill: "#58a6ff", fontSize: 11, position: "top" }} />}
+        {plan.breakeven && <ReferenceLine x={plan.breakeven} stroke="#d29922" strokeDasharray="3 3" label={{ value: `BE ${plan.breakeven.toFixed(0)}`, fill: "#d29922", fontSize: 11, position: "top" }} />}
+        {plan.long_strike  && <ReferenceLine x={plan.long_strike}  stroke="#3fb950" strokeOpacity={0.5} label={{ value: `L ${plan.long_strike}`, fill: "#3fb950", fontSize: 11, position: "insideBottomLeft" }} />}
+        {plan.short_strike && <ReferenceLine x={plan.short_strike} stroke="#f85149" strokeOpacity={0.5} label={{ value: `S ${plan.short_strike}`, fill: "#f85149", fontSize: 11, position: "insideBottomRight" }} />}
+        <Line type="monotone" dataKey="pnl" stroke="#58a6ff" strokeWidth={2} dot={false} />
+      </ComposedChart>
+    </ResponsiveContainer>
   );
 }
 
@@ -1306,6 +1408,89 @@ function SnapshotRow({
     </div>
   );
 }
+
+/* =================================================================== */
+/* Pyramid intraday chart with entry/SL/exit markers                    */
+/* =================================================================== */
+function PyramidIntradayChart({
+  candles, entries, exitPrice,
+}: {
+  candles: Array<[string, number, number, number, number, number]>;
+  entries: PyramidEntry[];
+  exitPrice?: number;
+}) {
+  const containerRef = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    if (!containerRef.current || candles.length === 0) return;
+    let cleanup = () => {};
+
+    (async () => {
+      const mod = await import("lightweight-charts");
+      const chart = mod.createChart(containerRef.current!, {
+        layout: { background: { color: "transparent" }, textColor: "#8b949e" },
+        grid:   { vertLines: { color: "#161b22" }, horzLines: { color: "#161b22" } },
+        timeScale: { timeVisible: true, secondsVisible: false, borderColor: "#30363d" },
+        rightPriceScale: { borderColor: "#30363d" },
+        crosshair: { mode: 0 },
+        autoSize: true,
+      });
+      const series = chart.addCandlestickSeries({
+        upColor: "#3fb950", downColor: "#f85149",
+        wickUpColor: "#3fb950", wickDownColor: "#f85149",
+        borderVisible: false,
+      });
+      const data = candles
+        .map(([ts, o, h, l, c]) => ({
+          time: Math.floor(new Date(ts).getTime() / 1000) as any,
+          open: o, high: h, low: l, close: c,
+        }))
+        .filter((d) => Number.isFinite(d.time) && d.time > 0)
+        .sort((a, b) => a.time - b.time);
+      series.setData(data);
+
+      // Mark entries on the candle series with up arrows (initial) / down
+      // arrows (no — they're always BUYs in pyramid), each annotated with lots.
+      if (entries.length > 0) {
+        series.setMarkers(entries.map((e, i) => ({
+          time: Math.floor(new Date(e.timestamp).getTime() / 1000) as any,
+          position: "belowBar" as any,
+          color: i === 0 ? "#79c0ff" : "#a371f7",
+          shape: i === 0 ? "arrowUp" : "circle",
+          text: i === 0 ? `IN ${e.lots}L @ ${e.price.toFixed(1)}` : `+${e.lots}L`,
+          size: 1,
+        })));
+      }
+
+      // SL-at-entry as a horizontal price line per entry (initial only — the
+      // pyramid trails its SL between bars; legacy log captures every raise).
+      if (entries.length > 0 && entries[0].sl_at_entry) {
+        series.createPriceLine({
+          price: entries[0].sl_at_entry, color: "#f85149",
+          lineWidth: 1, lineStyle: 2, axisLabelVisible: true,
+          title: `SL ${entries[0].sl_at_entry.toFixed(1)}`,
+        });
+      }
+
+      // Exit price reference.
+      if (exitPrice) {
+        series.createPriceLine({
+          price: exitPrice, color: "#d29922",
+          lineWidth: 1, lineStyle: 0, axisLabelVisible: true,
+          title: `EXIT ${exitPrice.toFixed(1)}`,
+        });
+      }
+
+      chart.timeScale().fitContent();
+      cleanup = () => chart.remove();
+    })();
+
+    return () => cleanup();
+  }, [candles, entries, exitPrice]);
+
+  return <div ref={containerRef} className="h-full w-full" />;
+}
+
 
 function IntradayClosesChart({
   ceCandles, peCandles, niftyCandles, ceSold, peSold, runs = [],
