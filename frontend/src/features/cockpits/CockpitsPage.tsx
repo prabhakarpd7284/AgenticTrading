@@ -6,9 +6,10 @@
  */
 import * as React from "react";
 import {
-  Activity, AlertTriangle, BarChart3, Briefcase, Calculator, Check, Clock,
-  Droplets, Flag, Gauge, GitCompareArrows, Grid3X3, LineChart, Microscope,
-  Pencil, Scale, Shield, Sigma, Sunrise, Target, TrendingDown, X, Zap,
+  Activity, AlertTriangle, Award, BarChart3, Briefcase, Calculator, Check,
+  Clock, Compass, Droplets, Flag, Gauge, GitCompareArrows, Grid3X3, LineChart,
+  Microscope, Pencil, Scale, Shield, Sigma, Sunrise, Sunrise as DaybreakIcon,
+  Target, TrendingDown, X, Zap,
 } from "lucide-react";
 import {
   Bar, BarChart, CartesianGrid, Line, LineChart as RLineChart,
@@ -68,10 +69,11 @@ function Help({ label, text }: { label: string; text: string }) {
 import { useQueryClient } from "@tanstack/react-query";
 import {
   checkSlippageEdge, flattenAll, setCapital, simulateSizer,
-  useBrokerRecon, useCapitalCockpit, useCorrelationMatrix,
-  useEdgeDecay, useExpiryCockpit, useForcedFlat, useGapRisk, useGreeksHeatmap,
-  useLiquidityMap, useORB, usePlanVsActual, usePostMortem, useRegimeHeatmap,
-  useRiskBudget, useSignalFunnel, useStructuralStops, useThetaForecast,
+  useBaseQuality, useBrokerRecon, useCapitalCockpit, useCorrelationMatrix,
+  useEdgeDecay, useExpiryCockpit, useFirst5Min, useForcedFlat, useGapRisk,
+  useGreeksHeatmap, useLiquidityMap, useORB, usePlanVsActual, usePostMortem,
+  useRegimeHeatmap, useRiskBudget, useSignalFunnel, useStructuralStops,
+  useThetaForecast, useVWAPBands,
   type SizerResponse, type SlippageEdgeResponse,
 } from "@/lib/cockpits";
 
@@ -95,6 +97,9 @@ const TABS = [
   { id: "forced-flat",   label: "Forced Flat",  icon: Flag },
   { id: "slippage-edge", label: "Slippage vs Edge", icon: Scale },
   { id: "orb",           label: "Opening Range", icon: Zap },
+  { id: "vwap",          label: "VWAP Bands",   icon: Compass },
+  { id: "first5",        label: "First 5-min",  icon: DaybreakIcon },
+  { id: "base",          label: "Base Quality", icon: Award },
 ] as const;
 
 export function CockpitsPage() {
@@ -140,6 +145,9 @@ export function CockpitsPage() {
         <TabsContent value="forced-flat"><ForcedFlatPanel /></TabsContent>
         <TabsContent value="slippage-edge"><SlippageEdgePanel /></TabsContent>
         <TabsContent value="orb"><ORBPanel /></TabsContent>
+        <TabsContent value="vwap"><VWAPPanel /></TabsContent>
+        <TabsContent value="first5"><First5MinPanel /></TabsContent>
+        <TabsContent value="base"><BaseQualityPanel /></TabsContent>
       </Tabs>
     </div>
   );
@@ -1558,6 +1566,218 @@ function ORBPanel() {
           )}
         </CardContent>
       </Card>
+    </PanelWrap>
+  );
+}
+
+/* ------------------------------ 20. VWAP bands ---------------------------- */
+function VWAPPanel() {
+  const [symbol, setSymbol] = React.useState("HDFCBANK");
+  const [draft, setDraft] = React.useState("HDFCBANK");
+  const { data, isLoading } = useVWAPBands(symbol);
+
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setSymbol(draft.trim().toUpperCase());
+  };
+
+  const stateTone = (s: string) =>
+    s === "stretched_up" ? "warning"
+    : s === "stretched_down" ? "warning"
+    : s === "no_data" ? "neutral"
+    : "success";
+
+  return (
+    <PanelWrap>
+      <HelpBlock
+        what="Intraday anchored VWAP for one symbol with rolling ±1σ / ±2σ bands. Each minute bar's close is plotted against the bands; the σ comes from the last 30 minutes."
+        why="VWAP is where institutions get measured. Trades pinned to VWAP get done at fair value; bars stretched past ±2σ are mean-reversion candidates. The σ width tells you whether the symbol is rangey or trending."
+        act="Stretched-up + falling tape = short to VWAP. Stretched-down + rising tape = long to VWAP. Inside ±1σ for 20+ bars = chop, skip."
+      />
+      <form onSubmit={submit} className="flex items-center gap-2">
+        <input value={draft} onChange={(e) => setDraft(e.target.value)}
+               placeholder="Symbol (e.g. RELIANCE)"
+               className="h-9 px-2 w-48 bg-surface border border-border rounded-sm text-body-sm" />
+        <button type="submit" className="h-9 px-3 bg-accent text-accent-fg rounded-sm text-body-sm">Load</button>
+      </form>
+      {isLoading || !data ? <LoadingPanel /> : (
+        <>
+          <section className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <KPI label="VWAP" value={data.vwap ? fmtNum(data.vwap, 2) : "—"} />
+            <KPI label="Last close" value={data.last_close ? fmtNum(data.last_close, 2) : "—"} />
+            <KPI label="Distance (σ)" value={`${fmtNum(data.dist_sigma, 2)}σ`}
+                 tone={Math.abs(data.dist_sigma) >= 2 ? "warning" : "neutral"} />
+            <KPI label="State" value={data.state.replace("_"," ")} tone={stateTone(data.state)} />
+          </section>
+          <Card>
+            <CardHeader>
+              <CardTitle>{symbol} — VWAP + ±σ bands</CardTitle>
+              <CardDescription>
+                ±1σ green band · ±2σ amber band · {data.bar_count ?? 0} bars
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {data.series.length === 0 ? <EmptyState title={data.note || "No bars yet"} /> : (
+                <ResponsiveContainer width="100%" height={260}>
+                  <RLineChart data={data.series}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+                    <XAxis dataKey="t" hide />
+                    <YAxis tick={{ fill: "var(--color-fg-muted)", fontSize: 11 }} domain={["auto","auto"]} />
+                    <ReTooltip />
+                    <Line type="monotone" dataKey="sigma2_up" stroke="#f59e0b" dot={false} strokeWidth={1} strokeDasharray="3 3" />
+                    <Line type="monotone" dataKey="sigma1_up" stroke="#22c55e" dot={false} strokeWidth={1} strokeDasharray="2 2" />
+                    <Line type="monotone" dataKey="vwap"      stroke="#3b82f6" dot={false} strokeWidth={2} />
+                    <Line type="monotone" dataKey="sigma1_dn" stroke="#22c55e" dot={false} strokeWidth={1} strokeDasharray="2 2" />
+                    <Line type="monotone" dataKey="sigma2_dn" stroke="#f59e0b" dot={false} strokeWidth={1} strokeDasharray="3 3" />
+                    <Line type="monotone" dataKey="c"         stroke="#e6edf3" dot={false} strokeWidth={1.5} />
+                  </RLineChart>
+                </ResponsiveContainer>
+              )}
+            </CardContent>
+          </Card>
+        </>
+      )}
+    </PanelWrap>
+  );
+}
+
+/* ------------------------------ 21. First 5-min --------------------------- */
+function First5MinPanel() {
+  const { data, isLoading } = useFirst5Min();
+  if (isLoading || !data) return <LoadingPanel />;
+
+  const tagTone = (t: string): "success" | "warning" | "danger" | "neutral" =>
+    t === "TREND_DAY" ? "success"
+    : t === "FADE_DAY" ? "warning"
+    : t === "COIL_DAY" ? "neutral"
+    : t === "RANGE_DAY" ? "neutral"
+    : "neutral";
+
+  return (
+    <PanelWrap>
+      <HelpBlock
+        what="At 09:20 IST, every watchlist symbol's 09:15-09:20 5-min bar gets classified into a day-type — TREND_DAY, RANGE_DAY, FADE_DAY, COIL_DAY — based on body %, gap %, and range vs ATR."
+        why="The first 5 minutes set the tone. A wide-range trend-day candle predicts continuation; a doji predicts chop; a gap-and-fade predicts a reversal you can short against. Knowing this at 9:20 saves an hour of bad trades."
+        act="TREND_DAY → run your breakout playbook. FADE_DAY → fade the gap. COIL_DAY → wait for expansion. RANGE_DAY → cut size by half, target inner swings."
+      />
+      <Card>
+        <CardHeader>
+          <CardTitle>First-5-min profile · {data.count} symbol{data.count === 1 ? "" : "s"}</CardTitle>
+          <CardDescription>{data.note}</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {data.rows.length === 0 ? <EmptyState title="No watchlist symbols" /> : (
+            <div className="overflow-auto">
+              <table className="w-full text-body-sm">
+                <thead className="text-fg-subtle border-b border-border">
+                  <tr>
+                    <th className="text-left py-1.5">Symbol</th>
+                    <th className="text-left">Classification</th>
+                    <th className="text-left">Day type</th>
+                    <th className="text-right">Gap %</th>
+                    <th className="text-right">Body %</th>
+                    <th className="text-right">Range/ATR</th>
+                    <th className="text-right">Vol</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.rows.map((r) => (
+                    <tr key={r.symbol} className="border-b border-border/40">
+                      <td className="py-1.5">{r.symbol}</td>
+                      <td>{r.classification.replace("_"," ")}</td>
+                      <td><Badge tone={tagTone(r.day_type_tag)}>{r.day_type_tag}</Badge></td>
+                      <td className={`text-right tabular-nums ${Math.abs(r.gap_pct) >= 0.5 ? "text-warning" : ""}`}>
+                        {r.gap_pct ? `${fmtNum(r.gap_pct, 2)}%` : "—"}
+                      </td>
+                      <td className="text-right tabular-nums">{r.body_pct ? fmtNum(r.body_pct, 0) + "%" : "—"}</td>
+                      <td className="text-right tabular-nums">{r.range_atr ? fmtNum(r.range_atr, 2) : "—"}</td>
+                      <td className="text-right tabular-nums">{r.vol || "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </PanelWrap>
+  );
+}
+
+/* ------------------------------ 22. Base Quality -------------------------- */
+function BaseQualityPanel() {
+  const [draft, setDraft] = React.useState("");
+  const [symbols, setSymbols] = React.useState<string | undefined>(undefined);
+  const { data, isLoading } = useBaseQuality(symbols);
+
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setSymbols(draft.trim() || undefined);
+  };
+
+  const tagTone = (t: string): "success" | "warning" | "danger" | "neutral" =>
+    t === "VCP_TIGHT" ? "success"
+    : t === "FLAT_BASE" ? "success"
+    : t === "DEEP_BASE" ? "warning"
+    : "neutral";
+
+  return (
+    <PanelWrap>
+      <HelpBlock
+        what="For every watchlist symbol (or a custom list), score the most recent base on depth, length, tightness of last-3 weekly closes, and volume dry-up. 0-100 + pattern tag."
+        why="Setups bought from tight, dry, well-defined bases work. Setups bought from raw ranges fail. The score lets you ignore 'kinda looks like a base' opinions and trade only the bases that statistically pay."
+        act="80+ = ready to break out — set a buy-stop at the pivot. 60-79 = watchlist; needs another week. <60 = pass; the base hasn't formed yet."
+      />
+      <form onSubmit={submit} className="flex items-center gap-2">
+        <input value={draft} onChange={(e) => setDraft(e.target.value)}
+               placeholder="Comma-separated symbols (blank = watchlist)"
+               className="h-9 px-2 flex-1 max-w-md bg-surface border border-border rounded-sm text-body-sm" />
+        <button type="submit" className="h-9 px-3 bg-accent text-accent-fg rounded-sm text-body-sm">Score</button>
+      </form>
+      {isLoading || !data ? <LoadingPanel /> : (
+        <Card>
+          <CardHeader>
+            <CardTitle>Base quality · {data.count} symbol{data.count === 1 ? "" : "s"}</CardTitle>
+            <CardDescription>{data.note}</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {data.rows.length === 0 ? <EmptyState title="No data" /> : (
+              <div className="overflow-auto">
+                <table className="w-full text-body-sm">
+                  <thead className="text-fg-subtle border-b border-border">
+                    <tr>
+                      <th className="text-left py-1.5">Symbol</th>
+                      <th className="text-right">Score</th>
+                      <th className="text-left">Pattern</th>
+                      <th className="text-right">Pivot</th>
+                      <th className="text-right">Depth %</th>
+                      <th className="text-right">Length (w)</th>
+                      <th className="text-right">Tightness</th>
+                      <th className="text-right">Vol dry-up</th>
+                      <th className="text-right">From pivot</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.rows.map((r) => (
+                      <tr key={r.symbol} className="border-b border-border/40">
+                        <td className="py-1.5">{r.symbol}</td>
+                        <td className={`text-right tabular-nums font-mono font-semibold ${r.score >= 80 ? "text-pnl-up" : r.score >= 60 ? "text-fg" : "text-fg-subtle"}`}>{r.score}</td>
+                        <td><Badge tone={tagTone(r.pattern_tag)}>{r.pattern_tag}</Badge></td>
+                        <td className="text-right tabular-nums">{fmtNum(r.pivot, 2)}</td>
+                        <td className="text-right tabular-nums">{fmtNum(r.depth_pct, 1)}%</td>
+                        <td className="text-right tabular-nums">{fmtNum(r.length_weeks, 1)}</td>
+                        <td className="text-right tabular-nums">{fmtNum(r.tightness_pct, 2)}%</td>
+                        <td className="text-right tabular-nums">{r.volume_dryup ? fmtNum(r.volume_dryup, 2) + "×" : "—"}</td>
+                        <td className={`text-right tabular-nums ${r.pct_from_pivot > -3 ? "text-warning" : ""}`}>{fmtNum(r.pct_from_pivot, 2)}%</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
     </PanelWrap>
   );
 }

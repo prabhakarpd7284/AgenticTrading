@@ -1,7 +1,7 @@
 {
   "context_version": 2,
   "fingerprint": "16440204a7bfb31e",
-  "last_run_at": "2026-05-17T12:59:46Z",
+  "last_run_at": "2026-05-17T13:28:55Z",
   "open_bugs": [],
   "fixed_bugs": [
     {
@@ -113,23 +113,36 @@
       "passed": 15,
       "failed": 0,
       "finding_ids": []
+    },
+    {
+      "id": "418b69c212f1",
+      "started_at": "2026-05-17T13:27:11Z",
+      "ended_at": "2026-05-17T13:27:21Z",
+      "total": 15,
+      "passed": 15,
+      "failed": 0,
+      "finding_ids": []
     }
   ],
   "notes": [
-    "[trader_user:intraday @ 2026-05-17T12:52:27Z] Intraday-scalper lens: ORB tracker, VWAP-deviation bands, tape-speed gauge, slippage-vs-edge calculator per setup, and 3:20 PM forced-flat cockpit \u2014 gaps not covered by existing palace items.",
-    "[planner @ 2026-05-17T12:52:55Z] Cycle-3 plan: 8 new tasks turning the 8 open feature_requests into actionable specs (RRG, earnings overlay, fresh-vs-extended, ORB, VWAP bands, tape speed, slippage calculator, 3:20 PM cockpit).",
-    "[executor @ 2026-05-17T12:53:12Z] proposed prop-fresh-breakout-vs-extended-classifier-004 for fresh-breakout-vs-extended-classifier",
-    "[trader_user:default @ 2026-05-17T12:58:14Z] Generalist quant lens this cycle: with cockpits + intraday/equity/options coverage in flight, gaps are portfolio-level \u2014 exposure decomposition, regime context, capital-at-risk, and edge decay.",
-    "[trader_user:options @ 2026-05-17T12:58:26Z] Options lens this cycle: weekly NIFTY straddles + verticals into Tue expiry. Gaps are IV-surface visibility, theta/gamma scheduling, delta-drift hedging, and pin-risk on expiry day.",
-    "[trader_user:futures @ 2026-05-17T12:58:37Z] Futures-trader lens: basis curve, OI quadrant heatmap, roll-spread calendar, SPAN margin efficiency, and futures-cash arb scanner \u2014 none overlap existing options/equity palace items.",
-    "[trader_user:equity @ 2026-05-17T12:58:51Z] Equity swing lens: existing palace covers RRG, earnings overlay, fresh-vs-extended, breakout/ORB. Gaps are RS leaderboards, MTF stage scanner, FII/DII tape, structural stops, base-quality scoring.",
-    "[trader_user:intraday @ 2026-05-17T12:59:02Z] Intraday scalper lens: palace already has ORB, VWAP bands, tape-speed, slippage-edge, forced-flat. Gaps are sector dispersion, first-5min profile, news-shock halt monitor, capital rotation heatmap.",
     "[planner @ 2026-05-17T12:59:12Z] 8 new tasks from open feature requests (0 open bugs). Risk + decision-unlocking reports get high; charts/data get medium.",
     "[executor @ 2026-05-17T12:59:29Z] proposed prop-slippage-vs-edge-calculator-per-setup-005 for slippage-vs-edge-calculator-per-setup",
     {
       "agent": "executor",
       "at": "2026-05-17T13:26:05.272246+00:00",
       "summary": "Closed 4 planner tasks: structural-stop suggester, forced-flat cockpit, slippage-vs-edge calculator, opening-range breakout tracker. New tabs on /cockpits + endpoints under /portfolios + /market-data."
+    },
+    "[trader_user:default @ 2026-05-17T13:27:21Z] Quant-trader lens across equity intraday + monthly F&O + weekly index options: hunting for whole-picture views \u2014 plan vs deployed capital, leverage utilisation, margin, edge decay \u2014 none of which the palace currently covers.",
+    "[trader_user:options @ 2026-05-17T13:27:32Z] Options-trader lens on weekly NIFTY/BANKNIFTY cycle: palace lacks IV surface, skew, term structure, gamma-scalp windows, pin-risk forecasting, and event-driven IV crush playbooks.",
+    "[trader_user:futures @ 2026-05-17T13:27:46Z] Futures-trader lens on NSE NIFTY/BANKNIFTY + stock futures: palace has no basis/roll/OI quadrant/SPAN-margin views. Focused on carry, rolls, OI structure, and margin efficiency.",
+    "[trader_user:equity @ 2026-05-17T13:27:57Z] Equity swing lens: palace has zero RS-vs-NIFTY, RRG, multi-TF stage scan, earnings overlay, or fresh-vs-extended breakout tooling. Focused on positional decision support.",
+    "[trader_user:intraday @ 2026-05-17T13:28:07Z] Intraday scalper lens: palace covers ORB, VWAP bands, tape speed, slippage edge, forced-flat. Gaps: opening-range failure detection, microstructure depth, gap-fill stats, cost-per-trade ledger, news halt.",
+    "[planner @ 2026-05-17T13:28:17Z] Added 8 planner tasks from new feature requests across options/equity/intraday lenses: RRG, multi-TF stage scan, fresh-vs-extended classifier, OR-failure tracker, depth/iceberg, gap-fill, cost ledger, 2nd-5min classifier.",
+    "[executor @ 2026-05-17T13:28:34Z] proposed prop-news-shock-trading-halt-monitor-with-auto-flatten-prompt-006 for news-shock-trading-halt-monitor-with-auto-flatten-prompt",
+    {
+      "agent": "executor",
+      "at": "2026-05-17T13:32:12.736729+00:00",
+      "summary": "Closed 3 planner tasks: VWAP bands, first-5-min classifier, base-quality scorer. New tabs on /cockpits + endpoints under /market-data + /strategies."
     }
   ],
   "feature_requests": [
@@ -478,7 +491,7 @@
     {
       "id": "earnings-dividend-calendar-overlay-on-open-positions",
       "title": "Earnings + Dividend Calendar Overlay on Open Positions",
-      "rationale": "Forward 30-day calendar showing each held stock's earnings date, ex-dividend date, consensus EPS, and historical avg post-earnings gap. Lets me decide pre-results whether to trim, hedge with a put, or hold through. Right now I miss results dates on positions and get gapped \u2014 there is no calendar surface in palace.",
+      "rationale": "Show upcoming earnings dates, ex-dividend dates, AGMs, and bonus/split events for every held position with days-to-event countdown and a 'hold-through vs trim-before' recommendation based on historical post-event drift. Critical for positional traders to avoid getting blindsided by a 10% earnings gap against a 2-week swing.",
       "category": "workflow",
       "status": "open",
       "created_at": "2026-05-17T12:52:27Z",
@@ -761,6 +774,231 @@
       "category": "data",
       "status": "open",
       "created_at": "2026-05-17T12:59:12Z",
+      "requested_by": "trader_user:intraday"
+    },
+    {
+      "id": "plan-vs-actual-capital-deployment-cockpit",
+      "title": "Plan-vs-Actual Capital Deployment Cockpit",
+      "rationale": "Single screen showing the morning plan (intended deployment by bucket: intraday-equity / monthly-FNO / weekly-index-options) versus what is actually live right now by rupee and % of capital, with slippage flags where actual diverges >15% from plan. Unlocks the decision 'am I underdeployed in my edge bucket and overexposed in the marginal one?' before the next entry.",
+      "category": "report",
+      "status": "open",
+      "created_at": "2026-05-17T13:27:32Z",
+      "requested_by": "trader_user:default"
+    },
+    {
+      "id": "real-time-leverage-span-elm-margin-utilisation-strip",
+      "title": "Real-Time Leverage & SPAN+ELM Margin Utilisation Strip",
+      "rationale": "Live strip per portfolio showing gross notional / net notional / capital ratio, SPAN+ELM blocked, exchange-level peak-margin headroom, and the next 3 entries that would breach a 80% utilisation soft cap. Trading three F&O products without a margin headroom view is how you get force-squared off at 2:55 PM.",
+      "category": "risk",
+      "status": "open",
+      "created_at": "2026-05-17T13:27:32Z",
+      "requested_by": "trader_user:default"
+    },
+    {
+      "id": "weekly-options-greeks-pin-risk-aggregator",
+      "title": "Weekly Options Greeks & Pin-Risk Aggregator",
+      "rationale": "One panel that aggregates net delta / gamma / vega / theta across every open weekly NIFTY+SENSEX option position, projects EOD P&L sensitivity to \u00b10.5% / \u00b11% underlying moves and \u00b12vol IV shifts, and surfaces pin risk per strike on expiry day. Without a consolidated greeks book you cannot tell whether 4 'small' positions add up to one unhedged 3-lot gamma bomb.",
+      "category": "chart",
+      "status": "open",
+      "created_at": "2026-05-17T13:27:32Z",
+      "requested_by": "trader_user:default"
+    },
+    {
+      "id": "edge-decay-tracker-per-strategy-rolling-20-60-120-trade-r",
+      "title": "Edge-Decay Tracker per Strategy (rolling 20/60/120-trade R)",
+      "rationale": "Time-series of rolling avg-R, win-rate, and expectancy per registered strategy (ORB / VWAP-reclaim / straddle / pyramid / OK-swing) with a regime tag overlay and an explicit 'EDGE DECAYING' flag when the 20-trade window drops >1\u03c3 below the 120-trade baseline. Unlocks the decision to pause or shrink size on a strategy before drawdown compounds.",
+      "category": "report",
+      "status": "open",
+      "created_at": "2026-05-17T13:27:32Z",
+      "requested_by": "trader_user:default"
+    },
+    {
+      "id": "cross-product-correlation-concentration-matrix",
+      "title": "Cross-Product Correlation & Concentration Matrix",
+      "rationale": "Live matrix showing rolling 20-day return correlation between every open position (equity longs, futures, options deltas resolved to underlying) plus a concentration score by sector, factor (momentum/value/quality), and single-name beta-weighted exposure. Catches the silent risk of '5 different trades that are really one BANKNIFTY bet'.",
+      "category": "risk",
+      "status": "open",
+      "created_at": "2026-05-17T13:27:32Z",
+      "requested_by": "trader_user:default"
+    },
+    {
+      "id": "live-skew-term-structure-cockpit-25-rr-vertical-spread-curve",
+      "title": "Live Skew & Term-Structure Cockpit (25\u0394 RR + Vertical Spread Curve)",
+      "rationale": "Stream 25\u0394 risk-reversal (put IV \u2212 call IV) and 25\u0394 butterfly across the next 4 weekly expiries plus the monthly, plotted as a live curve with 20-day percentile bands. Lets me see when puts are bid relative to history (sell skew) vs flat (buy wings cheap), and whether the term structure is in contango (sell front) or backwardation (don't sell front into event).",
+      "category": "chart",
+      "status": "open",
+      "created_at": "2026-05-17T13:27:46Z",
+      "requested_by": "trader_user:options"
+    },
+    {
+      "id": "iv-rank-iv-percentile-matrix-for-next-4-expiries",
+      "title": "IV Rank & IV Percentile Matrix for Next 4 Expiries",
+      "rationale": "Per-expiry table showing ATM IV, IV Rank (1y), IV Percentile (1y), HV20, HV/IV ratio, and a 'sell premium' / 'buy premium' / 'neutral' tag based on thresholds. Drives the decision of whether to open a new straddle/strangle at all this cycle \u2014 never sell premium when IVR < 30 on the front weekly.",
+      "category": "report",
+      "status": "open",
+      "created_at": "2026-05-17T13:27:46Z",
+      "requested_by": "trader_user:options"
+    },
+    {
+      "id": "pin-risk-forecaster-for-expiry-day-max-pain-gamma-wall-projection",
+      "title": "Pin-Risk Forecaster for Expiry Day (Max-Pain + Gamma-Wall Projection)",
+      "rationale": "On expiry-day morning, compute max-pain strike from full option chain OI, overlay the top-3 gamma walls (largest |gamma \u00d7 OI| strikes), and project the implied 'pinning probability' for each based on distance and time-to-expiry. Critical for short straddles \u2014 tells me whether to hold to 3:15 or close at noon because spot is drifting toward a gamma wall.",
+      "category": "risk",
+      "status": "open",
+      "created_at": "2026-05-17T13:27:46Z",
+      "requested_by": "trader_user:options"
+    },
+    {
+      "id": "realised-vs-implied-gamma-scalp-window-detector",
+      "title": "Realised-vs-Implied Gamma-Scalp Window Detector",
+      "rationale": "Rolling 30-min realised vol vs ATM straddle's break-even move, plotted intraday with a 'scalp green-light' tag when RV > IV-implied move (long-gamma profitable) and 'theta-collect' tag when RV << IV (short-gamma comfortable). Tells me exactly when to delta-hedge actively vs let theta bleed in.",
+      "category": "data",
+      "status": "open",
+      "created_at": "2026-05-17T13:27:46Z",
+      "requested_by": "trader_user:options"
+    },
+    {
+      "id": "auto-hedge-suggester-on-delta-drift-with-cost-vs-theta-trade-off",
+      "title": "Auto-Hedge Suggester on Delta Drift (with Cost vs Theta Trade-off)",
+      "rationale": "For every open multi-leg position, monitor net delta in real time; when |\u0394| breaches a configurable band (e.g. \u00b115 per lot of NIFTY), surface 3 hedge options \u2014 futures lot, ATM option, or OTM wing \u2014 each with cost, residual gamma/vega, and 'days of theta consumed by this hedge'. Removes the eyeball-math at moments when spot is moving against me.",
+      "category": "workflow",
+      "status": "open",
+      "created_at": "2026-05-17T13:27:46Z",
+      "requested_by": "trader_user:options"
+    },
+    {
+      "id": "event-aware-iv-crush-calendar-post-event-decay-playbook",
+      "title": "Event-Aware IV Crush Calendar & Post-Event Decay Playbook",
+      "rationale": "Calendar of upcoming events that crush IV (RBI policy, CPI, Fed, expiry, big earnings) with the historical median IV drop on the next session for ATM weeklies, and a 'pre-event sell window' / 'post-event buy window' tag. Stops me from selling premium 24h before an event that's already priced in, and flags the post-event vol-buy opportunity.",
+      "category": "report",
+      "status": "open",
+      "created_at": "2026-05-17T13:27:46Z",
+      "requested_by": "trader_user:options"
+    },
+    {
+      "id": "live-basis-annualised-carry-cockpit-current-next-month",
+      "title": "Live Basis & Annualised Carry Cockpit (current + next month)",
+      "rationale": "Stream futures-minus-spot basis in points and as annualised carry % for NIFTY, BANKNIFTY, and the top-20 single-stock futures, with 20-day percentile bands and a 'rich/cheap vs fair-carry' tag using MIBOR + dividend-yield. Lets me see when current-month futures decouple from cash and when next-month carry blows out \u2014 direct trigger for cash-futures arb and roll timing.",
+      "category": "chart",
+      "status": "open",
+      "created_at": "2026-05-17T13:27:57Z",
+      "requested_by": "trader_user:futures"
+    },
+    {
+      "id": "roll-spread-calendar-cost-of-roll-tracker-t-7-to-expiry",
+      "title": "Roll-Spread Calendar & Cost-of-Roll Tracker (T-7 to expiry)",
+      "rationale": "Daily plot of (next-month \u2212 current-month) spread for NIFTY/BANKNIFTY and FnO stocks across the rollover week, with rolling 3-expiry median and the implied annualised roll cost. Flags 'roll early' when spread is cheap vs history and 'wait/avoid' when expensive. Critical because most discretionary traders bleed 20-40 bps just on bad roll timing.",
+      "category": "report",
+      "status": "open",
+      "created_at": "2026-05-17T13:27:57Z",
+      "requested_by": "trader_user:futures"
+    },
+    {
+      "id": "oi-vs-price-quadrant-scanner-long-build-up-short-cover-long-unwind-short-build-u",
+      "title": "OI vs Price Quadrant Scanner (Long Build-up / Short Cover / Long Unwind / Short Build-up)",
+      "rationale": "Classify every NSE futures contract every 15 minutes into the four OI-vs-price quadrants using \u0394Price and \u0394OI, rank by \u0394OI rupees, and surface the top movers. Doubles as a momentum-with-positioning filter \u2014 long build-up in a leader is a totally different trade from short cover in a laggard, and right now I have to eyeball this from Sensibull/NSE.",
+      "category": "data",
+      "status": "open",
+      "created_at": "2026-05-17T13:27:57Z",
+      "requested_by": "trader_user:futures"
+    },
+    {
+      "id": "span-elm-margin-vs-notional-efficiency-table",
+      "title": "SPAN+ELM Margin-vs-Notional Efficiency Table",
+      "rationale": "For every open futures + offset combination, compute SPAN+ELM blocked margin, notional exposure, and notional/margin leverage ratio, plus 'margin freed if I add hedge X' deltas. Helps decide whether to take a naked futures position vs a calendar/pair that frees 30-60% margin \u2014 without this I routinely under-utilise capital on expiry week.",
+      "category": "risk",
+      "status": "open",
+      "created_at": "2026-05-17T13:27:57Z",
+      "requested_by": "trader_user:futures"
+    },
+    {
+      "id": "eod-mark-to-market-preview-overnight-carry-decision-panel",
+      "title": "EOD Mark-to-Market Preview & Overnight-Carry Decision Panel",
+      "rationale": "By 15:00 IST show projected MTM debit/credit per futures position at the likely settlement price, overnight SGX-NIFTY/ADR signal, gap-risk score from event calendar, and a 'carry vs flatten' recommendation comparing expected overnight edge to MTM funding cost. Removes the 15:25 scramble of deciding which futures to hold overnight vs square off.",
+      "category": "workflow",
+      "status": "open",
+      "created_at": "2026-05-17T13:27:57Z",
+      "requested_by": "trader_user:futures"
+    },
+    {
+      "id": "rs-vs-nifty-leaderboard-with-21-63-126-day-rank-trend-arrow",
+      "title": "RS-vs-NIFTY Leaderboard with 21/63/126-Day Rank & Trend Arrow",
+      "rationale": "Daily relative-strength score for each NIFTY 500 name vs NIFTY50 across 1m/3m/6m windows, ranked with an arrow showing rank-change over the last 5 sessions. Lets the swing trader buy leaders breaking out of bases and avoid laggards. Currently the palace has no RS ranking surface at all.",
+      "category": "report",
+      "status": "open",
+      "created_at": "2026-05-17T13:28:07Z",
+      "requested_by": "trader_user:equity"
+    },
+    {
+      "id": "relative-rotation-graph-rrg-sectors-top-holdings",
+      "title": "Relative Rotation Graph (RRG) \u2014 Sectors & Top Holdings",
+      "rationale": "Classic RRG quadrant (Leading/Weakening/Lagging/Improving) for NIFTY sector indices plus the user's open positions, with tail length configurable to 8/13/21 weeks. Makes sector rotation visually obvious so capital stays in Leading-into-Weakening names and rotates out of Lagging ones. No rotation-quadrant view exists today.",
+      "category": "chart",
+      "status": "open",
+      "created_at": "2026-05-17T13:28:07Z",
+      "requested_by": "trader_user:equity"
+    },
+    {
+      "id": "multi-timeframe-stage-scanner-d-w-m-alignment-oliver-kell-phase",
+      "title": "Multi-Timeframe Stage Scanner (D/W/M alignment + Oliver Kell phase)",
+      "rationale": "For each watchlist symbol, compute Weinstein stage on daily, weekly, monthly plus current Oliver Kell cycle phase (base/breakout/exhaustion/wedge-pop/reversal), and flag only names with all three TFs aligned in stage 2 advancing. The OK detector exists in trading/swing but isn't fused with multi-TF stage logic in one decision view.",
+      "category": "data",
+      "status": "open",
+      "created_at": "2026-05-17T13:28:07Z",
+      "requested_by": "trader_user:equity"
+    },
+    {
+      "id": "fresh-breakout-vs-extended-classifier-distance-from-pivot-10wma",
+      "title": "Fresh-Breakout vs Extended Classifier (distance from pivot & 10WMA)",
+      "rationale": "For every breakout candidate, compute % distance from the pivot/base top and from the 10-week MA, then tag as 'fresh' (<3% extended, low risk), 'actionable' (3-7%), or 'extended/chase' (>7%). Stops swing entries from chasing late breakouts where R:R has collapsed. No such gatekeeper exists in the palace.",
+      "category": "risk",
+      "status": "open",
+      "created_at": "2026-05-17T13:28:07Z",
+      "requested_by": "trader_user:equity"
+    },
+    {
+      "id": "opening-range-failure-reversal-probability-tracker",
+      "title": "Opening-Range Failure & Reversal Probability Tracker",
+      "rationale": "After 9:30 IST, monitor every symbol that broke its 9:15-9:30 OR for failure signals \u2014 re-entry into range within N minutes, VWAP reclaim against the break, volume divergence. Output a live 'failed ORB' watchlist with historical reversal-success % for each symbol so scalpers can flip from breakout chaser to fade trader without re-deriving the setup.",
+      "category": "report",
+      "status": "open",
+      "created_at": "2026-05-17T13:28:17Z",
+      "requested_by": "trader_user:intraday"
+    },
+    {
+      "id": "level-2-depth-imbalance-iceberg-sniffer",
+      "title": "Level-2 Depth Imbalance & Iceberg Sniffer",
+      "rationale": "Per-symbol live bid/ask depth ratio across top 5 levels with delta over the last 10/30/60 seconds, flagging persistent absorption (price flat, one side eaten repeatedly) and refresh patterns that hint at icebergs. Critical for scalping liquid F&O underlyings where tape direction is set by hidden size, not visible prints.",
+      "category": "data",
+      "status": "open",
+      "created_at": "2026-05-17T13:28:17Z",
+      "requested_by": "trader_user:intraday"
+    },
+    {
+      "id": "gap-fill-probability-dashboard-per-symbol-per-gap-size",
+      "title": "Gap-Fill Probability Dashboard (per symbol, per gap size)",
+      "rationale": "At 9:15 classify every watchlist gap by size (% and ATR-units) and direction, then show the historical same-day fill rate, median minutes-to-fill, and worst adverse excursion before fill \u2014 bucketed by prior-day close-position. Lets the scalper size gap-fade trades on stats rather than gut feel.",
+      "category": "chart",
+      "status": "open",
+      "created_at": "2026-05-17T13:28:17Z",
+      "requested_by": "trader_user:intraday"
+    },
+    {
+      "id": "per-trade-cost-round-trip-edge-ledger-live",
+      "title": "Per-Trade Cost & Round-Trip Edge Ledger (live)",
+      "rationale": "Running ledger of today's scalps showing realised gross R, total brokerage + STT + exchange + GST + stamp, net R after costs, and a cost-as-%-of-edge metric per setup. Flags when a setup family's net edge drops below 0.3R intraday so the scalper kills it before bleeding capital on transaction friction.",
+      "category": "report",
+      "status": "open",
+      "created_at": "2026-05-17T13:28:17Z",
+      "requested_by": "trader_user:intraday"
+    },
+    {
+      "id": "second-5-minute-continuation-vs-reversal-classifier",
+      "title": "Second-5-Minute Continuation vs Reversal Classifier",
+      "rationale": "At 9:25 IST classify the 9:20-9:25 candle relative to the first 5-min (continuation, inside, reversal, expansion) and pair it with the day-type from the existing First-5-Min Profile to output a 2x2 matrix with historical session-bias and expected day-range. Resolves the most common scalper question \u2014 fade or follow the open \u2014 with a deterministic stat.",
+      "category": "data",
+      "status": "open",
+      "created_at": "2026-05-17T13:28:17Z",
       "requested_by": "trader_user:intraday"
     }
   ],
@@ -1074,15 +1312,15 @@
       "id": "fresh-breakout-vs-extended-classifier",
       "title": "Fresh-Breakout vs Extended Classifier",
       "priority": "high",
-      "scope": "For every breakout signal compute distance from pivot, distance from 20DMA, and base depth, then tag fresh vs extended so chasing climactic moves is blocked at the @RiskGuard layer.",
+      "scope": "For each breakout candidate compute % distance from pivot/base top and from 10WMA, tag fresh (<3%), actionable (3-7%), extended (>7%). Block extended entries via risk engine flag.",
       "files": [
         "backend/apps/strategies/services/breakout_classifier.py",
         "backend/apps/strategies/api/views.py",
-        "trading/screener/signals.py",
-        "trading/services/risk_engine.py",
-        "frontend/src/features/shortlist/BreakoutTag.tsx"
+        "backend/apps/strategies/api/urls.py",
+        "frontend/src/features/shortlist/BreakoutFreshnessBadge.tsx",
+        "trading/services/risk_engine.py"
       ],
-      "acceptance": "Each breakout SignalLog row carries breakout_state in {'fresh','extended'} plus pct_from_pivot, pct_from_20dma, base_depth_pct fields.",
+      "acceptance": "GET /api/v1/strategies/breakout-freshness/ returns per-symbol {pivot_dist_pct, wma10_dist_pct, tag} and risk_engine rejects entries with tag='extended'.",
       "source": "feature_request",
       "source_id": "fresh-breakout-vs-extended-classifier-from-20dma-base-depth",
       "status": "proposed",
@@ -1121,7 +1359,7 @@
       "acceptance": "GET /api/v1/market-data/vwap-bands/?symbol=HDFCBANK returns vwap, sigma1, sigma2, dist_sigma, state in {'stretched_up','stretched_down','neutral'}.",
       "source": "feature_request",
       "source_id": "vwap-deviation-bands-mean-reversion-alert-strip",
-      "status": "open",
+      "status": "done",
       "created_at": "2026-05-17T12:53:12Z"
     },
     {
@@ -1212,7 +1450,7 @@
       "acceptance": "GET /api/v1/market-data/news-shocks/ returns active shock events per held symbol with severity and a flatten_recommendation flag.",
       "source": "feature_request",
       "source_id": "news-shock-trading-halt-monitor-with-auto-flatten-prompt",
-      "status": "open",
+      "status": "proposed",
       "created_at": "2026-05-17T12:59:29Z"
     },
     {
@@ -1230,7 +1468,7 @@
       "acceptance": "GET /api/v1/strategies/base-quality/?symbol=XYZ returns {score, depth_pct, length_weeks, tightness_pct, volume_dryup, pattern_tag}.",
       "source": "feature_request",
       "source_id": "base-quality-scorer-depth-length-tightness-volume-dry-up",
-      "status": "open",
+      "status": "done",
       "created_at": "2026-05-17T12:59:29Z"
     },
     {
@@ -1248,7 +1486,7 @@
       "acceptance": "GET /api/v1/market-data/first-5min/ returns {symbol, classification, gap_pct, body_pct, vol_ratio, day_type_tag} for the watchlist.",
       "source": "feature_request",
       "source_id": "first-5-minute-candle-profile-day-type-classifier",
-      "status": "open",
+      "status": "done",
       "created_at": "2026-05-17T12:59:29Z"
     },
     {
@@ -1322,6 +1560,132 @@
       "source_id": "per-minute-volatility-tape-regime-tape-strip",
       "status": "open",
       "created_at": "2026-05-17T12:59:29Z"
+    },
+    {
+      "id": "relative-rotation-graph-rrg-sectors-top-holdings",
+      "title": "Relative Rotation Graph (RRG) \u2014 Sectors & Top Holdings",
+      "priority": "medium",
+      "scope": "Compute JdK RS-Ratio and RS-Momentum for NIFTY sector indices and user open positions vs NIFTY50, with configurable tail length (8/13/21 weeks). Expose endpoint and render quadrant chart.",
+      "files": [
+        "backend/apps/market_data/services/rrg.py",
+        "backend/apps/market_data/api/views.py",
+        "backend/apps/market_data/api/urls.py",
+        "frontend/src/features/rotation/RRGChart.tsx",
+        "trading/utils/indicators.py"
+      ],
+      "acceptance": "GET /api/v1/market-data/rrg/?tail=13 returns sectors+holdings with rs_ratio, rs_momentum, quadrant label; frontend renders quadrant chart at /rotation with tail toggle.",
+      "source": "feature_request",
+      "source_id": "relative-rotation-graph-rrg-sectors-top-holdings",
+      "status": "open",
+      "created_at": "2026-05-17T13:28:34Z"
+    },
+    {
+      "id": "multi-timeframe-stage-scanner-d-w-m-oliver-kell-phase",
+      "title": "Multi-Timeframe Stage Scanner (D/W/M + Oliver Kell phase)",
+      "priority": "high",
+      "scope": "For each watchlist symbol compute Weinstein stage on daily/weekly/monthly plus current Oliver Kell phase, returning only names where all three TFs agree. Surface via API and shortlist badge.",
+      "files": [
+        "backend/apps/strategies/services/mtf_stage_scanner.py",
+        "backend/apps/strategies/api/views.py",
+        "backend/apps/strategies/api/urls.py",
+        "frontend/src/features/shortlist/MTFStageBadge.tsx",
+        "trading/swing/ok_cycles.py"
+      ],
+      "acceptance": "GET /api/v1/strategies/mtf-stage/ returns per-symbol {stage_d, stage_w, stage_m, ok_phase, aligned:true|false}; shortlist row shows badge only when aligned=true.",
+      "source": "feature_request",
+      "source_id": "multi-timeframe-stage-scanner-d-w-m-alignment-oliver-kell-phase",
+      "status": "open",
+      "created_at": "2026-05-17T13:28:34Z"
+    },
+    {
+      "id": "opening-range-failure-reversal-probability-tracker",
+      "title": "Opening-Range Failure & Reversal Probability Tracker",
+      "priority": "high",
+      "scope": "After 9:30 IST monitor symbols that broke 9:15-9:30 OR for re-entry into range, VWAP reclaim against break, and volume divergence. Output live failed-OR list with reversal probability.",
+      "files": [
+        "backend/apps/market_data/services/or_failure_tracker.py",
+        "backend/apps/market_data/api/views.py",
+        "backend/apps/market_data/api/urls.py",
+        "frontend/src/features/pulse/ORFailureTracker.tsx",
+        "trading/screener/strategies.py"
+      ],
+      "acceptance": "GET /api/v1/market-data/or-failure/ returns symbols with {break_dir, reclaim_minutes, vwap_reclaim:bool, reversal_prob}; UI lists current failures with timestamps.",
+      "source": "feature_request",
+      "source_id": "opening-range-failure-reversal-probability-tracker",
+      "status": "open",
+      "created_at": "2026-05-17T13:28:34Z"
+    },
+    {
+      "id": "level-2-depth-imbalance-iceberg-sniffer",
+      "title": "Level-2 Depth Imbalance & Iceberg Sniffer",
+      "priority": "medium",
+      "scope": "Per-symbol live top-5 bid/ask depth ratio with 10/30/60s delta, flagging persistent absorption and refresh patterns that hint at iceberg orders. Backend computes; UI shows tape strip.",
+      "files": [
+        "backend/apps/market_data/services/depth_imbalance.py",
+        "backend/apps/market_data/api/views.py",
+        "backend/apps/market_data/api/urls.py",
+        "frontend/src/features/positions/DepthImbalanceStrip.tsx",
+        "trading/services/ticker_service.py"
+      ],
+      "acceptance": "GET /api/v1/market-data/depth-imbalance/?symbol=X returns {ratio, delta_10s, delta_30s, delta_60s, absorption:bool, iceberg_hint:bool}; UI strip updates each tick.",
+      "source": "feature_request",
+      "source_id": "level-2-depth-imbalance-iceberg-sniffer",
+      "status": "open",
+      "created_at": "2026-05-17T13:28:34Z"
+    },
+    {
+      "id": "gap-fill-probability-dashboard",
+      "title": "Gap-Fill Probability Dashboard",
+      "priority": "medium",
+      "scope": "At 9:15 classify every watchlist gap by % size and ATR-units + direction, then return historical same-day fill rate, median minutes-to-fill, and worst adverse excursion bucketed by gap size.",
+      "files": [
+        "backend/apps/market_data/services/gap_fill.py",
+        "backend/apps/market_data/api/views.py",
+        "backend/apps/market_data/api/urls.py",
+        "frontend/src/features/pulse/GapFillDashboard.tsx",
+        "trading/services/data_service.py"
+      ],
+      "acceptance": "GET /api/v1/market-data/gap-fill/ returns per-symbol {gap_pct, gap_atr, dir, fill_rate, median_min, worst_adverse_pct}; UI table sorted by fill probability.",
+      "source": "feature_request",
+      "source_id": "gap-fill-probability-dashboard-per-symbol-per-gap-size",
+      "status": "open",
+      "created_at": "2026-05-17T13:28:34Z"
+    },
+    {
+      "id": "per-trade-cost-round-trip-edge-ledger-live",
+      "title": "Per-Trade Cost & Round-Trip Edge Ledger (live)",
+      "priority": "high",
+      "scope": "Live ledger for today's scalps showing gross R, brokerage+STT+exchange+GST+stamp, net R after costs, and cost-as-%-of-edge per setup. Flag setup families whose net edge collapses below threshold.",
+      "files": [
+        "backend/apps/portfolio/services/cost_ledger.py",
+        "backend/apps/portfolio/api/views.py",
+        "backend/apps/portfolio/api/urls.py",
+        "frontend/src/features/dashboard/CostEdgeLedger.tsx",
+        "trading/models.py"
+      ],
+      "acceptance": "GET /api/v1/portfolios/cost-ledger/ returns per-trade {gross_r, costs_breakdown, net_r, cost_pct_of_edge} plus per-setup roll-ups; flagged=true when net_r<=0.",
+      "source": "feature_request",
+      "source_id": "per-trade-cost-round-trip-edge-ledger-live",
+      "status": "open",
+      "created_at": "2026-05-17T13:28:34Z"
+    },
+    {
+      "id": "second-5-minute-continuation-vs-reversal-classifier",
+      "title": "Second-5-Minute Continuation vs Reversal Classifier",
+      "priority": "medium",
+      "scope": "At 9:25 IST classify the 9:20-9:25 candle vs the first 5-min as continuation/inside/reversal/expansion and combine with First-5-Min profile into a 2x2 day-type matrix.",
+      "files": [
+        "backend/apps/market_data/services/second_5min.py",
+        "backend/apps/market_data/api/views.py",
+        "backend/apps/market_data/api/urls.py",
+        "frontend/src/features/pulse/Second5MinMatrix.tsx",
+        "backend/apps/market_data/services/first_5min.py"
+      ],
+      "acceptance": "GET /api/v1/market-data/second-5min/ returns per-symbol {first_profile, second_class, matrix_cell}; UI renders 2x2 cell badge per watchlist row at/after 9:25 IST.",
+      "source": "feature_request",
+      "source_id": "second-5-minute-continuation-vs-reversal-classifier",
+      "status": "open",
+      "created_at": "2026-05-17T13:28:34Z"
     }
   ],
   "proposals": [
@@ -1563,6 +1927,55 @@
       ],
       "status": "proposed",
       "created_at": "2026-05-17T12:59:46Z"
+    },
+    {
+      "id": "prop-news-shock-trading-halt-monitor-with-auto-flatten-prompt-006",
+      "task_id": "news-shock-trading-halt-monitor-with-auto-flatten-prompt",
+      "summary": "Add a news-shock & trading-halt monitor service that streams corporate actions, circuit hits, LULD pauses, and headlines for every open intraday position, exposes them via a new REST endpoint, wires a regime-aware auto-pause into @RiskGuard",
+      "files_changed": [
+        {
+          "path": "backend/apps/market_data/services/news_shock_monitor.py",
+          "change_kind": "create",
+          "approach": "New service module that polls/streams NSE corporate-action feed, circuit-filter hits, LULD/halt status, and a headline source per held symbol, normalises them into ShockEvent dataclasses, and caches the active shocks in Redis keyed by tenant+symbol with TTL aligned to the market clock.",
+          "code_outline": "from dataclasses import dataclass, field\nfrom enum import Enum\nfrom typing import Iterable\n\nCACHE_KEY = 'market:news_shocks:v1:{tenant_id}'\nSHOCK_TTL = 120  # seconds; refreshed each pulse tick\n\nclass ShockSeverity(str, Enum):\n    INFO = 'info'        # corp action, scheduled event\n    WARN = 'warn'        # circuit hit, large headline beta\n    CRITICAL = 'critical'  # trading halt, LULD pause, profit warning\n\nclass ShockKind(str, Enum):\n    CORP_ACTION = 'corp_action'\n    CIRCUIT_FILTER = 'circuit_filter'\n    LULD_PAUSE = 'luld_pause'\n    TRADING_HALT = 'trading_halt'\n    HEADLINE = 'headline'\n\n@dataclass\nclass ShockEvent:\n    symbol: str\n    exchange: str\n    kind: ShockKind\n    severity: ShockSeverity\n    headline: str\n    source: str\n    detected_at: str  # ISO\n    rationale: str    # why we think it matters for this position\n    flatten_recommendation: bool\n    confidence: float  # 0-1\n    raw: dict = field(default_factory=dict)\n\nclass NewsShockMonitor:\n    def __init__(self, tenant_id, positions_provider, clock=None): ...\n    def poll_once(self) -> list[ShockEvent]:\n        symbols = self._open_position_symbols()\n        events = []\n        events += self._fetch_nse_corp_actions(symbols)\n        events += self._fetch_circuit_hits(symbols)\n        events += self._fetch_halts(symbols)         # NSE/BSE halt + LULD\n        events += self._fetch_headlines(symbols)     # provider-agnostic; pluggable\n        events = [self._score(e) for e in events]\n        self._persist(events)\n        self._notify_risk_engine(events)             # writes pause flags per symbol\n        ret"
+        },
+        {
+          "path": "backend/apps/market_data/api/views.py",
+          "change_kind": "modify",
+          "approach": "Add a NewsShockMonitorView that calls build_news_shocks(request.tenant.id) and returns the list of ShockEvents (as dicts) grouped by symbol with active flags and flatten_recommendation. Follows the existing IsAuthenticated + force=1 pattern used by MarketPulseView.",
+          "code_outline": "from apps.market_data.services.news_shock_monitor import build_news_shocks\n\nclass NewsShockMonitorView(APIView):\n    \"\"\"GET /api/v1/market-data/news-shocks/\n    Active shock events per held symbol. severity \u2208 {info,warn,critical};\n    flatten_recommendation True implies @RiskGuard has also auto-paused entries on the symbol.\n    Cached 30s; ?force=1 to bypass.\n    \"\"\"\n    permission_classes = [IsAuthenticated]\n    def get(self, request):\n        force = request.query_params.get('force') in ('1','true','yes')\n        payload = build_news_shocks(request.tenant.id, force=force)\n        return Response(payload)  # {generated_at, symbols: {SYM: [event,...]}, summary: {...}}\n"
+        },
+        {
+          "path": "backend/apps/market_data/api/urls.py",
+          "change_kind": "modify",
+          "approach": "Register the new news-shocks route alongside the other market-data routes.",
+          "code_outline": "from apps.market_data.api.views import (..., NewsShockMonitorView)\n\nurlpatterns = [\n    ...,\n    path('news-shocks/', NewsShockMonitorView.as_view(), name='news-shock-monitor'),\n]"
+        },
+        {
+          "path": "trading/services/risk_engine.py",
+          "change_kind": "modify",
+          "approach": "Insert a new symbol-level shock gate immediately after the regime gate (and before basic field validation). It reads a cache key written by NewsShockMonitor (risk:symbol_pause:{symbol}); on a CRITICAL shock it rejects new entries with reason 'symbol paused: <shock rationale>' and surfaces a flatten hint in details. Honours RISK_SHOCK_STRICT env (default soft when cache cold), mirroring the existin",
+          "code_outline": "SHOCK_PAUSE_CACHE_KEY = 'risk:symbol_pause:{symbol}'\nRISK_SHOCK_STRICT = os.getenv('RISK_SHOCK_STRICT', '0') == '1'\n\ndef _check_symbol_shock(symbol: str) -> tuple[bool, str, dict]:\n    # read cache; if missing & not strict => OK; if CRITICAL => reject; if WARN => allow but tag details['shock']={severity, headline, flatten_hint}\n    ...\n\ndef validate_trade(plan, capital, daily_loss=0.0, open_positions=0):\n    ...\n    regime_ok, ... = _check_regime()\n    ...\n    shock_ok, shock_reason, shock_details = _check_symbol_shock(plan.get('symbol',''))\n    details['shock'] = shock_details\n    if not shock_ok:\n        logger.warning('Risk REJECTED by shock gate: %s', shock_reason)\n        return False, shock_reason, details\n    # existing field validation continues...\n"
+        },
+        {
+          "path": "frontend/src/features/positions/NewsShockMonitor.tsx",
+          "change_kind": "create",
+          "approach": "New React panel that subscribes to GET /api/v1/market-data/news-shocks/ via TanStack Query (refetch 15s), renders one row per held symbol with severity badge, headline, rationale, and \u2014 when flatten_recommendation is true \u2014 a primary 'Flatten now' button and a secondary 'Hold (override)' button that records an audit reason. Pulls position list from the existing positions store so we don't duplicat",
+          "code_outline": "import { useQuery } from '@tanstack/react-query';\nimport { api } from '@/lib/api';\nimport { Card, Badge, Button } from '@/components/ui';\n\ntype Severity = 'info'|'warn'|'critical';\ninterface ShockEvent { symbol:string; kind:string; severity:Severity; headline:string; rationale:string; detected_at:string; flatten_recommendation:boolean; source:string }\ninterface Payload { generated_at:string; symbols: Record<string, ShockEvent[]>; summary:{critical:number;warn:number;info:number} }\n\nexport function NewsShockMonitor({ heldSymbols }: { heldSymbols: string[] }) {\n  const { data } = useQuery<Payload>({\n    queryKey: ['news-shocks'],\n    queryFn: () => api.get('/market-data/news-shocks/').then(r=>r.data),\n    refetchInterval: 15_000,\n  });\n  // group by symbol; only render symbols present in heldSymbols\n  // severity \u2192 badge color; flatten_recommendation \u2192 primary CTA\n  // onFlatten: POST /api/v1/orders/ flatten payload (existing endpoint)\n  // onHold: POST override audit reason via existing audit endpoint\n  return <Card>...</Card>;\n}\n"
+        }
+      ],
+      "risks": [
+        "Headline/halt providers are rate-limited and flaky \u2014 a misbehaving fetcher could block the poll loop or thrash @RiskGuard's pause cache; needs per-source timeouts and graceful degradation so a dead so",
+        "False positives on the shock gate would silently reject legitimate entries; the soft-skip-on-cold-cache pattern (RISK_SHOCK_STRICT=0 default) must be preserved so dev/tests and pre-market workflows ar",
+        "Flatten button is a destructive, hard-to-reverse action \u2014 single-click flatten without confirmation could cause an unintended exit on a noisy headline; needs a confirm step and audit-log of the operat"
+      ],
+      "tests_needed": [
+        "Service unit tests: feeding synthetic NSE corp-action / circuit / halt / headline fixtures produces correctly-classified ShockEvents (severity, flatten_recommendation) and writes the per-symbol pause ",
+        "Risk engine test: with a CRITICAL shock present for plan.symbol, validate_trade returns (False, 'symbol paused: ...'); with cache cold and strict=0, the gate is skipped; with WARN, plan passes but det",
+        "API test: GET /api/v1/market-data/news-shocks/ returns 200 with the expected shape (symbols map + summary counts), respects ?force=1, and only includes symbols that are currently held by the requestin"
+      ],
+      "status": "proposed",
+      "created_at": "2026-05-17T13:28:55Z"
     }
   ],
   "agent_runs": [
@@ -1910,6 +2323,111 @@
       "summary": "Proposed change for task 'Slippage-vs-Edge Calculator per Setup'",
       "produced_ids": [
         "prop-slippage-vs-edge-calculator-per-setup-005"
+      ]
+    },
+    {
+      "id": "trader_user:default-2026-05-17t13-27-21z",
+      "agent_kind": "trader_user:default",
+      "started_at": "2026-05-17T13:27:21Z",
+      "ended_at": "2026-05-17T13:27:32Z",
+      "ok": true,
+      "summary": "Quant-trader lens across equity intraday + monthly F&O + weekly index options: hunting for whole-picture views \u2014 plan vs deployed capital, leverage utilisation, margin, edge decay \u2014 none of which the palace currently covers.",
+      "produced_ids": [
+        "plan-vs-actual-capital-deployment-cockpit",
+        "real-time-leverage-span-elm-margin-utilisation-strip",
+        "weekly-options-greeks-pin-risk-aggregator",
+        "edge-decay-tracker-per-strategy-rolling-20-60-120-trade-r",
+        "cross-product-correlation-concentration-matrix"
+      ]
+    },
+    {
+      "id": "trader_user:options-2026-05-17t13-27-32z",
+      "agent_kind": "trader_user:options",
+      "started_at": "2026-05-17T13:27:32Z",
+      "ended_at": "2026-05-17T13:27:46Z",
+      "ok": true,
+      "summary": "Options-trader lens on weekly NIFTY/BANKNIFTY cycle: palace lacks IV surface, skew, term structure, gamma-scalp windows, pin-risk forecasting, and event-driven IV crush playbooks.",
+      "produced_ids": [
+        "live-skew-term-structure-cockpit-25-rr-vertical-spread-curve",
+        "iv-rank-iv-percentile-matrix-for-next-4-expiries",
+        "pin-risk-forecaster-for-expiry-day-max-pain-gamma-wall-projection",
+        "realised-vs-implied-gamma-scalp-window-detector",
+        "auto-hedge-suggester-on-delta-drift-with-cost-vs-theta-trade-off",
+        "event-aware-iv-crush-calendar-post-event-decay-playbook"
+      ]
+    },
+    {
+      "id": "trader_user:futures-2026-05-17t13-27-46z",
+      "agent_kind": "trader_user:futures",
+      "started_at": "2026-05-17T13:27:46Z",
+      "ended_at": "2026-05-17T13:27:57Z",
+      "ok": true,
+      "summary": "Futures-trader lens on NSE NIFTY/BANKNIFTY + stock futures: palace has no basis/roll/OI quadrant/SPAN-margin views. Focused on carry, rolls, OI structure, and margin efficiency.",
+      "produced_ids": [
+        "live-basis-annualised-carry-cockpit-current-next-month",
+        "roll-spread-calendar-cost-of-roll-tracker-t-7-to-expiry",
+        "oi-vs-price-quadrant-scanner-long-build-up-short-cover-long-unwind-short-build-u",
+        "span-elm-margin-vs-notional-efficiency-table",
+        "eod-mark-to-market-preview-overnight-carry-decision-panel"
+      ]
+    },
+    {
+      "id": "trader_user:equity-2026-05-17t13-27-57z",
+      "agent_kind": "trader_user:equity",
+      "started_at": "2026-05-17T13:27:57Z",
+      "ended_at": "2026-05-17T13:28:07Z",
+      "ok": true,
+      "summary": "Equity swing lens: palace has zero RS-vs-NIFTY, RRG, multi-TF stage scan, earnings overlay, or fresh-vs-extended breakout tooling. Focused on positional decision support.",
+      "produced_ids": [
+        "rs-vs-nifty-leaderboard-with-21-63-126-day-rank-trend-arrow",
+        "relative-rotation-graph-rrg-sectors-top-holdings",
+        "multi-timeframe-stage-scanner-d-w-m-alignment-oliver-kell-phase",
+        "earnings-dividend-calendar-overlay-on-open-positions",
+        "fresh-breakout-vs-extended-classifier-distance-from-pivot-10wma"
+      ]
+    },
+    {
+      "id": "trader_user:intraday-2026-05-17t13-28-07z",
+      "agent_kind": "trader_user:intraday",
+      "started_at": "2026-05-17T13:28:07Z",
+      "ended_at": "2026-05-17T13:28:17Z",
+      "ok": true,
+      "summary": "Intraday scalper lens: palace covers ORB, VWAP bands, tape speed, slippage edge, forced-flat. Gaps: opening-range failure detection, microstructure depth, gap-fill stats, cost-per-trade ledger, news halt.",
+      "produced_ids": [
+        "opening-range-failure-reversal-probability-tracker",
+        "level-2-depth-imbalance-iceberg-sniffer",
+        "gap-fill-probability-dashboard-per-symbol-per-gap-size",
+        "per-trade-cost-round-trip-edge-ledger-live",
+        "second-5-minute-continuation-vs-reversal-classifier"
+      ]
+    },
+    {
+      "id": "planner-2026-05-17t13-28-17z",
+      "agent_kind": "planner",
+      "started_at": "2026-05-17T13:28:17Z",
+      "ended_at": "2026-05-17T13:28:34Z",
+      "ok": true,
+      "summary": "Added 8 planner tasks from new feature requests across options/equity/intraday lenses: RRG, multi-TF stage scan, fresh-vs-extended classifier, OR-failure tracker, depth/iceberg, gap-fill, cost ledger, 2nd-5min classifier.",
+      "produced_ids": [
+        "relative-rotation-graph-rrg-sectors-top-holdings",
+        "multi-timeframe-stage-scanner-d-w-m-oliver-kell-phase",
+        "fresh-breakout-vs-extended-classifier",
+        "opening-range-failure-reversal-probability-tracker",
+        "level-2-depth-imbalance-iceberg-sniffer",
+        "gap-fill-probability-dashboard",
+        "per-trade-cost-round-trip-edge-ledger-live",
+        "second-5-minute-continuation-vs-reversal-classifier"
+      ]
+    },
+    {
+      "id": "executor-2026-05-17t13-28-34z",
+      "agent_kind": "executor",
+      "started_at": "2026-05-17T13:28:34Z",
+      "ended_at": "2026-05-17T13:28:55Z",
+      "ok": true,
+      "summary": "Proposed change for task 'News-Shock & Trading-Halt Monitor with Auto-Flatten Prompt'",
+      "produced_ids": [
+        "prop-news-shock-trading-halt-monitor-with-auto-flatten-prompt-006"
       ]
     }
   ]

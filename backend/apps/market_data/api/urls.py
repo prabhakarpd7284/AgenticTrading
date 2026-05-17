@@ -2,6 +2,7 @@ from django.urls import path
 from apps.market_data.api.views import (
     BasketView,
     CandleView,
+    First5MinView,
     LiquidityMapView,
     MarketPulseView,
     OKBacktestView,
@@ -12,6 +13,7 @@ from apps.market_data.api.views import (
     ShortlistView,
     SwingScannerView,
     SymbolSearchView,
+    VWAPBandsView,
 )
 
 urlpatterns = [
@@ -27,4 +29,6 @@ urlpatterns = [
     path("pyramid/",        PyramidView.as_view(),        name="pyramid"),
     path("liquidity/",      LiquidityMapView.as_view(),   name="liquidity-map"),
     path("orb/",            ORBView.as_view(),            name="orb-tracker"),
+    path("vwap-bands/",     VWAPBandsView.as_view(),      name="vwap-bands"),
+    path("first-5min/",     First5MinView.as_view(),      name="first-5min"),
 ]

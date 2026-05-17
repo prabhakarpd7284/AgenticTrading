@@ -15,8 +15,10 @@ from apps.market_data.services.shortlist_service import build_shortlist
 from apps.market_data.services.swing_scanner_service import build_swing_scanner
 from apps.market_data.services.ok_backtest_service import build_ok_backtest
 from apps.market_data.services.basket_service import build_basket_status
+from apps.market_data.services.first_5min import build_first_5min
 from apps.market_data.services.liquidity_map import build_liquidity_map
 from apps.market_data.services.orb_tracker import build_orb
+from apps.market_data.services.vwap_bands import build_vwap_bands
 
 
 class SymbolSearchView(APIView):
@@ -453,3 +455,27 @@ class ORBView(APIView):
 
     def get(self, request):
         return Response(build_orb(getattr(request, "tenant", None)))
+
+
+class VWAPBandsView(APIView):
+    """GET /api/v1/market-data/vwap-bands/?symbol=HDFCBANK
+
+    Intraday anchored VWAP + ±1σ / ±2σ bands. Returns full bar series so
+    the React chart can plot the bands directly.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        sym = request.query_params.get("symbol") or ""
+        return Response(build_vwap_bands(sym))
+
+
+class First5MinView(APIView):
+    """GET /api/v1/market-data/first-5min/
+
+    Classifies every watchlist symbol's 09:15-09:20 IST 5-min bar.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        return Response(build_first_5min(getattr(request, "tenant", None)))

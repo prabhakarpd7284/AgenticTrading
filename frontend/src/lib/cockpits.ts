@@ -434,3 +434,75 @@ export const useORB = () =>
     queryFn: () => api.get<ORB>("/market-data/orb/").then((r) => r.data),
     ...COMMON,
   });
+
+// ---------------------------------------------------------------------------
+// Cycle-4 cockpits — VWAP bands, first-5-min profile, base-quality score.
+// ---------------------------------------------------------------------------
+export interface VWAPSeries {
+  t: string; c: number; vwap: number;
+  sigma1_up: number; sigma1_dn: number;
+  sigma2_up: number; sigma2_dn: number; sd: number;
+}
+export interface VWAPBands {
+  symbol: string;
+  vwap: number;
+  sigma1_up: number; sigma1_dn: number;
+  sigma2_up: number; sigma2_dn: number;
+  dist_sigma: number;
+  state: "neutral" | "stretched_up" | "stretched_down" | "no_data";
+  last_close?: number;
+  series: VWAPSeries[];
+  bar_count?: number;
+  note?: string;
+  error?: string;
+}
+
+export const useVWAPBands = (symbol: string) =>
+  useQuery({
+    queryKey: ["cockpits", "vwap-bands", symbol],
+    queryFn: () =>
+      api.get<VWAPBands>(`/market-data/vwap-bands/?symbol=${encodeURIComponent(symbol)}`).then((r) => r.data),
+    enabled: !!symbol,
+    ...COMMON,
+  });
+
+export interface First5MinRow {
+  symbol: string;
+  classification: string;
+  day_type_tag: string;
+  open?: number; high?: number; low?: number; close?: number;
+  gap_pct: number; body_pct: number; vol: number;
+  range_atr?: number;
+}
+export interface First5Min { count: number; rows: First5MinRow[]; note?: string; }
+
+export const useFirst5Min = () =>
+  useQuery({
+    queryKey: ["cockpits", "first-5min"],
+    queryFn: () => api.get<First5Min>("/market-data/first-5min/").then((r) => r.data),
+    ...COMMON,
+  });
+
+export interface BaseQualityRow {
+  symbol: string;
+  score: number;
+  pattern_tag: string;
+  pivot: number;
+  depth_pct: number;
+  length_weeks: number;
+  tightness_pct: number;
+  volume_dryup: number;
+  last_close: number;
+  pct_from_pivot: number;
+}
+export interface BaseQuality { count: number; rows: BaseQualityRow[]; note?: string; }
+
+export const useBaseQuality = (symbols?: string) =>
+  useQuery({
+    queryKey: ["cockpits", "base-quality", symbols ?? ""],
+    queryFn: () => {
+      const q = symbols ? `?symbols=${encodeURIComponent(symbols)}` : "";
+      return api.get<BaseQuality>(`/strategies/base-quality/${q}`).then((r) => r.data);
+    },
+    ...COMMON,
+  });

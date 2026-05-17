@@ -1,6 +1,10 @@
 from rest_framework import serializers, viewsets
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from rest_framework.views import APIView
 
 from apps.strategies.models import Backtest, StrategyInstance
+from apps.strategies.services.base_quality import build_base_quality
 
 
 class StrategyInstanceSerializer(serializers.ModelSerializer):
@@ -35,3 +39,15 @@ class BacktestViewSet(viewsets.ModelViewSet):
         from apps.strategies.tasks.backtest import run_backtest
         bt = serializer.save(tenant=self.request.tenant)
         run_backtest.delay(str(bt.id))
+
+
+class BaseQualityView(APIView):
+    """GET /api/v1/strategies/base-quality/?symbols=A,B,C
+    (or no params to score the legacy watchlist).
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        raw = request.query_params.get("symbols") or request.query_params.get("symbol") or ""
+        syms = [s.strip().upper() for s in raw.split(",") if s.strip()] if raw else None
+        return Response(build_base_quality(symbols=syms))
