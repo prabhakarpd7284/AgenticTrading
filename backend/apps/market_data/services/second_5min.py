@@ -46,7 +46,7 @@ def _fetch_first_two(symbol: str) -> list[dict]:
         start = today.strftime("%Y-%m-%d 09:15")
         end = today.strftime("%Y-%m-%d 09:25")
         try:
-            raw = broker.fetch_candles(token, start, end, "FIVE_MINUTE", exchange="NSE") or []
+            raw = broker.fetch_candles(token, start, end, "FIVE_MINUTE", exchange=ticker_service.resolve_exchange(symbol)) or []
         except TypeError:
             raw = broker.fetch_candles(token, start, end, "FIVE_MINUTE") or []
         rows = [

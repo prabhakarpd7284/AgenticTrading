@@ -40,7 +40,7 @@ def _fetch_daily(symbol: str, days: int = 400) -> list[dict]:
         start = (today - timedelta(days=days + 14)).strftime("%Y-%m-%d 09:15")
         end = today.strftime("%Y-%m-%d 15:30")
         try:
-            raw = broker.fetch_candles(token, start, end, "ONE_DAY", exchange="NSE") or []
+            raw = broker.fetch_candles(token, start, end, "ONE_DAY", exchange=ticker_service.resolve_exchange(symbol)) or []
         except TypeError:
             raw = broker.fetch_candles(token, start, end, "ONE_DAY") or []
         rows = [

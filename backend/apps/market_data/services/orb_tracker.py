@@ -59,7 +59,7 @@ def _fetch_1m(symbol: str) -> list[dict]:
         start = today.strftime("%Y-%m-%d 09:15")
         end = today.strftime("%Y-%m-%d 15:30")
         try:
-            raw = broker.fetch_candles(token, start, end, "ONE_MINUTE", exchange="NSE") or []
+            raw = broker.fetch_candles(token, start, end, "ONE_MINUTE", exchange=ticker_service.resolve_exchange(symbol)) or []
         except TypeError:
             raw = broker.fetch_candles(token, start, end, "ONE_MINUTE") or []
         out = [
@@ -102,7 +102,7 @@ def _atr14_daily(symbol: str) -> float:
         start = (today - timedelta(days=25)).strftime("%Y-%m-%d 09:15")
         end = today.strftime("%Y-%m-%d 15:30")
         try:
-            raw = broker.fetch_candles(token, start, end, "ONE_DAY", exchange="NSE") or []
+            raw = broker.fetch_candles(token, start, end, "ONE_DAY", exchange=ticker_service.resolve_exchange(symbol)) or []
         except TypeError:
             raw = broker.fetch_candles(token, start, end, "ONE_DAY") or []
         rows = [(float(r[2]), float(r[3]), float(r[4])) for r in raw if len(r) >= 5]

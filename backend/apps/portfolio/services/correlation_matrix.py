@@ -82,7 +82,7 @@ def _fetch_daily_returns(underlying: str, days: int = 60) -> list[float]:
         start = (today - timedelta(days=days + 5)).strftime("%Y-%m-%d 09:15")
         end = today.strftime("%Y-%m-%d 15:30")
         try:
-            raw = broker.fetch_candles(token, start, end, "ONE_DAY", exchange="NSE") or []
+            raw = broker.fetch_candles(token, start, end, "ONE_DAY", exchange=ticker_service.resolve_exchange(underlying)) or []
         except TypeError:
             raw = broker.fetch_candles(token, start, end, "ONE_DAY") or []
         closes = [float(r[4]) for r in raw if len(r) >= 5]

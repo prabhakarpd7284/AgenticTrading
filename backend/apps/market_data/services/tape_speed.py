@@ -43,7 +43,7 @@ def _fetch_1m_today(symbol: str) -> list[dict]:
         start = today.strftime("%Y-%m-%d 09:15")
         end = today.strftime("%Y-%m-%d 15:30")
         try:
-            raw = broker.fetch_candles(token, start, end, "ONE_MINUTE", exchange="NSE") or []
+            raw = broker.fetch_candles(token, start, end, "ONE_MINUTE", exchange=ticker_service.resolve_exchange(symbol)) or []
         except TypeError:
             raw = broker.fetch_candles(token, start, end, "ONE_MINUTE") or []
         out = [
@@ -72,7 +72,7 @@ def _baseline_turnover(symbol: str, days: int = 20) -> float:
         start = (today - timedelta(days=days + 2)).strftime("%Y-%m-%d 09:15")
         end = today.strftime("%Y-%m-%d 15:30")
         try:
-            raw = broker.fetch_candles(token, start, end, "ONE_DAY", exchange="NSE") or []
+            raw = broker.fetch_candles(token, start, end, "ONE_DAY", exchange=ticker_service.resolve_exchange(symbol)) or []
         except TypeError:
             raw = broker.fetch_candles(token, start, end, "ONE_DAY") or []
         turnovers = []

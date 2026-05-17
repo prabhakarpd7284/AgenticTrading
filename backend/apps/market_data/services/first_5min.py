@@ -66,7 +66,7 @@ def _fetch_first_5min(symbol: str) -> list[dict]:
         start = today.strftime("%Y-%m-%d 09:15")
         end = today.strftime("%Y-%m-%d 09:20")
         try:
-            raw = broker.fetch_candles(token, start, end, "FIVE_MINUTE", exchange="NSE") or []
+            raw = broker.fetch_candles(token, start, end, "FIVE_MINUTE", exchange=ticker_service.resolve_exchange(symbol)) or []
         except TypeError:
             raw = broker.fetch_candles(token, start, end, "FIVE_MINUTE") or []
         rows = [
@@ -94,7 +94,7 @@ def _prev_close_and_atr(symbol: str) -> tuple[float, float, float]:
         start = (today - timedelta(days=25)).strftime("%Y-%m-%d 09:15")
         end = today.strftime("%Y-%m-%d 15:30")
         try:
-            raw = broker.fetch_candles(token, start, end, "ONE_DAY", exchange="NSE") or []
+            raw = broker.fetch_candles(token, start, end, "ONE_DAY", exchange=ticker_service.resolve_exchange(symbol)) or []
         except TypeError:
             raw = broker.fetch_candles(token, start, end, "ONE_DAY") or []
         rows = [(float(r[2]), float(r[3]), float(r[4])) for r in raw if len(r) >= 5]
@@ -152,7 +152,7 @@ def _fetch_1030_bar(symbol: str) -> dict | None:
         start = today.strftime("%Y-%m-%d 10:25")
         end = today.strftime("%Y-%m-%d 10:30")
         try:
-            raw = broker.fetch_candles(token, start, end, "FIVE_MINUTE", exchange="NSE") or []
+            raw = broker.fetch_candles(token, start, end, "FIVE_MINUTE", exchange=ticker_service.resolve_exchange(symbol)) or []
         except TypeError:
             raw = broker.fetch_candles(token, start, end, "FIVE_MINUTE") or []
         bar = None

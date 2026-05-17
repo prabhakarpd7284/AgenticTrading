@@ -41,7 +41,7 @@ def _today_volume(symbol: str) -> int:
         start = today.strftime("%Y-%m-%d 09:15")
         end = today.strftime("%Y-%m-%d 15:30")
         try:
-            raw = broker.fetch_candles(token, start, end, "FIVE_MINUTE", exchange="NSE") or []
+            raw = broker.fetch_candles(token, start, end, "FIVE_MINUTE", exchange=ticker_service.resolve_exchange(symbol)) or []
         except TypeError:
             raw = broker.fetch_candles(token, start, end, "FIVE_MINUTE") or []
         total = sum(int(r[5]) for r in raw if len(r) > 5)
@@ -66,7 +66,7 @@ def _baseline_volume(symbol: str, days: int = 20) -> float:
         start = (today - timedelta(days=days + 2)).strftime("%Y-%m-%d 09:15")
         end = today.strftime("%Y-%m-%d 15:30")
         try:
-            raw = broker.fetch_candles(token, start, end, "ONE_DAY", exchange="NSE") or []
+            raw = broker.fetch_candles(token, start, end, "ONE_DAY", exchange=ticker_service.resolve_exchange(symbol)) or []
         except TypeError:
             raw = broker.fetch_candles(token, start, end, "ONE_DAY") or []
         vols = [int(r[5]) for r in raw[-days:] if len(r) > 5]

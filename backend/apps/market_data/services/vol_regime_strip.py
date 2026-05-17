@@ -44,7 +44,7 @@ def _fetch_1m(symbol: str) -> list[dict]:
         start = today.strftime("%Y-%m-%d 09:15")
         end = today.strftime("%Y-%m-%d 15:30")
         try:
-            raw = broker.fetch_candles(token, start, end, "ONE_MINUTE", exchange="NSE") or []
+            raw = broker.fetch_candles(token, start, end, "ONE_MINUTE", exchange=ticker_service.resolve_exchange(symbol)) or []
         except TypeError:
             raw = broker.fetch_candles(token, start, end, "ONE_MINUTE") or []
         rows = [
