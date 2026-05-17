@@ -20,6 +20,8 @@ from apps.portfolio.api.views_cockpits import (
     CorrelationMatrixView,
     EdgeDecayView,
     ExpiryCockpitView,
+    ForcedFlatFlattenView,
+    ForcedFlatView,
     GapRiskView,
     GreeksHeatmapView,
     PlanVsActualView,
@@ -29,6 +31,8 @@ from apps.portfolio.api.views_cockpits import (
     SetCapitalView,
     SignalFunnelView,
     SizerSimulatorView,
+    SlippageEdgeView,
+    StructuralStopsView,
     ThetaForecastView,
 )
 
@@ -60,6 +64,10 @@ urlpatterns = [
     path("post-mortem/", PostMortemView.as_view(), name="post-mortem"),
     path("gap-risk/", GapRiskView.as_view(), name="gap-risk"),
     path("sizer/simulate/", SizerSimulatorView.as_view(), name="sizer-simulate"),
+    path("structural-stops/", StructuralStopsView.as_view(), name="structural-stops"),
+    path("forced-flat/", ForcedFlatView.as_view(), name="forced-flat"),
+    path("forced-flat/flatten/", ForcedFlatFlattenView.as_view(), name="forced-flat-flatten"),
+    path("slippage-edge/", SlippageEdgeView.as_view(), name="slippage-edge"),
     path("positions/", include(position_router.urls)),
     path("snapshots/", include(snapshot_router.urls)),
     path("", include(portfolio_router.urls)),

@@ -125,7 +125,12 @@
     "[trader_user:equity @ 2026-05-17T12:58:51Z] Equity swing lens: existing palace covers RRG, earnings overlay, fresh-vs-extended, breakout/ORB. Gaps are RS leaderboards, MTF stage scanner, FII/DII tape, structural stops, base-quality scoring.",
     "[trader_user:intraday @ 2026-05-17T12:59:02Z] Intraday scalper lens: palace already has ORB, VWAP bands, tape-speed, slippage-edge, forced-flat. Gaps are sector dispersion, first-5min profile, news-shock halt monitor, capital rotation heatmap.",
     "[planner @ 2026-05-17T12:59:12Z] 8 new tasks from open feature requests (0 open bugs). Risk + decision-unlocking reports get high; charts/data get medium.",
-    "[executor @ 2026-05-17T12:59:29Z] proposed prop-slippage-vs-edge-calculator-per-setup-005 for slippage-vs-edge-calculator-per-setup"
+    "[executor @ 2026-05-17T12:59:29Z] proposed prop-slippage-vs-edge-calculator-per-setup-005 for slippage-vs-edge-calculator-per-setup",
+    {
+      "agent": "executor",
+      "at": "2026-05-17T13:26:05.272246+00:00",
+      "summary": "Closed 4 planner tasks: structural-stop suggester, forced-flat cockpit, slippage-vs-edge calculator, opening-range breakout tracker. New tabs on /cockpits + endpoints under /portfolios + /market-data."
+    }
   ],
   "feature_requests": [
     {
@@ -1098,7 +1103,7 @@
       "acceptance": "GET /api/v1/market-data/orb/ returns each watchlist symbol with or_high, or_low, or_width_atr, breakout_time, retests, vol_vs_20d fields after 09:30 IST.",
       "source": "feature_request",
       "source_id": "opening-range-breakout-tracker-first-15m-high-low-per-symbol",
-      "status": "open",
+      "status": "done",
       "created_at": "2026-05-17T12:53:12Z"
     },
     {
@@ -1152,7 +1157,7 @@
       "acceptance": "POST /api/v1/portfolios/slippage-edge/ with {symbol, qty, setup_id} returns net_edge_ticks, half_spread, impact_cost, brokerage, verdict in {'green','amber','red'}.",
       "source": "feature_request",
       "source_id": "slippage-vs-edge-calculator-per-setup-go-no-go-before-click",
-      "status": "proposed",
+      "status": "done",
       "created_at": "2026-05-17T12:53:12Z"
     },
     {
@@ -1171,7 +1176,7 @@
       "acceptance": "GET /api/v1/portfolios/forced-flat/ returns each MIS position with countdown_sec, pnl, est_slippage; POST .../flatten-all queues SQUARE_OFF orders for every row.",
       "source": "feature_request",
       "source_id": "3-20-pm-forced-flat-checklist-auto-square-off-cockpit",
-      "status": "open",
+      "status": "done",
       "created_at": "2026-05-17T12:53:12Z"
     },
     {
@@ -1189,7 +1194,7 @@
       "acceptance": "GET /api/v1/portfolios/structural-stops/ returns {position_id, swing_low, ten_wma, atr_trail, recommended, r_distance, pct_loss} for each open position.",
       "source": "feature_request",
       "source_id": "structural-stop-suggester-swing-low-10wma-atr-anchored",
-      "status": "open",
+      "status": "done",
       "created_at": "2026-05-17T12:59:29Z"
     },
     {

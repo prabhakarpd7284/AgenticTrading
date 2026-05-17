@@ -16,6 +16,7 @@ from apps.market_data.services.swing_scanner_service import build_swing_scanner
 from apps.market_data.services.ok_backtest_service import build_ok_backtest
 from apps.market_data.services.basket_service import build_basket_status
 from apps.market_data.services.liquidity_map import build_liquidity_map
+from apps.market_data.services.orb_tracker import build_orb
 
 
 class SymbolSearchView(APIView):
@@ -441,3 +442,14 @@ class LiquidityMapView(APIView):
 
     def get(self, request):
         return Response(build_liquidity_map(getattr(request, "tenant", None)))
+
+
+class ORBView(APIView):
+    """GET /api/v1/market-data/orb/
+
+    Opening-range high/low + breakout state + retests per watchlist symbol.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        return Response(build_orb(getattr(request, "tenant", None)))

@@ -29,9 +29,12 @@ from apps.portfolio.services.cockpits import (
     build_theta_forecast,
 )
 from apps.portfolio.services.correlation_matrix import build_correlation_report
+from apps.portfolio.services.forced_flat import build_forced_flat, flatten_all
 from apps.portfolio.services.gap_risk import build_gap_risk_report
 from apps.portfolio.services.post_mortem import build_post_mortem_report
 from apps.portfolio.services.sizer_simulator import simulate as simulate_sizer
+from apps.portfolio.services.slippage_edge import compute as compute_slippage_edge
+from apps.portfolio.services.structural_stops import build_structural_stops
 
 
 class _BaseCockpitView(APIView):
@@ -196,3 +199,28 @@ class SizerSimulatorView(_BaseCockpitView):
     """
     def post(self, request):
         return Response(simulate_sizer(request.data or {}))
+
+
+class StructuralStopsView(_BaseCockpitView):
+    """GET /api/v1/portfolios/structural-stops/"""
+    def get(self, request):
+        return Response(build_structural_stops(getattr(request, "tenant", None)))
+
+
+class ForcedFlatView(_BaseCockpitView):
+    """GET  /api/v1/portfolios/forced-flat/        — countdown + close list
+    POST /api/v1/portfolios/forced-flat/flatten/  — square off all (paper)
+    """
+    def get(self, request):
+        return Response(build_forced_flat(getattr(request, "tenant", None)))
+
+
+class ForcedFlatFlattenView(_BaseCockpitView):
+    def post(self, request):
+        return Response(flatten_all(getattr(request, "tenant", None)))
+
+
+class SlippageEdgeView(_BaseCockpitView):
+    """POST /api/v1/portfolios/slippage-edge/  body: {symbol, qty, setup_avg_r_inr}"""
+    def post(self, request):
+        return Response(compute_slippage_edge(request.data or {}))

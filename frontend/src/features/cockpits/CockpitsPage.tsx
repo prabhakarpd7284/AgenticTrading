@@ -7,8 +7,8 @@
 import * as React from "react";
 import {
   Activity, AlertTriangle, BarChart3, Briefcase, Calculator, Check, Clock,
-  Droplets, Gauge, GitCompareArrows, Grid3X3, LineChart, Microscope, Pencil,
-  Sigma, Sunrise, Target, TrendingDown, X,
+  Droplets, Flag, Gauge, GitCompareArrows, Grid3X3, LineChart, Microscope,
+  Pencil, Scale, Shield, Sigma, Sunrise, Target, TrendingDown, X, Zap,
 } from "lucide-react";
 import {
   Bar, BarChart, CartesianGrid, Line, LineChart as RLineChart,
@@ -67,10 +67,12 @@ function Help({ label, text }: { label: string; text: string }) {
 }
 import { useQueryClient } from "@tanstack/react-query";
 import {
-  setCapital, simulateSizer, useBrokerRecon, useCapitalCockpit, useCorrelationMatrix,
-  useEdgeDecay, useExpiryCockpit, useGapRisk, useGreeksHeatmap, useLiquidityMap,
-  usePlanVsActual, usePostMortem, useRegimeHeatmap, useRiskBudget,
-  useSignalFunnel, useThetaForecast, type SizerResponse,
+  checkSlippageEdge, flattenAll, setCapital, simulateSizer,
+  useBrokerRecon, useCapitalCockpit, useCorrelationMatrix,
+  useEdgeDecay, useExpiryCockpit, useForcedFlat, useGapRisk, useGreeksHeatmap,
+  useLiquidityMap, useORB, usePlanVsActual, usePostMortem, useRegimeHeatmap,
+  useRiskBudget, useSignalFunnel, useStructuralStops, useThetaForecast,
+  type SizerResponse, type SlippageEdgeResponse,
 } from "@/lib/cockpits";
 
 const TABS = [
@@ -89,6 +91,10 @@ const TABS = [
   { id: "gap-risk",      label: "Gap Risk",     icon: Sunrise },
   { id: "liquidity",     label: "Liquidity",    icon: Droplets },
   { id: "sizer",         label: "What-If Sizer", icon: Calculator },
+  { id: "stops",         label: "Structural Stops", icon: Shield },
+  { id: "forced-flat",   label: "Forced Flat",  icon: Flag },
+  { id: "slippage-edge", label: "Slippage vs Edge", icon: Scale },
+  { id: "orb",           label: "Opening Range", icon: Zap },
 ] as const;
 
 export function CockpitsPage() {
@@ -130,6 +136,10 @@ export function CockpitsPage() {
         <TabsContent value="gap-risk"><GapRiskPanel /></TabsContent>
         <TabsContent value="liquidity"><LiquidityPanel /></TabsContent>
         <TabsContent value="sizer"><SizerPanel /></TabsContent>
+        <TabsContent value="stops"><StopsPanel /></TabsContent>
+        <TabsContent value="forced-flat"><ForcedFlatPanel /></TabsContent>
+        <TabsContent value="slippage-edge"><SlippageEdgePanel /></TabsContent>
+        <TabsContent value="orb"><ORBPanel /></TabsContent>
       </Tabs>
     </div>
   );
@@ -1247,6 +1257,309 @@ function topKey(rec: Record<string, number>): string | null {
     if (v > bestV) { best = k; bestV = v; }
   }
   return best;
+}
+
+/* ------------------------------ 16. Structural Stops ---------------------- */
+function StopsPanel() {
+  const { data, isLoading } = useStructuralStops();
+  if (isLoading || !data) return <LoadingPanel />;
+  return (
+    <PanelWrap>
+      <HelpBlock
+        what="Three candidate stops per open position — last meaningful swing low, the 10-week MA, and a 2.5× ATR trail off the recent high. 'Recommended' is the tightest one that still sits below entry."
+        why="Stops set off feel kill swing trades. Anchoring to structure (a real low, a known mean, a vol-aware trail) means you only get stopped when the thesis is genuinely broken, not by noise."
+        act="If pct_loss > 5% on a single position, halve the size or pick a tighter candidate. If recommended is null, the stock has gapped above all three — wait for a pullback before adding."
+      />
+      <Card>
+        <CardHeader>
+          <CardTitle>Structural stops · {data.count} open position{data.count === 1 ? "" : "s"}</CardTitle>
+          <CardDescription>{data.note}</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {data.rows.length === 0 ? <EmptyState title="No open positions" /> : (
+            <div className="overflow-auto">
+              <table className="w-full text-body-sm">
+                <thead className="text-fg-subtle border-b border-border">
+                  <tr>
+                    <th className="text-left py-1.5">Symbol</th>
+                    <th className="text-right">Entry</th>
+                    <th className="text-right">Swing low</th>
+                    <th className="text-right">10W MA</th>
+                    <th className="text-right">ATR trail</th>
+                    <th className="text-right">Recommended</th>
+                    <th className="text-right">% loss</th>
+                    <th className="text-right">₹ at stop</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.rows.map((r) => (
+                    <tr key={r.position_id} className="border-b border-border/40">
+                      <td className="py-1.5">{r.symbol}</td>
+                      <td className="text-right tabular-nums">{fmtNum(r.entry, 2)}</td>
+                      <td className="text-right tabular-nums">{r.swing_low ? fmtNum(r.swing_low, 2) : "—"}</td>
+                      <td className="text-right tabular-nums">{r.ten_wma ? fmtNum(r.ten_wma, 2) : "—"}</td>
+                      <td className="text-right tabular-nums">{r.atr_trail ? fmtNum(r.atr_trail, 2) : "—"}</td>
+                      <td className="text-right">
+                        {r.recommended ? (
+                          <Badge tone="info">{r.recommended} · {fmtNum(r.recommended_value ?? 0, 2)}</Badge>
+                        ) : <span className="text-fg-subtle">n/a</span>}
+                      </td>
+                      <td className={`text-right tabular-nums ${r.pct_loss > 5 ? "text-warning" : ""}`}>
+                        {r.pct_loss ? `${fmtNum(r.pct_loss, 2)}%` : "—"}
+                      </td>
+                      <td className="text-right tabular-nums">{r.loss_at_stop_inr ? fmtInr(r.loss_at_stop_inr) : "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </PanelWrap>
+  );
+}
+
+/* ------------------------------ 17. Forced Flat --------------------------- */
+function ForcedFlatPanel() {
+  const qc = useQueryClient();
+  const { data, isLoading } = useForcedFlat();
+  const [pending, setPending] = React.useState(false);
+  const [result, setResult] = React.useState<string | null>(null);
+
+  const doFlatten = async () => {
+    if (!confirm("Flatten ALL open intraday positions at current LTP? Paper mode only — no live broker call.")) return;
+    setPending(true);
+    setResult(null);
+    try {
+      const r = await flattenAll();
+      setResult(`Flattened ${r.flattened} trade${r.flattened === 1 ? "" : "s"}.`);
+      await qc.invalidateQueries({ queryKey: ["cockpits"] });
+    } catch (e) {
+      setResult(e instanceof Error ? e.message : "flatten failed");
+    } finally {
+      setPending(false);
+    }
+  };
+
+  if (isLoading || !data) return <LoadingPanel />;
+  return (
+    <PanelWrap>
+      <HelpBlock
+        what={`Live countdown to ${data.deadline} (square-off deadline) and every open intraday position with live LTP, P&L, and estimated closing-auction slippage.`}
+        why="After 15:15 the closing auction absorbs MIS holders at whatever clears — slippage explodes. A one-click flatten-all keeps you disciplined when the move goes against you in the last hour."
+        act="When countdown drops under 30 min, exit losers first. Under 5 min: hit Flatten All if you haven't closed manually. Pair with the Gap Risk tab to decide whether anything deserves NRML conversion."
+      />
+      <section className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <KPI label="Now (IST)" value={data.now_ist.split(" ")[1] ?? "—"} hint={data.now_ist.split(" ")[0]} />
+        <KPI label="Countdown" value={fmtCountdown(data.countdown_seconds)}
+             tone={data.countdown_seconds > 0 && data.countdown_seconds < 1800 ? "warning" : "neutral"} />
+        <KPI label="Open MIS" value={String(data.count)} />
+        <KPI label="Total P&amp;L" value={fmtInr(data.total_pnl)}
+             tone={data.total_pnl >= 0 ? "success" : "danger"} />
+      </section>
+      <Card>
+        <CardHeader>
+          <CardTitle>Close list</CardTitle>
+          <CardDescription>{data.note}</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {data.rows.length === 0 ? <EmptyState title="Nothing to flatten" /> : (
+            <>
+              <div className="overflow-auto">
+                <table className="w-full text-body-sm">
+                  <thead className="text-fg-subtle border-b border-border">
+                    <tr>
+                      <th className="text-left py-1.5">Symbol</th>
+                      <th className="text-left">Side</th>
+                      <th className="text-right">Qty</th>
+                      <th className="text-right">Entry</th>
+                      <th className="text-right">LTP</th>
+                      <th className="text-right">P&amp;L</th>
+                      <th className="text-right">Est slip (bps)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.rows.map((r) => (
+                      <tr key={r.trade_id} className="border-b border-border/40">
+                        <td className="py-1.5">{r.symbol}</td>
+                        <td>{r.side}</td>
+                        <td className="text-right tabular-nums">{r.qty}</td>
+                        <td className="text-right tabular-nums">{fmtNum(r.entry, 2)}</td>
+                        <td className="text-right tabular-nums">{fmtNum(r.ltp, 2)}</td>
+                        <td className={`text-right tabular-nums ${r.pnl >= 0 ? "text-pnl-up" : "text-pnl-down"}`}>{fmtInr(r.pnl)}</td>
+                        <td className="text-right tabular-nums">{fmtNum(r.est_slippage_bps, 1)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="mt-3 flex items-center gap-3">
+                <button onClick={doFlatten} disabled={pending}
+                        className="h-9 px-4 bg-pnl-down text-white rounded-sm text-body-sm font-medium disabled:opacity-50">
+                  {pending ? "Flattening…" : `Flatten all ${data.count} (paper)`}
+                </button>
+                {result ? <span className="text-body-sm text-fg-muted">{result}</span> : null}
+              </div>
+            </>
+          )}
+        </CardContent>
+      </Card>
+    </PanelWrap>
+  );
+}
+
+/* ------------------------------ 18. Slippage vs Edge ---------------------- */
+function SlippageEdgePanel() {
+  const [form, setForm] = React.useState({ symbol: "NIFTY", qty: 65, setup_avg_r_inr: 5 });
+  const [result, setResult] = React.useState<SlippageEdgeResponse | null>(null);
+  const [pending, setPending] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null); setPending(true);
+    try {
+      const r = await checkSlippageEdge({
+        symbol: form.symbol.toUpperCase(),
+        qty: Number(form.qty),
+        setup_avg_r_inr: Number(form.setup_avg_r_inr),
+      });
+      if (r.error) setError(r.error);
+      setResult(r);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "request failed");
+    } finally {
+      setPending(false);
+    }
+  };
+
+  const verdictTone = (v: string): "success" | "warning" | "danger" =>
+    v === "green" ? "success" : v === "amber" ? "warning" : "danger";
+
+  return (
+    <PanelWrap>
+      <HelpBlock
+        what="Live half-spread + estimated impact + brokerage for the trade you're about to take, vs the historical expected R for the setup. Returns a green / amber / red verdict."
+        why="Backtested edges die in execution. A setup that prints +5 R on paper but pays 2 R in spread + impact each time is net-negative — you wouldn't trade it if you knew."
+        act="Green = take it. Amber = halve size or use limit orders. Red = skip; the trade can't pay for itself."
+      />
+      <Card>
+        <CardHeader>
+          <CardTitle>Pre-trade check</CardTitle>
+          <CardDescription>Net edge = expected R × qty − (half-spread + impact + brokerage)</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={submit} className="grid grid-cols-2 sm:grid-cols-4 gap-3 items-end">
+            <Field label="Symbol">
+              <input value={form.symbol} onChange={(e) => setForm({ ...form, symbol: e.target.value })}
+                     className="w-full h-9 px-2 bg-surface border border-border rounded-sm text-body-sm" />
+            </Field>
+            <Field label="Qty">
+              <input type="number" min={1} step="any" value={form.qty}
+                     onChange={(e) => setForm({ ...form, qty: Number(e.target.value) })}
+                     className="w-full h-9 px-2 bg-surface border border-border rounded-sm text-body-sm tabular-nums" />
+            </Field>
+            <Field label="Expected R / trade (INR)">
+              <input type="number" min={0} step="any" value={form.setup_avg_r_inr}
+                     onChange={(e) => setForm({ ...form, setup_avg_r_inr: Number(e.target.value) })}
+                     className="w-full h-9 px-2 bg-surface border border-border rounded-sm text-body-sm tabular-nums" />
+            </Field>
+            <button type="submit" disabled={pending}
+                    className="h-9 px-4 bg-accent text-accent-fg rounded-sm text-body-sm font-medium disabled:opacity-50">
+              {pending ? "Checking…" : "Check"}
+            </button>
+          </form>
+          {error ? <div className="mt-3 text-body-sm text-pnl-down flex items-center gap-2"><AlertTriangle className="h-4 w-4" /> {error}</div> : null}
+        </CardContent>
+      </Card>
+      {result && !result.error ? (
+        <>
+          <section className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <KPI label="Verdict" value={result.verdict.toUpperCase()} tone={verdictTone(result.verdict)} />
+            <KPI label="Expected edge" value={fmtInr(result.expected_edge_inr)} />
+            <KPI label="Total cost" value={fmtInr(result.total_cost_inr)} />
+            <KPI label="Net edge" value={fmtInr(result.net_edge_inr)}
+                 tone={result.net_edge_inr > 0 ? "success" : "danger"}
+                 hint={`edge:cost ${fmtNum(result.edge_to_cost_ratio, 2)}×`} />
+          </section>
+          <Card>
+            <CardHeader><CardTitle>Cost breakdown</CardTitle></CardHeader>
+            <CardContent>
+              <ul className="text-body-sm space-y-1.5">
+                <li>Half-spread × qty: <span className="font-mono">{fmtInr(result.half_spread_inr)}</span></li>
+                <li>Impact (5 bps proxy): <span className="font-mono">{fmtInr(result.impact_inr)}</span></li>
+                <li>Brokerage (2 × ₹20): <span className="font-mono">{fmtInr(result.brokerage_inr)}</span></li>
+              </ul>
+              {result.note ? <p className="text-caption text-fg-subtle mt-3">{result.note}</p> : null}
+            </CardContent>
+          </Card>
+        </>
+      ) : null}
+    </PanelWrap>
+  );
+}
+
+/* ------------------------------ 19. Opening Range ------------------------- */
+function ORBPanel() {
+  const { data, isLoading } = useORB();
+  if (isLoading || !data) return <LoadingPanel />;
+
+  const stateTone = (s: string) =>
+    s === "breakout_up" ? "success"
+    : s === "breakout_down" ? "danger"
+    : s === "failed_breakout" ? "warning"
+    : "neutral";
+
+  return (
+    <PanelWrap>
+      <HelpBlock
+        what="For every watchlist symbol, today's 9:15-9:30 IST opening range (high/low), the breakout state, the first breakout minute, and how many bars have re-entered the range since."
+        why="The first 15-min range filters the day. Wide opens trend; tight opens chop. Retests > 0 after a breakout means it's failing — fading is the play, not chasing."
+        act="Trade breakouts only when OR / ATR > 0.6 (wide-trend day). If retests ≥ 2, the setup is broken — exit or flip. Symbols still 'inside' after 11:00 are likely chop all day."
+      />
+      <Card>
+        <CardHeader>
+          <CardTitle>ORB tracker · {data.count} symbol{data.count === 1 ? "" : "s"}</CardTitle>
+          <CardDescription>{data.note}</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {data.rows.length === 0 ? <EmptyState title="No symbols watchlisted yet" /> : (
+            <div className="overflow-auto">
+              <table className="w-full text-body-sm">
+                <thead className="text-fg-subtle border-b border-border">
+                  <tr>
+                    <th className="text-left py-1.5">Symbol</th>
+                    <th className="text-right">OR high</th>
+                    <th className="text-right">OR low</th>
+                    <th className="text-right">Width / ATR</th>
+                    <th className="text-left">State</th>
+                    <th className="text-left">Breakout @</th>
+                    <th className="text-right">Retests</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.rows.map((r) => (
+                    <tr key={r.symbol} className="border-b border-border/40">
+                      <td className="py-1.5">{r.symbol}</td>
+                      <td className="text-right tabular-nums">{r.or_high ? fmtNum(r.or_high, 2) : "—"}</td>
+                      <td className="text-right tabular-nums">{r.or_low ? fmtNum(r.or_low, 2) : "—"}</td>
+                      <td className={`text-right tabular-nums ${r.or_width_atr > 0.6 ? "text-pnl-up" : r.or_width_atr < 0.3 && r.or_width_atr > 0 ? "text-warning" : ""}`}>
+                        {r.or_width_atr ? fmtNum(r.or_width_atr, 2) : "—"}
+                      </td>
+                      <td><Badge tone={stateTone(r.state)}>{r.state}</Badge></td>
+                      <td className="text-fg-muted">{r.breakout_time ?? "—"}</td>
+                      <td className={`text-right tabular-nums ${r.retests >= 2 ? "text-warning" : ""}`}>{r.retests}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </PanelWrap>
+  );
 }
 
 /* ------------------------------ misc -------------------------------------- */

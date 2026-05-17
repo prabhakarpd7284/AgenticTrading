@@ -5,6 +5,7 @@ from apps.market_data.api.views import (
     LiquidityMapView,
     MarketPulseView,
     OKBacktestView,
+    ORBView,
     PyramidView,
     SectorRotationView,
     SetupPreviewView,
@@ -25,4 +26,5 @@ urlpatterns = [
     path("basket/",         BasketView.as_view(),         name="basket-status"),
     path("pyramid/",        PyramidView.as_view(),        name="pyramid"),
     path("liquidity/",      LiquidityMapView.as_view(),   name="liquidity-map"),
+    path("orb/",            ORBView.as_view(),            name="orb-tracker"),
 ]

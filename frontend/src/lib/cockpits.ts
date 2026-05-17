@@ -355,3 +355,82 @@ export async function setCapital(capital: number): Promise<SetCapitalResponse> {
   const { data } = await api.post<SetCapitalResponse>("/portfolios/capital/", { capital });
   return data;
 }
+
+// ---------------------------------------------------------------------------
+// Cycle-3 cockpits — structural stops, forced-flat, slippage-edge, ORB.
+// ---------------------------------------------------------------------------
+export interface StructuralStopRow {
+  position_id: number; symbol: string; side?: string; entry: number; qty: number;
+  swing_low: number; ten_wma: number; atr_trail: number;
+  recommended: string | null; recommended_value?: number;
+  r_distance: number; pct_loss: number; loss_at_stop_inr?: number;
+  note?: string;
+}
+export interface StructuralStops { count: number; rows: StructuralStopRow[]; as_of: string; note: string; }
+
+export interface ForcedFlatRow {
+  trade_id: number; symbol: string; side: string; qty: number;
+  entry: number; ltp: number; pnl: number;
+  est_slippage_bps: number; status: string;
+}
+export interface ForcedFlat {
+  now_ist: string; deadline: string; countdown_seconds: number;
+  active: boolean; count: number; total_pnl: number;
+  rows: ForcedFlatRow[]; note: string;
+}
+
+export interface SlippageEdgeRequest {
+  symbol: string; qty: number; setup_avg_r_inr: number;
+}
+export interface SlippageEdgeResponse {
+  symbol: string; qty: number;
+  bid: number; ask: number; mid: number;
+  half_spread_inr: number; impact_inr: number; brokerage_inr: number;
+  total_cost_inr: number; expected_edge_inr: number; net_edge_inr: number;
+  edge_to_cost_ratio: number;
+  verdict: "green" | "amber" | "red";
+  note?: string; error?: string;
+}
+
+export interface ORBRow {
+  symbol: string; or_high: number; or_low: number; or_width: number;
+  or_width_atr: number; atr14: number;
+  state: "pre_open" | "inside" | "breakout_up" | "breakout_down" | "failed_breakout";
+  breakout_time: string | null; retests: number;
+}
+export interface ORB { count: number; rows: ORBRow[]; note?: string; }
+
+export const useStructuralStops = () =>
+  useQuery({
+    queryKey: ["cockpits", "structural-stops"],
+    queryFn: () => api.get<StructuralStops>("/portfolios/structural-stops/").then((r) => r.data),
+    ...COMMON,
+  });
+
+export const useForcedFlat = () =>
+  useQuery({
+    queryKey: ["cockpits", "forced-flat"],
+    queryFn: () => api.get<ForcedFlat>("/portfolios/forced-flat/").then((r) => r.data),
+    refetchInterval: 30_000,    // countdown ticks
+    staleTime: 10_000,
+    refetchOnWindowFocus: false,
+  });
+
+export async function flattenAll() {
+  const { data } = await api.post<{ flattened: number; trades: { trade_id: number; symbol: string; ltp: number; pnl: number }[] }>(
+    "/portfolios/forced-flat/flatten/", {},
+  );
+  return data;
+}
+
+export async function checkSlippageEdge(payload: SlippageEdgeRequest): Promise<SlippageEdgeResponse> {
+  const { data } = await api.post<SlippageEdgeResponse>("/portfolios/slippage-edge/", payload);
+  return data;
+}
+
+export const useORB = () =>
+  useQuery({
+    queryKey: ["cockpits", "orb"],
+    queryFn: () => api.get<ORB>("/market-data/orb/").then((r) => r.data),
+    ...COMMON,
+  });
