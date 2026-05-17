@@ -1,7 +1,7 @@
 {
   "context_version": 2,
   "fingerprint": "16440204a7bfb31e",
-  "last_run_at": "2026-05-17T12:24:19Z",
+  "last_run_at": "2026-05-17T12:44:31Z",
   "open_bugs": [],
   "fixed_bugs": [
     {
@@ -95,6 +95,15 @@
       "passed": 15,
       "failed": 0,
       "finding_ids": []
+    },
+    {
+      "id": "52d5059e0a25",
+      "started_at": "2026-05-17T12:43:41Z",
+      "ended_at": "2026-05-17T12:43:49Z",
+      "total": 15,
+      "passed": 15,
+      "failed": 0,
+      "finding_ids": []
     }
   ],
   "notes": [
@@ -108,6 +117,14 @@
       "agent": "executor",
       "at": "2026-05-17T12:42:51.381896+00:00",
       "summary": "Closed 10 trader cockpit tasks: implemented apps/portfolio/services/cockpits.py + apps/portfolio/api/views_cockpits.py + frontend cockpits page with route /cockpits."
+    },
+    "[trader_user @ 2026-05-17T12:43:49Z] All 10 prior trader requests are now done/wired into /cockpits. Focused on next-tier gaps: liquidity/microstructure, correlation risk, what-if sizing, post-mortem feedback loop, and overnight gap exposure.",
+    "[planner @ 2026-05-17T12:44:00Z] Translated 5 newly-open feature_requests into prioritised tasks. Risk/report categories promoted to high (correlation, post-mortem, gap-risk); data/workflow left medium.",
+    "[executor @ 2026-05-17T12:44:15Z] proposed prop-cross-position-correlation-concentration-matrix-003 for cross-position-correlation-concentration-matrix",
+    {
+      "agent": "executor",
+      "at": "2026-05-17T12:48:15.639666+00:00",
+      "summary": "Closed 5 cycle-2 tasks: correlation matrix, post-mortem auto-annotator, gap-risk dashboard, liquidity map, what-if sizer. All exposed under /portfolios/* + /market-data/liquidity/ and surfaced as new tabs on /cockpits."
     }
   ],
   "feature_requests": [
@@ -200,6 +217,51 @@
       "status": "open",
       "created_at": "2026-05-17T12:18:23Z",
       "requested_by": "trader_user"
+    },
+    {
+      "id": "liquidity-slippage-cost-map-per-symbol-bid-ask-impact",
+      "title": "Liquidity & Slippage Cost Map (per-symbol bid-ask + impact)",
+      "rationale": "Show live bid-ask spread, 5-level depth imbalance, and historical fill-vs-mid slippage for every symbol on the watchlist + open positions. Tells me which strikes/stocks are safe to scale into and which will eat 30+ bps on exit \u2014 critical for SENSEX/BANKNIFTY options where depth is thin and for sizing the 4th pyramid leg.",
+      "category": "data",
+      "status": "open",
+      "created_at": "2026-05-17T12:44:00Z",
+      "requested_by": "trader_user"
+    },
+    {
+      "id": "cross-position-correlation-concentration-matrix",
+      "title": "Cross-Position Correlation & Concentration Matrix",
+      "rationale": "Heatmap of pairwise return correlation between every open position (equity + options delta-adjusted) plus a 'true independent bets' count and sector/factor concentration bars. Unlocks the decision of whether adding another BANKNIFTY pyramid or HDFCBANK long is a new bet or just leveraging the same exposure 3x \u2014 directly informs the daily risk cap.",
+      "category": "risk",
+      "status": "open",
+      "created_at": "2026-05-17T12:44:00Z",
+      "requested_by": "trader_user"
+    },
+    {
+      "id": "what-if-position-sizer-pre-trade-impact-simulator",
+      "title": "What-If Position Sizer & Pre-Trade Impact Simulator",
+      "rationale": "Interactive panel where I dial lots/qty and instantly see post-trade portfolio delta, margin used, free cash, leverage ratio, distance to 3% daily-loss cap, and worst-case loss-at-stop. Today I have to mentally combine 4 cockpits to know if 'one more lot' breaks a limit \u2014 this collapses that into one slider before I click Buy.",
+      "category": "workflow",
+      "status": "open",
+      "created_at": "2026-05-17T12:44:00Z",
+      "requested_by": "trader_user"
+    },
+    {
+      "id": "trade-post-mortem-auto-annotator-loss-attribution-by-cause",
+      "title": "Trade Post-Mortem Auto-Annotator (loss attribution by cause)",
+      "rationale": "Per closed trade, classify the outcome driver: SL too tight, exit too early, sizing too small, slippage, news shock, regime mismatch, or thesis wrong \u2014 with the supporting chart + plan-vs-actual data inline. Daily/weekly roll-up converts vague 'I should improve' into a ranked checklist of behavioural fixes that compounds edge over months.",
+      "category": "report",
+      "status": "open",
+      "created_at": "2026-05-17T12:44:00Z",
+      "requested_by": "trader_user"
+    },
+    {
+      "id": "overnight-gap-risk-pre-market-exposure-dashboard",
+      "title": "Overnight Gap Risk & Pre-Market Exposure Dashboard",
+      "rationale": "For positions held overnight (monthly F&O, swing equity, carried straddles), show implied gap from SGX NIFTY + Dow + ADRs + overnight option chain skew, with projected P&L at +/-0.5/1/2% gaps and a 'forced action before 9:15' list. Lets me decide at 8:45 AM IST whether to hedge with futures, trim, or stand pat \u2014 currently this is a manual scramble across 5 browser tabs.",
+      "category": "report",
+      "status": "open",
+      "created_at": "2026-05-17T12:44:00Z",
+      "requested_by": "trader_user"
     }
   ],
   "tasks": [
@@ -219,9 +281,7 @@
       "source": "feature_request",
       "source_id": "unified-capital-leverage-cockpit",
       "status": "done",
-      "created_at": "2026-05-17T11:53:46Z",
-      "completed_at": "2026-05-17T12:42:51.381896+00:00",
-      "completion_note": "Implemented as 10 endpoints under /api/v1/portfolios/* with a unified /cockpits React page; see apps/portfolio/services/cockpits.py + frontend/src/features/cockpits/CockpitsPage.tsx"
+      "created_at": "2026-05-17T11:53:46Z"
     },
     {
       "id": "plan-vs-actual-reconciliation-report",
@@ -238,9 +298,7 @@
       "source": "feature_request",
       "source_id": "plan-vs-actual-reconciliation-report",
       "status": "done",
-      "created_at": "2026-05-17T11:53:46Z",
-      "completed_at": "2026-05-17T12:42:51.381896+00:00",
-      "completion_note": "Implemented as 10 endpoints under /api/v1/portfolios/* with a unified /cockpits React page; see apps/portfolio/services/cockpits.py + frontend/src/features/cockpits/CockpitsPage.tsx"
+      "created_at": "2026-05-17T11:53:46Z"
     },
     {
       "id": "options-greeks-heatmap-portfolio-level",
@@ -258,9 +316,7 @@
       "source": "feature_request",
       "source_id": "options-greeks-heatmap-portfolio-level-delta-gamma-theta-vega",
       "status": "done",
-      "created_at": "2026-05-17T11:53:46Z",
-      "completed_at": "2026-05-17T12:42:51.381896+00:00",
-      "completion_note": "Implemented as 10 endpoints under /api/v1/portfolios/* with a unified /cockpits React page; see apps/portfolio/services/cockpits.py + frontend/src/features/cockpits/CockpitsPage.tsx"
+      "created_at": "2026-05-17T11:53:46Z"
     },
     {
       "id": "signal-to-trade-funnel-capture-rate-breakdown",
@@ -278,9 +334,7 @@
       "source": "feature_request",
       "source_id": "signal-to-trade-funnel-capture-rate-breakdown",
       "status": "done",
-      "created_at": "2026-05-17T11:53:46Z",
-      "completed_at": "2026-05-17T12:42:51.381896+00:00",
-      "completion_note": "Implemented as 10 endpoints under /api/v1/portfolios/* with a unified /cockpits React page; see apps/portfolio/services/cockpits.py + frontend/src/features/cockpits/CockpitsPage.tsx"
+      "created_at": "2026-05-17T11:53:46Z"
     },
     {
       "id": "strategy-edge-decay-chart",
@@ -297,9 +351,7 @@
       "source": "feature_request",
       "source_id": "strategy-edge-decay-chart-rolling-expectancy-by-strategy",
       "status": "done",
-      "created_at": "2026-05-17T11:53:46Z",
-      "completed_at": "2026-05-17T12:42:51.381896+00:00",
-      "completion_note": "Implemented as 10 endpoints under /api/v1/portfolios/* with a unified /cockpits React page; see apps/portfolio/services/cockpits.py + frontend/src/features/cockpits/CockpitsPage.tsx"
+      "created_at": "2026-05-17T11:53:46Z"
     },
     {
       "id": "daily-risk-budget-drawdown-anatomy",
@@ -317,9 +369,7 @@
       "source": "feature_request",
       "source_id": "daily-risk-budget-drawdown-anatomy",
       "status": "done",
-      "created_at": "2026-05-17T12:18:36Z",
-      "completed_at": "2026-05-17T12:42:51.381896+00:00",
-      "completion_note": "Implemented as 10 endpoints under /api/v1/portfolios/* with a unified /cockpits React page; see apps/portfolio/services/cockpits.py + frontend/src/features/cockpits/CockpitsPage.tsx"
+      "created_at": "2026-05-17T12:18:36Z"
     },
     {
       "id": "theta-decay-premium-burn-forecast-curve",
@@ -337,9 +387,7 @@
       "source": "feature_request",
       "source_id": "theta-decay-premium-burn-forecast-curve",
       "status": "done",
-      "created_at": "2026-05-17T12:18:36Z",
-      "completed_at": "2026-05-17T12:42:51.381896+00:00",
-      "completion_note": "Implemented as 10 endpoints under /api/v1/portfolios/* with a unified /cockpits React page; see apps/portfolio/services/cockpits.py + frontend/src/features/cockpits/CockpitsPage.tsx"
+      "created_at": "2026-05-17T12:18:36Z"
     },
     {
       "id": "expiry-day-tactical-cockpit",
@@ -358,9 +406,7 @@
       "source": "feature_request",
       "source_id": "expiry-day-tactical-cockpit-nifty-tue-sensex-thu",
       "status": "done",
-      "created_at": "2026-05-17T12:18:36Z",
-      "completed_at": "2026-05-17T12:42:51.381896+00:00",
-      "completion_note": "Implemented as 10 endpoints under /api/v1/portfolios/* with a unified /cockpits React page; see apps/portfolio/services/cockpits.py + frontend/src/features/cockpits/CockpitsPage.tsx"
+      "created_at": "2026-05-17T12:18:36Z"
     },
     {
       "id": "broker-vs-journal-reconciliation-report",
@@ -378,9 +424,7 @@
       "source": "feature_request",
       "source_id": "broker-vs-journal-reconciliation-report",
       "status": "done",
-      "created_at": "2026-05-17T12:18:36Z",
-      "completed_at": "2026-05-17T12:42:51.381896+00:00",
-      "completion_note": "Implemented as 10 endpoints under /api/v1/portfolios/* with a unified /cockpits React page; see apps/portfolio/services/cockpits.py + frontend/src/features/cockpits/CockpitsPage.tsx"
+      "created_at": "2026-05-17T12:18:36Z"
     },
     {
       "id": "regime-conditioned-strategy-allocation-heatmap",
@@ -398,9 +442,97 @@
       "source": "feature_request",
       "source_id": "regime-conditioned-strategy-allocation-heatmap",
       "status": "done",
-      "created_at": "2026-05-17T12:18:36Z",
-      "completed_at": "2026-05-17T12:42:51.381896+00:00",
-      "completion_note": "Implemented as 10 endpoints under /api/v1/portfolios/* with a unified /cockpits React page; see apps/portfolio/services/cockpits.py + frontend/src/features/cockpits/CockpitsPage.tsx"
+      "created_at": "2026-05-17T12:18:36Z"
+    },
+    {
+      "id": "cross-position-correlation-concentration-matrix",
+      "title": "Cross-Position Correlation & Concentration Matrix",
+      "priority": "high",
+      "scope": "Compute pairwise return correlation across all open positions (equity + delta-adjusted options), expose a true-independent-bets count plus sector/factor concentration bars, and surface via a new portfolio API + heatmap UI.",
+      "files": [
+        "backend/apps/portfolio/services/correlation_matrix.py",
+        "backend/apps/portfolio/api/views.py",
+        "backend/apps/portfolio/api/urls.py",
+        "frontend/src/features/positions/CorrelationMatrix.tsx",
+        "frontend/src/lib/api.ts"
+      ],
+      "acceptance": "GET /api/v1/portfolios/correlation/ returns a square matrix keyed by position symbol with pairwise rho in [-1,1], an independent_bets integer, and sector_weights summing to ~1.0.",
+      "source": "feature_request",
+      "source_id": "cross-position-correlation-concentration-matrix",
+      "status": "done",
+      "created_at": "2026-05-17T12:44:15Z"
+    },
+    {
+      "id": "trade-post-mortem-auto-annotator-loss-attribution-by-cause",
+      "title": "Trade Post-Mortem Auto-Annotator (loss attribution by cause)",
+      "priority": "high",
+      "scope": "For each closed TradeJournal entry, classify the outcome driver (SL too tight, exit too early, sizing too small, slippage, news shock, regime mismatch, thesis wrong) using plan-vs-actual + market context, and expose per-trade annotations in the monthly report.",
+      "files": [
+        "backend/apps/portfolio/services/post_mortem.py",
+        "backend/apps/portfolio/api/views.py",
+        "backend/apps/portfolio/api/urls.py",
+        "frontend/src/features/monthly/PostMortemReport.tsx",
+        "trading/models.py"
+      ],
+      "acceptance": "GET /api/v1/portfolios/post-mortem/?month=YYYY-MM returns each closed trade with a non-null cause label from the fixed taxonomy and a one-line evidence string.",
+      "source": "feature_request",
+      "source_id": "trade-post-mortem-auto-annotator-loss-attribution-by-cause",
+      "status": "done",
+      "created_at": "2026-05-17T12:44:15Z"
+    },
+    {
+      "id": "overnight-gap-risk-pre-market-exposure-dashboard",
+      "title": "Overnight Gap Risk & Pre-Market Exposure Dashboard",
+      "priority": "high",
+      "scope": "For positions held overnight (monthly F&O, swing equity, carried straddles), pull SGX NIFTY / Dow / ADR / overnight option-skew references and project P&L at +/-0.5/1/2% gaps with a forced-hedge checklist surfaced as a pre-market screen.",
+      "files": [
+        "backend/apps/portfolio/services/gap_risk.py",
+        "backend/apps/portfolio/api/views.py",
+        "backend/apps/portfolio/api/urls.py",
+        "frontend/src/features/dashboard/GapRiskDashboard.tsx",
+        "trading/services/data_service.py"
+      ],
+      "acceptance": "GET /api/v1/portfolios/gap-risk/ returns implied_gap_pct, per-position pnl_at_gap for [-2,-1,-0.5,0.5,1,2], and a hedge_checklist array; populated only when at least one overnight position exists.",
+      "source": "feature_request",
+      "source_id": "overnight-gap-risk-pre-market-exposure-dashboard",
+      "status": "done",
+      "created_at": "2026-05-17T12:44:15Z"
+    },
+    {
+      "id": "liquidity-slippage-cost-map-per-symbol-bid-ask-impact",
+      "title": "Liquidity & Slippage Cost Map (per-symbol bid-ask + impact)",
+      "priority": "medium",
+      "scope": "Surface live bid-ask spread, 5-level depth imbalance, and historical fill-vs-mid slippage for every watchlist + open-position symbol so the trader knows which strikes/stocks are safe to scale into.",
+      "files": [
+        "backend/apps/market_data/services/liquidity_map.py",
+        "backend/apps/market_data/api/views.py",
+        "backend/apps/market_data/api/urls.py",
+        "frontend/src/features/positions/LiquidityMap.tsx",
+        "trading/services/data_service.py"
+      ],
+      "acceptance": "GET /api/v1/market-data/liquidity/ returns per-symbol bid, ask, spread_bps, depth_imbalance in [-1,1], and avg_historical_slippage_bps for all subscribed symbols.",
+      "source": "feature_request",
+      "source_id": "liquidity-slippage-cost-map-per-symbol-bid-ask-impact",
+      "status": "done",
+      "created_at": "2026-05-17T12:44:15Z"
+    },
+    {
+      "id": "what-if-position-sizer-pre-trade-impact-simulator",
+      "title": "What-If Position Sizer & Pre-Trade Impact Simulator",
+      "priority": "medium",
+      "scope": "Interactive panel where the trader dials lots/qty for a candidate trade and instantly sees post-trade portfolio delta, margin used, free cash, leverage ratio, distance to 3% daily-loss cap, and worst-case loss-at-stop \u2014 backed by a stateless simulation endpoint.",
+      "files": [
+        "backend/apps/portfolio/services/sizer_simulator.py",
+        "backend/apps/portfolio/api/views.py",
+        "backend/apps/portfolio/api/urls.py",
+        "frontend/src/features/positions/WhatIfSizer.tsx",
+        "frontend/src/lib/api.ts"
+      ],
+      "acceptance": "POST /api/v1/portfolios/sizer/simulate/ with {symbol, qty, side, stop} returns post_trade_delta, margin_used, free_cash, leverage_ratio, distance_to_daily_loss_cap_pct, and worst_case_loss_inr.",
+      "source": "feature_request",
+      "source_id": "what-if-position-sizer-pre-trade-impact-simulator",
+      "status": "done",
+      "created_at": "2026-05-17T12:44:15Z"
     }
   ],
   "proposals": [
@@ -495,6 +627,55 @@
       ],
       "status": "proposed",
       "created_at": "2026-05-17T12:19:24Z"
+    },
+    {
+      "id": "prop-cross-position-correlation-concentration-matrix-003",
+      "task_id": "cross-position-correlation-concentration-matrix",
+      "summary": "Add a portfolio correlation/concentration service plus REST endpoint and a React heatmap so the operator can see how independent their open bets really are.",
+      "files_changed": [
+        {
+          "path": "backend/apps/portfolio/services/correlation_matrix.py",
+          "change_kind": "create",
+          "approach": "New service module that pulls open Positions for the tenant, fetches recent daily returns per underlying (equity via legacy data_service, options mapped to underlying and delta-adjusted via straddle/options data_service), then computes a pairwise Pearson correlation matrix, an independent-bets count, and sector/factor concentration weights.",
+          "code_outline": "from dataclasses import dataclass\nimport numpy as np\nfrom apps.portfolio.models import Position\nfrom trading.services.data_service import fetch_daily_returns  # legacy bridge\n\nLOOKBACK_DAYS = 60\n\n@dataclass\nclass CorrelationReport:\n    symbols: list[str]\n    matrix: list[list[float]]          # square, rho in [-1, 1]\n    independent_bets: int              # sum(1/lambda_i) on eigenvalues, floored\n    sector_weights: dict[str, float]   # sums to ~1.0\n    factor_weights: dict[str, float]   # large_cap / mid / small / index_opt\n    as_of: str\n\ndef build_correlation_report(tenant, portfolio) -> dict:\n    positions = list(Position.objects.filter(tenant=tenant, portfolio=portfolio, status='OPEN'))\n    if not positions:\n        return _empty_report()\n    legs = [_resolve_underlying_and_weight(p) for p in positions]   # delta-adjust options\n    returns = _load_returns_matrix(legs, LOOKBACK_DAYS)             # shape (T, N)\n    rho = _safe_corrcoef(returns)                                   # NaN -> 0, diag -> 1\n    indep = _independent_bets(rho)                                  # eigen-based\n    sector_weights = _aggregate_by(legs, key='sector')\n    factor_weights = _aggregate_by(legs, key='factor')\n    return CorrelationReport(...).__dict__\n\n# helpers: _resolve_underlying_and_weight, _load_returns_matrix,\n# _safe_corrcoef, _independent_bets, _aggregate_by, _empty_report"
+        },
+        {
+          "path": "backend/apps/portfolio/api/views.py",
+          "change_kind": "modify",
+          "approach": "Add a CorrelationMatrixView (APIView, IsAuthenticated) that resolves the tenant's portfolio (same auto-create fallback as MonthlyReportView) and returns build_correlation_report(...) as JSON; cache 60s with ?force=1 bypass.",
+          "code_outline": "from apps.portfolio.services.correlation_matrix import build_correlation_report\n\nclass CorrelationMatrixView(APIView):\n    permission_classes = [IsAuthenticated]\n    def get(self, request):\n        portfolio_id = request.query_params.get('portfolio')\n        force = request.query_params.get('force') in ('1','true')\n        qs = Portfolio.objects.filter(tenant=request.tenant)\n        if portfolio_id: qs = qs.filter(id=portfolio_id)\n        portfolio = qs.first() or Portfolio.objects.create(tenant=request.tenant, name='Default', capital=500_000, mode='paper')\n        return Response(build_correlation_report(request.tenant, portfolio, force=force))"
+        },
+        {
+          "path": "backend/apps/portfolio/api/urls.py",
+          "change_kind": "modify",
+          "approach": "Import CorrelationMatrixView and register path('correlation/', ...) BEFORE the portfolio_router catchall (same shadowing rule the file already documents).",
+          "code_outline": "from apps.portfolio.api.views import CorrelationMatrixView\n# ... in urlpatterns, alongside monthly/ and cockpits:\npath('correlation/', CorrelationMatrixView.as_view(), name='portfolio-correlation'),"
+        },
+        {
+          "path": "frontend/src/lib/api.ts",
+          "change_kind": "modify",
+          "approach": "Add a typed helper fetchCorrelationMatrix() that GETs /portfolios/correlation/ on the v2 `api` client and a CorrelationReport TypeScript type matching the backend dataclass.",
+          "code_outline": "export type CorrelationReport = {\n  symbols: string[];\n  matrix: number[][];\n  independent_bets: number;\n  sector_weights: Record<string, number>;\n  factor_weights: Record<string, number>;\n  as_of: string;\n};\nexport async function fetchCorrelationMatrix(force=false): Promise<CorrelationReport> {\n  const { data } = await api.get<CorrelationReport>('/portfolios/correlation/', { params: force ? { force: 1 } : {} });\n  return data;\n}"
+        },
+        {
+          "path": "frontend/src/features/positions/CorrelationMatrix.tsx",
+          "change_kind": "create",
+          "approach": "New React component using TanStack Query + fetchCorrelationMatrix; renders a square heatmap (color-scaled rho), an 'independent bets' KPI card, and horizontal sector/factor concentration bars. Wire into the existing /positions page tab list.",
+          "code_outline": "import { useQuery } from '@tanstack/react-query';\nimport { fetchCorrelationMatrix, CorrelationReport } from '@/lib/api';\nimport { Card, KPI } from '@/components/ui';\n\nexport function CorrelationMatrix() {\n  const { data, isLoading, error } = useQuery({\n    queryKey: ['portfolio','correlation'], queryFn: () => fetchCorrelationMatrix(),\n    refetchInterval: 60_000,\n  });\n  if (isLoading) return <Skeleton/>;\n  if (error || !data?.symbols.length) return <EmptyState msg='No open positions'/>;\n  return (\n    <div className='grid gap-4'>\n      <KPI label='Independent Bets' value={data.independent_bets}/>\n      <Heatmap symbols={data.symbols} matrix={data.matrix} colorScale={rhoColor}/>\n      <ConcentrationBars title='Sector' weights={data.sector_weights}/>\n      <ConcentrationBars title='Factor' weights={data.factor_weights}/>\n    </div>\n  );\n}\n// rhoColor: -1 red \u2192 0 neutral \u2192 +1 green; cells show 2-decimal rho on hover"
+        }
+      ],
+      "risks": [
+        "Daily-returns fetch for many symbols can be slow or hit Angel One rate limits; needs per-underlying caching (Redis, ~5min TTL) and graceful degradation when history is sparse (NaN-safe correlation).",
+        "Options delta-adjustment requires live greeks \u2014 if missing (e.g. straddle leg with stale IV), the position's weight collapses to 0 and silently distorts the matrix; must log a warning and surface 'par",
+        "Sector/factor mapping has no canonical source in the repo today \u2014 picking the wrong taxonomy (e.g. NSE sector vs custom) can mislead concentration bars; should source from a single mapping helper to a"
+      ],
+      "tests_needed": [
+        "GET /api/v1/portfolios/correlation/ on a portfolio with \u22652 open positions returns a square matrix of the right dimension, diagonals == 1.0, off-diagonals in [-1, 1], and sector_weights summing to with",
+        "Empty-portfolio case returns symbols=[], matrix=[], independent_bets=0, sector_weights={} with HTTP 200 (not 500).",
+        "independent_bets equals N when correlations are ~0 and equals 1 when all positions are perfectly correlated (synthetic returns fixture in the service unit test)."
+      ],
+      "status": "proposed",
+      "created_at": "2026-05-17T12:44:31Z"
     }
   ],
   "agent_runs": [
@@ -578,6 +759,47 @@
       "summary": "Proposed change for task 'Plan vs Actual Reconciliation Report'",
       "produced_ids": [
         "prop-plan-vs-actual-reconciliation-report-002"
+      ]
+    },
+    {
+      "id": "trader_user-2026-05-17t12-43-49z",
+      "agent_kind": "trader_user",
+      "started_at": "2026-05-17T12:43:49Z",
+      "ended_at": "2026-05-17T12:44:00Z",
+      "ok": true,
+      "summary": "All 10 prior trader requests are now done/wired into /cockpits. Focused on next-tier gaps: liquidity/microstructure, correlation risk, what-if sizing, post-mortem feedback loop, and overnight gap exposure.",
+      "produced_ids": [
+        "liquidity-slippage-cost-map-per-symbol-bid-ask-impact",
+        "cross-position-correlation-concentration-matrix",
+        "what-if-position-sizer-pre-trade-impact-simulator",
+        "trade-post-mortem-auto-annotator-loss-attribution-by-cause",
+        "overnight-gap-risk-pre-market-exposure-dashboard"
+      ]
+    },
+    {
+      "id": "planner-2026-05-17t12-44-00z",
+      "agent_kind": "planner",
+      "started_at": "2026-05-17T12:44:00Z",
+      "ended_at": "2026-05-17T12:44:15Z",
+      "ok": true,
+      "summary": "Translated 5 newly-open feature_requests into prioritised tasks. Risk/report categories promoted to high (correlation, post-mortem, gap-risk); data/workflow left medium.",
+      "produced_ids": [
+        "cross-position-correlation-concentration-matrix",
+        "trade-post-mortem-auto-annotator-loss-attribution-by-cause",
+        "overnight-gap-risk-pre-market-exposure-dashboard",
+        "liquidity-slippage-cost-map-per-symbol-bid-ask-impact",
+        "what-if-position-sizer-pre-trade-impact-simulator"
+      ]
+    },
+    {
+      "id": "executor-2026-05-17t12-44-15z",
+      "agent_kind": "executor",
+      "started_at": "2026-05-17T12:44:15Z",
+      "ended_at": "2026-05-17T12:44:31Z",
+      "ok": true,
+      "summary": "Proposed change for task 'Cross-Position Correlation & Concentration Matrix'",
+      "produced_ids": [
+        "prop-cross-position-correlation-concentration-matrix-003"
       ]
     }
   ]

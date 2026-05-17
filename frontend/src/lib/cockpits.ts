@@ -213,3 +213,122 @@ export const useRegimeHeatmap = () =>
     queryFn: () => api.get<RegimeHeatmap>("/portfolios/regime-heatmap/").then((r) => r.data),
     ...COMMON,
   });
+
+// ---------------------------------------------------------------------------
+// Cycle-2 cockpits — added after the second AI team planning cycle.
+// ---------------------------------------------------------------------------
+export interface CorrelationReport {
+  symbols: string[];
+  matrix: number[][];
+  independent_bets: number;
+  sector_weights: Record<string, number>;
+  factor_weights: Record<string, number>;
+  as_of: string;
+}
+
+export interface PostMortemRow {
+  trade_id: number;
+  symbol: string;
+  side: string;
+  entry: number;
+  exit: number;
+  pnl: number;
+  cause: string;
+  evidence: string;
+  timestamp: string | null;
+}
+
+export interface PostMortemReport {
+  month: string | null;
+  count: number;
+  by_cause: Record<string, number>;
+  rows: PostMortemRow[];
+  taxonomy: string[];
+}
+
+export interface GapRiskPosition {
+  symbol: string;
+  side: string;
+  qty: number;
+  entry: number;
+  kind: string;
+  pnl_at_gap: Record<string, number>;
+}
+
+export interface GapRiskReport {
+  implied_gap_pct: number;
+  implied_gap_source: string;
+  positions: GapRiskPosition[];
+  hedge_checklist: string[];
+  as_of: string;
+}
+
+export interface LiquidityRow {
+  symbol: string;
+  bid: number;
+  ask: number;
+  mid: number;
+  spread_bps: number;
+  depth_imbalance: number;
+  avg_historical_slippage_bps: number;
+}
+
+export interface LiquidityMap {
+  count: number;
+  rows: LiquidityRow[];
+  note?: string;
+}
+
+export interface SizerRequest {
+  symbol: string; qty: number; side: "BUY" | "SELL";
+  stop?: number; entry?: number; product?: string;
+}
+
+export interface SizerResponse {
+  symbol: string; qty: number; side: string; entry: number; stop: number;
+  post_trade_delta: { margin_added: number; notional_added: number };
+  capital: number;
+  margin_used_before: number; margin_used: number;
+  free_cash: number; leverage_ratio: number;
+  worst_case_loss_inr: number;
+  distance_to_daily_loss_cap_pct: number;
+  daily_loss_cap_inr: number;
+  realised_pnl_today: number;
+  error?: string;
+}
+
+export const useCorrelationMatrix = () =>
+  useQuery({
+    queryKey: ["cockpits", "correlation"],
+    queryFn: () => api.get<CorrelationReport>("/portfolios/correlation/").then((r) => r.data),
+    ...COMMON,
+  });
+
+export const usePostMortem = (month?: string) =>
+  useQuery({
+    queryKey: ["cockpits", "post-mortem", month],
+    queryFn: () =>
+      api
+        .get<PostMortemReport>(`/portfolios/post-mortem/${month ? `?month=${encodeURIComponent(month)}` : ""}`)
+        .then((r) => r.data),
+    ...COMMON,
+  });
+
+export const useGapRisk = () =>
+  useQuery({
+    queryKey: ["cockpits", "gap-risk"],
+    queryFn: () => api.get<GapRiskReport>("/portfolios/gap-risk/").then((r) => r.data),
+    ...COMMON,
+  });
+
+export const useLiquidityMap = () =>
+  useQuery({
+    queryKey: ["cockpits", "liquidity"],
+    queryFn: () => api.get<LiquidityMap>("/market-data/liquidity/").then((r) => r.data),
+    ...COMMON,
+  });
+
+export async function simulateSizer(payload: SizerRequest): Promise<SizerResponse> {
+  const { data } = await api.post<SizerResponse>("/portfolios/sizer/simulate/", payload);
+  return data;
+}

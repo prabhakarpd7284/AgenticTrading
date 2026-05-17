@@ -2,6 +2,7 @@ from django.urls import path
 from apps.market_data.api.views import (
     BasketView,
     CandleView,
+    LiquidityMapView,
     MarketPulseView,
     OKBacktestView,
     PyramidView,
@@ -23,4 +24,5 @@ urlpatterns = [
     path("ok-backtest/",    OKBacktestView.as_view(),     name="ok-backtest"),
     path("basket/",         BasketView.as_view(),         name="basket-status"),
     path("pyramid/",        PyramidView.as_view(),        name="pyramid"),
+    path("liquidity/",      LiquidityMapView.as_view(),   name="liquidity-map"),
 ]

@@ -6,8 +6,9 @@
  */
 import * as React from "react";
 import {
-  Activity, AlertTriangle, BarChart3, Briefcase, Clock, Gauge, GitCompareArrows,
-  LineChart, Sigma, Target, TrendingDown,
+  Activity, AlertTriangle, BarChart3, Briefcase, Calculator, Clock, Droplets,
+  Gauge, GitCompareArrows, Grid3X3, LineChart, Microscope, Sigma, Sunrise,
+  Target, TrendingDown,
 } from "lucide-react";
 import {
   Bar, BarChart, CartesianGrid, Line, LineChart as RLineChart,
@@ -40,9 +41,10 @@ function KPI({ label, value, hint, tone = "neutral" }: {
   );
 }
 import {
-  useBrokerRecon, useCapitalCockpit, useEdgeDecay, useExpiryCockpit,
-  useGreeksHeatmap, usePlanVsActual, useRegimeHeatmap, useRiskBudget,
-  useSignalFunnel, useThetaForecast,
+  simulateSizer, useBrokerRecon, useCapitalCockpit, useCorrelationMatrix,
+  useEdgeDecay, useExpiryCockpit, useGapRisk, useGreeksHeatmap, useLiquidityMap,
+  usePlanVsActual, usePostMortem, useRegimeHeatmap, useRiskBudget,
+  useSignalFunnel, useThetaForecast, type SizerResponse,
 } from "@/lib/cockpits";
 
 const TABS = [
@@ -56,6 +58,11 @@ const TABS = [
   { id: "edge-decay",    label: "Edge Decay",   icon: TrendingDown },
   { id: "theta",         label: "Theta",        icon: LineChart },
   { id: "regime",        label: "Regime",       icon: Activity },
+  { id: "correlation",   label: "Correlation",  icon: Grid3X3 },
+  { id: "post-mortem",   label: "Post-Mortem",  icon: Microscope },
+  { id: "gap-risk",      label: "Gap Risk",     icon: Sunrise },
+  { id: "liquidity",     label: "Liquidity",    icon: Droplets },
+  { id: "sizer",         label: "What-If Sizer", icon: Calculator },
 ] as const;
 
 export function CockpitsPage() {
@@ -92,6 +99,11 @@ export function CockpitsPage() {
         <TabsContent value="edge-decay"><EdgeDecayPanel /></TabsContent>
         <TabsContent value="theta"><ThetaPanel /></TabsContent>
         <TabsContent value="regime"><RegimePanel /></TabsContent>
+        <TabsContent value="correlation"><CorrelationPanel /></TabsContent>
+        <TabsContent value="post-mortem"><PostMortemPanel /></TabsContent>
+        <TabsContent value="gap-risk"><GapRiskPanel /></TabsContent>
+        <TabsContent value="liquidity"><LiquidityPanel /></TabsContent>
+        <TabsContent value="sizer"><SizerPanel /></TabsContent>
       </Tabs>
     </div>
   );
@@ -581,6 +593,417 @@ function RegimePanel() {
       </Card>
     </PanelWrap>
   );
+}
+
+/* ------------------------------ 11. Correlation --------------------------- */
+function CorrelationPanel() {
+  const { data, isLoading } = useCorrelationMatrix();
+  if (isLoading || !data) return <LoadingPanel />;
+  if (data.symbols.length === 0)
+    return <EmptyState title="No open positions to correlate" />;
+
+  const cell = (rho: number) => {
+    const a = Math.min(1, Math.abs(rho));
+    const bg = rho >= 0
+      ? `rgba(34,197,94,${(a * 0.6).toFixed(2)})`
+      : `rgba(239,68,68,${(a * 0.6).toFixed(2)})`;
+    return bg;
+  };
+  return (
+    <PanelWrap>
+      <section className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+        <KPI label="Open underlyings" value={String(data.symbols.length)} />
+        <KPI label="Independent bets" value={String(data.independent_bets)}
+             tone={data.independent_bets < 2 ? "warning" : "neutral"} />
+        <KPI label="Top sector" value={topKey(data.sector_weights) ?? "—"}
+             hint={topKey(data.sector_weights)
+                ? fmtPct(data.sector_weights[topKey(data.sector_weights)!], 0)
+                : undefined} />
+      </section>
+      <Card>
+        <CardHeader>
+          <CardTitle>Pairwise correlation</CardTitle>
+          <CardDescription>60-day daily-return Pearson. Green = positive co-movement.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="overflow-auto">
+            <table className="text-body-sm border-collapse">
+              <thead>
+                <tr>
+                  <th></th>
+                  {data.symbols.map((s) => (
+                    <th key={s} className="px-2 py-1 text-fg-subtle font-normal">{s}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {data.symbols.map((row, i) => (
+                  <tr key={row}>
+                    <th className="px-2 py-1 text-right text-fg-subtle font-normal">{row}</th>
+                    {data.symbols.map((col, j) => (
+                      <td key={col} className="px-2 py-1 text-center tabular-nums"
+                          style={{ background: cell(data.matrix[i][j]) }}>
+                        {fmtNum(data.matrix[i][j], 2)}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </CardContent>
+      </Card>
+      <div className="grid md:grid-cols-2 gap-4">
+        <ConcentrationCard title="Sector" weights={data.sector_weights} />
+        <ConcentrationCard title="Factor" weights={data.factor_weights} />
+      </div>
+    </PanelWrap>
+  );
+}
+
+function ConcentrationCard({ title, weights }: { title: string; weights: Record<string, number> }) {
+  const rows = Object.entries(weights).sort((a, b) => b[1] - a[1]);
+  return (
+    <Card>
+      <CardHeader><CardTitle>{title} weights</CardTitle></CardHeader>
+      <CardContent>
+        {rows.length === 0 ? <EmptyState title="No data" /> : (
+          <ul className="space-y-2 text-body-sm">
+            {rows.map(([k, v]) => (
+              <li key={k}>
+                <div className="flex items-center justify-between mb-0.5">
+                  <span className="text-fg-muted">{k}</span>
+                  <span className="tabular-nums">{fmtPct(v, 1)}</span>
+                </div>
+                <div className="h-1.5 bg-surface-2 rounded overflow-hidden">
+                  <div className="h-full bg-accent" style={{ width: `${Math.min(100, v * 100)}%` }} />
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+/* ------------------------------ 12. Post-Mortem --------------------------- */
+function PostMortemPanel() {
+  const [month, setMonth] = React.useState(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  });
+  const { data, isLoading } = usePostMortem(month);
+  return (
+    <PanelWrap>
+      <div className="flex items-center gap-2">
+        <label className="text-body-sm text-fg-muted">Month</label>
+        <input
+          type="month"
+          value={month}
+          onChange={(e) => setMonth(e.target.value)}
+          className="h-8 px-2 bg-surface border border-border rounded-sm text-body-sm"
+        />
+      </div>
+      {isLoading || !data ? <LoadingPanel /> : (
+        <>
+          <section className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <KPI label="Closed trades" value={String(data.count)} />
+            <KPI label="SL too tight" value={String(data.by_cause.sl_too_tight ?? 0)} tone="warning" />
+            <KPI label="Exit too early" value={String(data.by_cause.exit_too_early ?? 0)} tone="warning" />
+            <KPI label="Thesis wrong" value={String(data.by_cause.thesis_wrong ?? 0)} tone="danger" />
+          </section>
+          <Card>
+            <CardHeader>
+              <CardTitle>Per-trade attribution</CardTitle>
+              <CardDescription>Auto-classified by heuristics over plan-vs-actual fields.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {data.rows.length === 0 ? <EmptyState title="No closed trades in this month" /> : (
+                <div className="overflow-auto max-h-[480px]">
+                  <table className="w-full text-body-sm">
+                    <thead className="text-fg-subtle border-b border-border sticky top-0 bg-surface">
+                      <tr>
+                        <th className="text-left py-1.5">Symbol</th>
+                        <th className="text-left">Side</th>
+                        <th className="text-right">Entry</th>
+                        <th className="text-right">Exit</th>
+                        <th className="text-right">P&amp;L</th>
+                        <th className="text-left">Cause</th>
+                        <th className="text-left">Evidence</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {data.rows.map((r) => (
+                        <tr key={r.trade_id} className="border-b border-border/40">
+                          <td className="py-1.5">{r.symbol}</td>
+                          <td>{r.side}</td>
+                          <td className="text-right tabular-nums">{fmtNum(r.entry, 2)}</td>
+                          <td className="text-right tabular-nums">{fmtNum(r.exit, 2)}</td>
+                          <td className={`text-right tabular-nums ${r.pnl >= 0 ? "text-pnl-up" : "text-pnl-down"}`}>
+                            {fmtInr(r.pnl)}
+                          </td>
+                          <td><Badge tone={r.pnl < 0 ? "danger" : "neutral"}>{r.cause}</Badge></td>
+                          <td className="text-fg-muted">{r.evidence}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </>
+      )}
+    </PanelWrap>
+  );
+}
+
+/* ------------------------------ 13. Gap Risk ------------------------------ */
+function GapRiskPanel() {
+  const { data, isLoading } = useGapRisk();
+  if (isLoading || !data) return <LoadingPanel />;
+  if (data.positions.length === 0)
+    return <EmptyState title="No overnight positions" description="Gap risk dashboard activates when at least one position carries to next session." />;
+
+  const steps = ["-2", "-1", "-0.5", "0.5", "1", "2"];
+  return (
+    <PanelWrap>
+      <section className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+        <KPI label="Positions" value={String(data.positions.length)} />
+        <KPI label="Implied gap" value={`${fmtNum(data.implied_gap_pct, 2)}%`}
+             hint={`source: ${data.implied_gap_source}`} />
+        <KPI label="Worst at ±2%" value={fmtInr(Math.min(
+          ...data.positions.map((p) => Math.min(p.pnl_at_gap["-2"], p.pnl_at_gap["2"])),
+        ))} tone="warning" />
+      </section>
+      <Card>
+        <CardHeader>
+          <CardTitle>P&amp;L at gap (per position)</CardTitle>
+          <CardDescription>Projection at -2% / -1% / -0.5% / +0.5% / +1% / +2% gap.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="overflow-auto">
+            <table className="w-full text-body-sm">
+              <thead className="text-fg-subtle border-b border-border">
+                <tr>
+                  <th className="text-left py-1.5">Symbol</th>
+                  <th className="text-left">Kind</th>
+                  <th className="text-right">Qty</th>
+                  {steps.map((s) => <th key={s} className="text-right px-2">{s}%</th>)}
+                </tr>
+              </thead>
+              <tbody>
+                {data.positions.map((p) => (
+                  <tr key={p.symbol} className="border-b border-border/40">
+                    <td className="py-1.5">{p.symbol}</td>
+                    <td className="text-fg-muted">{p.kind}</td>
+                    <td className="text-right tabular-nums">{p.qty}</td>
+                    {steps.map((s) => {
+                      const v = p.pnl_at_gap[s];
+                      return (
+                        <td key={s} className={`text-right tabular-nums px-2 ${v < 0 ? "text-pnl-down" : "text-pnl-up"}`}>
+                          {fmtInr(v)}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader><CardTitle>Hedge checklist</CardTitle></CardHeader>
+        <CardContent>
+          <ul className="space-y-1.5 text-body-sm">
+            {data.hedge_checklist.map((item, i) => (
+              <li key={i} className="flex items-start gap-2">
+                <AlertTriangle className="h-3.5 w-3.5 text-warning mt-0.5 shrink-0" />
+                <span>{item}</span>
+              </li>
+            ))}
+          </ul>
+        </CardContent>
+      </Card>
+    </PanelWrap>
+  );
+}
+
+/* ------------------------------ 14. Liquidity ----------------------------- */
+function LiquidityPanel() {
+  const { data, isLoading } = useLiquidityMap();
+  if (isLoading || !data) return <LoadingPanel />;
+  return (
+    <PanelWrap>
+      {data.note ? (
+        <Card><CardContent className="py-3 text-body-sm text-fg-muted">{data.note}</CardContent></Card>
+      ) : null}
+      <Card>
+        <CardHeader>
+          <CardTitle>Liquidity & slippage ({data.count} symbols)</CardTitle>
+          <CardDescription>Live bid/ask spread + rolling historical fill slippage.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {data.rows.length === 0 ? <EmptyState title="No watchlist + open symbols" /> : (
+            <div className="overflow-auto max-h-[480px]">
+              <table className="w-full text-body-sm">
+                <thead className="text-fg-subtle border-b border-border sticky top-0 bg-surface">
+                  <tr>
+                    <th className="text-left py-1.5">Symbol</th>
+                    <th className="text-right">Bid</th>
+                    <th className="text-right">Ask</th>
+                    <th className="text-right">Spread (bps)</th>
+                    <th className="text-right">Avg slip (bps)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.rows.map((r) => (
+                    <tr key={r.symbol} className="border-b border-border/40">
+                      <td className="py-1.5">{r.symbol}</td>
+                      <td className="text-right tabular-nums">{fmtNum(r.bid, 2)}</td>
+                      <td className="text-right tabular-nums">{fmtNum(r.ask, 2)}</td>
+                      <td className={`text-right tabular-nums ${r.spread_bps > 20 ? "text-warning" : ""}`}>
+                        {fmtNum(r.spread_bps, 1)}
+                      </td>
+                      <td className="text-right tabular-nums">{fmtNum(r.avg_historical_slippage_bps, 1)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </PanelWrap>
+  );
+}
+
+/* ------------------------------ 15. What-If Sizer ------------------------- */
+function SizerPanel() {
+  const [form, setForm] = React.useState({
+    symbol: "NIFTY", qty: 65, side: "BUY" as "BUY" | "SELL",
+    entry: "", stop: "",
+  });
+  const [result, setResult] = React.useState<SizerResponse | null>(null);
+  const [error, setError] = React.useState<string | null>(null);
+  const [pending, setPending] = React.useState(false);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setPending(true);
+    try {
+      const payload = {
+        symbol: form.symbol.toUpperCase(),
+        qty: Number(form.qty),
+        side: form.side,
+        entry: form.entry ? Number(form.entry) : undefined,
+        stop: form.stop ? Number(form.stop) : undefined,
+      };
+      const r = await simulateSizer(payload);
+      if (r.error) setError(r.error);
+      setResult(r);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "request failed");
+    } finally {
+      setPending(false);
+    }
+  };
+
+  return (
+    <PanelWrap>
+      <Card>
+        <CardHeader>
+          <CardTitle>What-If Position Sizer</CardTitle>
+          <CardDescription>Project post-trade margin, leverage, and loss-at-stop before you click buy.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={submit} className="grid grid-cols-2 sm:grid-cols-5 gap-3 items-end">
+            <Field label="Symbol">
+              <input value={form.symbol} onChange={(e) => setForm({ ...form, symbol: e.target.value })}
+                     className="w-full h-9 px-2 bg-surface border border-border rounded-sm text-body-sm" />
+            </Field>
+            <Field label="Qty">
+              <input type="number" value={form.qty} onChange={(e) => setForm({ ...form, qty: Number(e.target.value) })}
+                     className="w-full h-9 px-2 bg-surface border border-border rounded-sm text-body-sm tabular-nums" />
+            </Field>
+            <Field label="Side">
+              <select value={form.side} onChange={(e) => setForm({ ...form, side: e.target.value as "BUY" | "SELL" })}
+                      className="w-full h-9 px-2 bg-surface border border-border rounded-sm text-body-sm">
+                <option value="BUY">BUY</option>
+                <option value="SELL">SELL</option>
+              </select>
+            </Field>
+            <Field label="Entry (optional)">
+              <input value={form.entry} onChange={(e) => setForm({ ...form, entry: e.target.value })}
+                     placeholder="auto" inputMode="decimal"
+                     className="w-full h-9 px-2 bg-surface border border-border rounded-sm text-body-sm tabular-nums" />
+            </Field>
+            <Field label="Stop">
+              <input value={form.stop} onChange={(e) => setForm({ ...form, stop: e.target.value })}
+                     inputMode="decimal"
+                     className="w-full h-9 px-2 bg-surface border border-border rounded-sm text-body-sm tabular-nums" />
+            </Field>
+            <button type="submit" disabled={pending}
+                    className="col-span-2 sm:col-span-5 h-9 px-4 bg-accent text-accent-fg rounded-sm text-body-sm font-medium disabled:opacity-50">
+              {pending ? "Simulating…" : "Simulate"}
+            </button>
+          </form>
+          {error ? (
+            <div className="mt-3 text-body-sm text-pnl-down flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4" /> {error}
+            </div>
+          ) : null}
+        </CardContent>
+      </Card>
+      {result && !result.error ? (
+        <>
+          <section className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <KPI label="Margin used" value={fmtInr(result.margin_used)}
+                 hint={`+ ${fmtInr(result.post_trade_delta.margin_added)} this leg`} />
+            <KPI label="Free cash" value={fmtInr(result.free_cash)}
+                 tone={result.free_cash < 0 ? "danger" : "success"} />
+            <KPI label="Leverage" value={`${fmtNum(result.leverage_ratio, 2)}×`}
+                 tone={result.leverage_ratio > 3 ? "warning" : "neutral"} />
+            <KPI label="Worst-case loss" value={fmtInr(result.worst_case_loss_inr)}
+                 tone={result.worst_case_loss_inr > result.daily_loss_cap_inr ? "danger" : "neutral"}
+                 hint={`cap ${fmtInr(result.daily_loss_cap_inr)} (3%)`} />
+          </section>
+          <Card>
+            <CardHeader><CardTitle>Daily-loss room</CardTitle></CardHeader>
+            <CardContent>
+              <p className="text-body-sm">
+                {`Distance to 3% daily-loss cap: `}
+                <span className="font-mono">{fmtNum(result.distance_to_daily_loss_cap_pct, 2)}%</span>
+                {`. Today's realised P&L: `}
+                <span className="font-mono">{fmtInr(result.realised_pnl_today)}</span>.
+              </p>
+            </CardContent>
+          </Card>
+        </>
+      ) : null}
+    </PanelWrap>
+  );
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <label className="block">
+      <span className="text-caption uppercase tracking-wider text-fg-subtle block mb-1">{label}</span>
+      {children}
+    </label>
+  );
+}
+
+function topKey(rec: Record<string, number>): string | null {
+  let best: string | null = null;
+  let bestV = -Infinity;
+  for (const [k, v] of Object.entries(rec)) {
+    if (v > bestV) { best = k; bestV = v; }
+  }
+  return best;
 }
 
 /* ------------------------------ misc -------------------------------------- */

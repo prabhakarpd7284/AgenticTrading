@@ -17,13 +17,17 @@ from apps.portfolio.api.views import (
 from apps.portfolio.api.views_cockpits import (
     BrokerReconView,
     CapitalCockpitView,
+    CorrelationMatrixView,
     EdgeDecayView,
     ExpiryCockpitView,
+    GapRiskView,
     GreeksHeatmapView,
     PlanVsActualView,
+    PostMortemView,
     RegimeHeatmapView,
     RiskBudgetView,
     SignalFunnelView,
+    SizerSimulatorView,
     ThetaForecastView,
 )
 
@@ -50,6 +54,10 @@ urlpatterns = [
     path("edge-decay/", EdgeDecayView.as_view(), name="edge-decay"),
     path("theta-forecast/", ThetaForecastView.as_view(), name="theta-forecast"),
     path("regime-heatmap/", RegimeHeatmapView.as_view(), name="regime-heatmap"),
+    path("correlation/", CorrelationMatrixView.as_view(), name="correlation-matrix"),
+    path("post-mortem/", PostMortemView.as_view(), name="post-mortem"),
+    path("gap-risk/", GapRiskView.as_view(), name="gap-risk"),
+    path("sizer/simulate/", SizerSimulatorView.as_view(), name="sizer-simulate"),
     path("positions/", include(position_router.urls)),
     path("snapshots/", include(snapshot_router.urls)),
     path("", include(portfolio_router.urls)),

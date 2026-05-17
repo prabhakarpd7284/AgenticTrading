@@ -15,6 +15,7 @@ from apps.market_data.services.shortlist_service import build_shortlist
 from apps.market_data.services.swing_scanner_service import build_swing_scanner
 from apps.market_data.services.ok_backtest_service import build_ok_backtest
 from apps.market_data.services.basket_service import build_basket_status
+from apps.market_data.services.liquidity_map import build_liquidity_map
 
 
 class SymbolSearchView(APIView):
@@ -429,3 +430,14 @@ def _maybe_float(raw, fallback):
 # Touch Decimal so the linter sees it intentional (used implicitly when
 # Portfolio fields are coerced to float above).
 _ = Decimal
+
+
+class LiquidityMapView(APIView):
+    """GET /api/v1/market-data/liquidity/
+
+    Live bid/ask/spread + historical slippage per held or watchlisted symbol.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        return Response(build_liquidity_map(getattr(request, "tenant", None)))

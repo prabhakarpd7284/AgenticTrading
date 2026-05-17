@@ -27,6 +27,10 @@ from apps.portfolio.services.cockpits import (
     build_signal_funnel,
     build_theta_forecast,
 )
+from apps.portfolio.services.correlation_matrix import build_correlation_report
+from apps.portfolio.services.gap_risk import build_gap_risk_report
+from apps.portfolio.services.post_mortem import build_post_mortem_report
+from apps.portfolio.services.sizer_simulator import simulate as simulate_sizer
 
 
 class _BaseCockpitView(APIView):
@@ -113,3 +117,32 @@ class RegimeHeatmapView(_BaseCockpitView):
     """GET /api/v1/portfolios/regime-heatmap/"""
     def get(self, request):
         return Response(build_regime_heatmap(getattr(request, "tenant", None)))
+
+
+class CorrelationMatrixView(_BaseCockpitView):
+    """GET /api/v1/portfolios/correlation/"""
+    def get(self, request):
+        return Response(build_correlation_report(getattr(request, "tenant", None)))
+
+
+class PostMortemView(_BaseCockpitView):
+    """GET /api/v1/portfolios/post-mortem/?month=YYYY-MM"""
+    def get(self, request):
+        month = request.query_params.get("month") or None
+        return Response(build_post_mortem_report(
+            getattr(request, "tenant", None), month=month,
+        ))
+
+
+class GapRiskView(_BaseCockpitView):
+    """GET /api/v1/portfolios/gap-risk/"""
+    def get(self, request):
+        return Response(build_gap_risk_report(getattr(request, "tenant", None)))
+
+
+class SizerSimulatorView(_BaseCockpitView):
+    """POST /api/v1/portfolios/sizer/simulate/
+    body: {symbol, qty, side, stop, entry?, product?}
+    """
+    def post(self, request):
+        return Response(simulate_sizer(request.data or {}))
