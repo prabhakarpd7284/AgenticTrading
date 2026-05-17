@@ -275,12 +275,27 @@ class TelegramAlertService:
         self._last_signal[(signal.symbol, signal.strategy)] = now
 
     def _is_killed(self) -> bool:
-        """Check SystemControl for kill switch (non-blocking, cached)."""
+        """Check SystemControl for kill switch (non-blocking).
+
+        Tenant-aware SystemControl row stores ``value`` as JSON (formerly a
+        plain string in the legacy `trading.SystemControl`). A row with
+        either ``"disabled"`` or ``{"disabled": true}`` / ``{"enabled":
+        false}`` halts alerts. Matches across all tenants — same semantics
+        as `apps.system.services.flags.get_flag` when no tenant is
+        supplied: a single trader pressing the kill switch silences the
+        screener regardless of which tenant they're in.
+        """
         try:
-            from trading.models import SystemControl
-            ctrl = SystemControl.objects.filter(key="screener_alerts").first()
-            if ctrl and ctrl.value == "disabled":
-                return True
+            from apps.system.models import SystemControl
+            for ctrl in SystemControl.objects.filter(key="screener_alerts").only("value"):
+                v = ctrl.value
+                if v == "disabled":
+                    return True
+                if isinstance(v, dict):
+                    if v.get("disabled") is True:
+                        return True
+                    if v.get("enabled") is False:
+                        return True
         except Exception:
             pass
         return False

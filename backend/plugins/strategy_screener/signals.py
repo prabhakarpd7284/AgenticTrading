@@ -225,12 +225,38 @@ class Signal:
 
     def persist(self, source: str = "SCREENER"):
         """
-        Save this signal to SignalLog for post-hoc analysis.
-        Non-blocking — log failures don't stop trading flow.
+        Save this signal for post-hoc analysis.
+
+        Writes to TWO v2 places (formerly one row in legacy `trading.SignalLog`):
+          1. ``apps.strategies.Signal`` — the canonical signal ledger that the
+             monthly capture-rate report reads from. The EOD ``enrich_signals``
+             job fills in ``max_favorable_move`` / outcome on these rows.
+          2. ``apps.events.Event`` (type=SIGNAL_FIRED) — the unified event
+             firehose that drives the Now activity feed and per-run timeline.
+
+        Both writes are wrapped in their own try/except — logging failures
+        never stop the screener (Invariant 9 in CLAUDE.md).
+
+        Tenant resolution: the screener CLI runs without a tenant in scope,
+        so we attach the signal to the first Tenant in the DB (the single-
+        tenant convention used by all the legacy CLI commands). If no Tenant
+        exists yet, the write is skipped — same end result as the old legacy
+        behaviour when the SQLite table was empty.
         """
+        from logzero import logger
+
+        tenant = _resolve_default_tenant()
+        if tenant is None:
+            logger.warning(
+                "Signal persist skipped (non-blocking): no Tenant rows in DB"
+            )
+            return
+
+        # 1. Canonical ledger row — monthly report + enrichment read from here.
         try:
-            from trading.models import SignalLog
-            SignalLog.objects.create(
+            from apps.strategies.models import Signal as SignalModel
+            SignalModel.objects.create(
+                tenant=tenant,
                 symbol=self.symbol,
                 signal_date=self.timestamp.date(),
                 signal_time=self.timestamp,
@@ -246,5 +272,47 @@ class Signal:
                 indicators=self.indicators,
             )
         except Exception as e:
-            from logzero import logger
-            logger.warning(f"SignalLog persist failed (non-blocking): {e}")
+            logger.warning(f"strategies.Signal persist failed (non-blocking): {e}")
+
+        # 2. Event firehose — drives the Now feed + workflow timeline.
+        try:
+            from apps.events.models import Event
+            from apps.events.services.event_writer import emit
+            emit(
+                tenant=tenant,
+                type=Event.Type.SIGNAL_FIRED,
+                actor_kind=Event.ActorKind.SYSTEM,
+                text=f"{self.side} {self.symbol} @ {self.entry:.2f} ({self.strategy})",
+                payload={
+                    "source": source,
+                    "symbol": self.symbol,
+                    "strategy": self.strategy,
+                    "side": self.side,
+                    "entry": self.entry,
+                    "stoploss": self.stoploss,
+                    "target": self.target,
+                    "risk_reward": self.risk_reward,
+                    "confidence": self.confidence,
+                    "reasons": self.reasons,
+                    "indicators": self.indicators,
+                },
+                ts=self.timestamp,
+            )
+        except Exception as e:
+            logger.warning(f"events.Event signal emit failed (non-blocking): {e}")
+
+
+def _resolve_default_tenant():
+    """Return the first Tenant in the DB, or None if no tenants exist.
+
+    The screener CLI has no tenant in scope (it's a long-running operator
+    process, not a per-request flow). Single-tenant dev installs and the
+    legacy migration both expect "first tenant = the trader's tenant".
+    Multi-tenant prod has an HTTP-bound entry point that injects a tenant
+    explicitly — this helper is the CLI fallback only.
+    """
+    try:
+        from apps.tenants.models import Tenant
+        return Tenant.objects.order_by("created_at").first()
+    except Exception:
+        return None
