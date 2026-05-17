@@ -6,9 +6,9 @@
  */
 import * as React from "react";
 import {
-  Activity, AlertTriangle, BarChart3, Briefcase, Calculator, Clock, Droplets,
-  Gauge, GitCompareArrows, Grid3X3, LineChart, Microscope, Sigma, Sunrise,
-  Target, TrendingDown,
+  Activity, AlertTriangle, BarChart3, Briefcase, Calculator, Check, Clock,
+  Droplets, Gauge, GitCompareArrows, Grid3X3, LineChart, Microscope, Pencil,
+  Sigma, Sunrise, Target, TrendingDown, X,
 } from "lucide-react";
 import {
   Bar, BarChart, CartesianGrid, Line, LineChart as RLineChart,
@@ -65,8 +65,9 @@ function Help({ label, text }: { label: string; text: string }) {
     </div>
   );
 }
+import { useQueryClient } from "@tanstack/react-query";
 import {
-  simulateSizer, useBrokerRecon, useCapitalCockpit, useCorrelationMatrix,
+  setCapital, simulateSizer, useBrokerRecon, useCapitalCockpit, useCorrelationMatrix,
   useEdgeDecay, useExpiryCockpit, useGapRisk, useGreeksHeatmap, useLiquidityMap,
   usePlanVsActual, usePostMortem, useRegimeHeatmap, useRiskBudget,
   useSignalFunnel, useThetaForecast, type SizerResponse,
@@ -158,6 +159,7 @@ function CapitalPanel() {
         why="Notional says how big your bets look on paper; delta-adjusted shows the real directional bet after accounting for option deltas. Leverage above 3× on intraday or 1× on overnight is where stops get triggered by noise."
         act="If leverage > 3× and the regime is choppy, scale a position down. If free margin < 10% of capital, stop opening new positions until something closes."
       />
+      <CapitalEditor current={data.total_capital} />
       <section className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <KPI label="Total capital" value={fmtInr(data.total_capital)} />
         <KPI label="Deployed" value={fmtInr(data.deployed_capital)} />
@@ -196,6 +198,92 @@ function CapitalPanel() {
         </CardContent>
       </Card>
     </PanelWrap>
+  );
+}
+
+function CapitalEditor({ current }: { current: number }) {
+  const qc = useQueryClient();
+  const [editing, setEditing] = React.useState(false);
+  const [value, setValue] = React.useState<string>("");
+  const [pending, setPending] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+
+  const start = () => {
+    setValue(String(Math.round(current)));
+    setError(null);
+    setEditing(true);
+  };
+  const cancel = () => { setEditing(false); setError(null); };
+
+  const save = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const n = Number(value);
+    if (!Number.isFinite(n) || n <= 0) { setError("Enter a positive number"); return; }
+    setPending(true);
+    setError(null);
+    try {
+      await setCapital(n);
+      // Anything that reads PortfolioSnapshot directly or derives from it
+      // needs to refresh: capital, risk budget, sizer, leverage on most cards.
+      await qc.invalidateQueries({ queryKey: ["cockpits"] });
+      setEditing(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "save failed");
+    } finally {
+      setPending(false);
+    }
+  };
+
+  if (!editing) {
+    return (
+      <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-md border border-border bg-surface">
+        <div className="text-body-sm">
+          <span className="text-fg-subtle">Capital base:</span>{" "}
+          <span className="font-mono text-fg">{fmtInr(current)}</span>
+          <span className="text-fg-subtle"> · drives risk-budget % and position sizing</span>
+        </div>
+        <button
+          type="button"
+          onClick={start}
+          className="inline-flex items-center gap-1 h-7 px-2 text-caption bg-surface-2 hover:bg-surface-3 border border-border rounded-sm"
+        >
+          <Pencil className="h-3 w-3" /> Edit
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <form onSubmit={save} className="flex flex-wrap items-center gap-2 px-3 py-2 rounded-md border border-accent/40 bg-accent/5">
+      <label className="text-body-sm text-fg-muted">New capital (INR)</label>
+      <input
+        autoFocus
+        type="number"
+        min={1}
+        step={1000}
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        className="w-40 h-8 px-2 bg-surface border border-border rounded-sm text-body-sm tabular-nums"
+      />
+      <button
+        type="submit"
+        disabled={pending}
+        className="inline-flex items-center gap-1 h-8 px-3 bg-accent text-accent-fg rounded-sm text-body-sm disabled:opacity-50"
+      >
+        <Check className="h-3.5 w-3.5" /> {pending ? "Saving…" : "Save"}
+      </button>
+      <button
+        type="button"
+        onClick={cancel}
+        className="inline-flex items-center gap-1 h-8 px-3 bg-surface-2 hover:bg-surface-3 border border-border rounded-sm text-body-sm"
+      >
+        <X className="h-3.5 w-3.5" /> Cancel
+      </button>
+      {error ? <span className="text-body-sm text-pnl-down">{error}</span> : null}
+      <span className="text-caption text-fg-subtle">
+        Writes today's PortfolioSnapshot. Used by @RiskGuard for sizing + the 3% daily-loss cap.
+      </span>
+    </form>
   );
 }
 

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from datetime import date
 
+from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -41,6 +42,55 @@ class CapitalCockpitView(_BaseCockpitView):
     """GET /api/v1/portfolios/capital-cockpit/"""
     def get(self, request):
         return Response(build_capital_cockpit(getattr(request, "tenant", None)))
+
+
+class SetCapitalView(_BaseCockpitView):
+    """POST /api/v1/portfolios/capital/  body: {"capital": <inr>}
+
+    Updates today's PortfolioSnapshot (or creates one) with the new capital.
+    `available_cash` is recomputed as capital - invested so position sizing
+    pulls the right denominator immediately.
+    """
+    def post(self, request):
+        from trading.models import PortfolioSnapshot
+
+        try:
+            new_capital = float(request.data.get("capital"))
+        except (TypeError, ValueError):
+            return Response(
+                {"error": "capital must be a number"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if new_capital <= 0:
+            return Response(
+                {"error": "capital must be > 0"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        today = date.today()
+        existing = PortfolioSnapshot.objects.filter(snapshot_date=today).first()
+        invested = float(existing.invested) if existing else 0.0
+        available = max(new_capital - invested, 0.0)
+
+        defaults = {
+            "capital": new_capital,
+            "available_cash": available,
+            "invested": invested,
+        }
+        if existing:
+            for k, v in defaults.items():
+                setattr(existing, k, v)
+            existing.save(update_fields=list(defaults.keys()) + ["last_updated"])
+            snap = existing
+        else:
+            snap = PortfolioSnapshot.objects.create(snapshot_date=today, **defaults)
+
+        return Response({
+            "capital": float(snap.capital),
+            "invested": float(snap.invested),
+            "available_cash": float(snap.available_cash),
+            "snapshot_date": snap.snapshot_date.isoformat(),
+        })
 
 
 class PlanVsActualView(_BaseCockpitView):

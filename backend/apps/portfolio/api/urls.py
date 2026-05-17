@@ -26,6 +26,7 @@ from apps.portfolio.api.views_cockpits import (
     PostMortemView,
     RegimeHeatmapView,
     RiskBudgetView,
+    SetCapitalView,
     SignalFunnelView,
     SizerSimulatorView,
     ThetaForecastView,
@@ -45,6 +46,7 @@ urlpatterns = [
     path("monthly/", MonthlyReportView.as_view(), name="portfolio-monthly"),
     # Cockpits — must precede the portfolio detail catchall router below.
     path("capital-cockpit/", CapitalCockpitView.as_view(), name="capital-cockpit"),
+    path("capital/", SetCapitalView.as_view(), name="capital-set"),
     path("plan-vs-actual/", PlanVsActualView.as_view(), name="plan-vs-actual"),
     path("greeks-heatmap/", GreeksHeatmapView.as_view(), name="greeks-heatmap"),
     path("signal-funnel/", SignalFunnelView.as_view(), name="signal-funnel"),

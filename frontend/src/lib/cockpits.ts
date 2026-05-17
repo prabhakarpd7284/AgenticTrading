@@ -342,3 +342,16 @@ export async function simulateSizer(payload: SizerRequest): Promise<SizerRespons
   const { data } = await api.post<SizerResponse>("/portfolios/sizer/simulate/", payload);
   return data;
 }
+
+export interface SetCapitalResponse {
+  capital: number;
+  invested: number;
+  available_cash: number;
+  snapshot_date: string;
+  error?: string;
+}
+
+export async function setCapital(capital: number): Promise<SetCapitalResponse> {
+  const { data } = await api.post<SetCapitalResponse>("/portfolios/capital/", { capital });
+  return data;
+}
