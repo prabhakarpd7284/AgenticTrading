@@ -198,6 +198,46 @@ class TickerService:
         "BANKEX":    ("99919012", "BSE"),
     }
 
+    # Every user-facing alias the UI / planner / screener might send →
+    # the canonical name Angel One's scrip-master uses (`inst.name`).
+    # Match is case-insensitive after a strip+collapse-whitespace pass.
+    UNDERLYING_ALIASES: dict[str, str] = {
+        "NIFTY":            "NIFTY",
+        "NIFTY50":          "NIFTY",
+        "NIFTY 50":         "NIFTY",
+        "NSEI":             "NIFTY",
+        "BANKNIFTY":        "BANKNIFTY",
+        "BANK NIFTY":       "BANKNIFTY",
+        "NIFTY BANK":       "BANKNIFTY",
+        "NSEBANK":          "BANKNIFTY",
+        "FINNIFTY":         "FINNIFTY",
+        "FIN NIFTY":        "FINNIFTY",
+        "NIFTY FIN SERVICE":"FINNIFTY",
+        "MIDCPNIFTY":       "MIDCPNIFTY",
+        "NIFTY MIDCAP":     "MIDCPNIFTY",
+        "MIDCAP NIFTY":     "MIDCPNIFTY",
+        "INDIAVIX":         "INDIAVIX",
+        "INDIA VIX":        "INDIAVIX",
+        "VIX":              "INDIAVIX",
+        "SENSEX":           "SENSEX",
+        "BSE SENSEX":       "SENSEX",
+        "BANKEX":           "BANKEX",
+        "BSE BANKEX":       "BANKEX",
+    }
+
+    @classmethod
+    def normalize_underlying(cls, name: str) -> str:
+        """User input → canonical underlying name used by Angel One.
+
+        Strips, uppercases, collapses whitespace, and falls back to the
+        cleaned input when no alias matches (so stock tickers like
+        "HDFCBANK" still pass through unchanged).
+        """
+        if not name:
+            return ""
+        s = " ".join(str(name).upper().split())
+        return cls.UNDERLYING_ALIASES.get(s, s.replace(" ", ""))
+
     @classmethod
     def resolve_exchange(cls, symbol: str) -> str:
         """Best-effort exchange picker. Caller should still pass exchange
@@ -345,6 +385,12 @@ class TickerService:
         from datetime import datetime
         import re
 
+        # Normalise the caller-supplied underlying so "NIFTY50" / "NIFTY 50"
+        # / "NSEI" all collapse to "NIFTY" (the name in Angel One's NFO
+        # scrip master). Was the root cause of "No option token found for
+        # NIFTY50 …" — caller passed an alias, lookup filter saw no match.
+        underlying = self.normalize_underlying(underlying)
+
         # Parse expiry string (DDMMMYY or DDMMMYYYY) to a date for matching
         m = re.match(r'^(\d{1,2})([A-Z]{3})(\d{2,4})$', expiry_str.strip().upper())
         if not m:
@@ -408,6 +454,8 @@ class TickerService:
         """
         self._ensure_loaded()
         import re
+
+        underlying = self.normalize_underlying(underlying)
 
         m = re.match(r'^(\d{1,2})([A-Z]{3})(\d{2,4})$', expiry_str.strip().upper())
         if not m:
@@ -475,7 +523,7 @@ class TickerService:
         """
         self._ensure_loaded()
         from datetime import datetime
-        u = (underlying or "").upper().strip()
+        u = self.normalize_underlying(underlying)
         out: list[dict] = []
         for key, inst in self._nfo_by_key.items():
             if inst.get("name") != u:

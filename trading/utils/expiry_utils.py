@@ -114,6 +114,7 @@ def next_expiry_date(underlying: str = "NIFTY") -> Optional[date]:
     try:
         from trading.services.ticker_service import ticker_service
         ticker_service._ensure_loaded()
+        underlying = ticker_service.normalize_underlying(underlying)
 
         expiries = set()
         for key, inst in ticker_service._nfo_by_key.items():
