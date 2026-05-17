@@ -12,6 +12,19 @@ env = environ.Env(
     ALLOWED_HOSTS=(list, ["*"]),
     CORS_ALLOWED_ORIGINS=(list, ["http://localhost:5173"]),
 )
+# Load env files in order of increasing precedence:
+#   1. repo-root .env   — shared infra creds (SMARTAPI_*, TELEGRAM_*,
+#                          SYMBOL_MASTER_JSON) used by the broker client
+#                          + market-data services that need to reach the
+#                          Django process.
+#   2. backend/.env     — Django-specific config (DATABASE_URL,
+#                          DJANGO_SECRET_KEY, REDIS_URL, …) — overrides
+#                          anything set by the root file.
+# python-environ's read_env() does NOT override existing process env vars
+# by default — so if you `export SMARTAPI_KEY=...` in your shell, that wins.
+_REPO_ROOT_ENV = BASE_DIR.parent / ".env"
+if _REPO_ROOT_ENV.exists():
+    environ.Env.read_env(_REPO_ROOT_ENV)
 environ.Env.read_env(BASE_DIR / ".env")
 
 # Core -----------------------------------------------------------------
