@@ -209,9 +209,19 @@ class OptionsDataService:
 
     # ── Option LTP by token ──
     def fetch_option_ltp(self, symbol: str, token: str) -> dict:
-        """Fetch option LTP via centralized broker (cached, rate-limited)."""
+        """Fetch option LTP via centralized broker (cached, rate-limited).
+
+        Auto-detects the exchange from the symbol:
+          - SENSEX / BANKEX options → BFO
+          - NIFTY / BANKNIFTY / stock options → NFO
+
+        Was previously hardcoded "NFO" which broke every SENSEX/BANKEX
+        option LTP call silently.
+        """
         self._ensure_broker()
-        return self._broker.ltp("NFO", symbol, token)
+        sym_u = (symbol or "").upper()
+        exchange = "BFO" if sym_u.startswith(("SENSEX", "BANKEX")) else "NFO"
+        return self._broker.ltp(exchange, symbol, token)
 
     # ── NIFTY 5-min candles ──
     def fetch_nifty_candles(self, date_str: str, interval: str = "FIVE_MINUTE") -> list:
@@ -255,11 +265,13 @@ class OptionsDataService:
 
         results: dict = {}
 
-        # Batch fetch all 4 LTPs in ONE API call (saves 3 calls + 1.2s throttle)
+        # Batch fetch all 4 LTPs in ONE API call (saves 3 calls + 1.2s throttle).
+        # Auto-route option legs to BFO when the symbol is SENSEX/BANKEX.
+        opt_exchange = "BFO" if (ce_symbol or "").upper().startswith(("SENSEX", "BANKEX")) else "NFO"
         try:
             tokens = {
                 "NSE": [NIFTY_SPOT_TOKEN, INDIA_VIX_TOKEN],
-                "NFO": [ce_token, pe_token],
+                opt_exchange: [ce_token, pe_token],
             }
             fetched = self._broker.market_data_batch(tokens, mode="OHLC")
 

@@ -36,6 +36,7 @@ import {
   getMonthlySource, setMonthlySource,
   ASSET_CLASS_LABEL,
   type Analytics, type AssetClass, type BenchmarkComparison,
+  type DataSources,
   type EquityCurve, type MonthGroup, type MonthlyPayload, type PositionLeg,
   type RejectionReview, type SignalAudit, type StockCapture,
   type UnderlyingRoll, type YtdMonthBar, type YtdSummary,
@@ -98,6 +99,8 @@ export function MonthlyPage() {
         source={source}
         onToggleSource={handleToggleSource}
       />
+
+      {data.data_sources ? <DataSourceBanner sources={data.data_sources} /> : null}
 
       <YtdStrip
         ytd={data.ytd}
@@ -204,6 +207,87 @@ function Header({
     </header>
   );
 }
+
+/* ================================================================== */
+/* Data-source banner — surfaces empty-DB state so empty charts don't  */
+/* look like a broker outage                                            */
+/* ================================================================== */
+
+function DataSourceBanner({ sources }: { sources: DataSources }) {
+  const totalThisMonth = sources.tables.reduce((acc, t) => acc + t.count, 0);
+  const totalAllTime = sources.tables.reduce((acc, t) => acc + t.total_count, 0);
+  const [open, setOpen] = React.useState(totalThisMonth === 0);
+
+  const tone =
+    totalThisMonth === 0 ? "border-warning/40 bg-warning/5"
+    : "border-border bg-surface";
+  const stateLabel =
+    totalThisMonth === 0 ? "EMPTY"
+    : totalThisMonth < 10 ? "SPARSE"
+    : "HEALTHY";
+
+  return (
+    <div className={cn("rounded-md border p-3", tone)}>
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-2 text-body-sm">
+          <span className={cn(
+            "inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-caption font-semibold",
+            totalThisMonth === 0 ? "bg-warning/20 text-warning"
+              : totalThisMonth < 10 ? "bg-info/15 text-info"
+              : "bg-pnl-up/15 text-pnl-up",
+          )}>
+            <span className="w-1.5 h-1.5 rounded-full bg-current" /> {stateLabel}
+          </span>
+          <span className="text-fg-muted">
+            Data sources for <span className="font-mono text-fg">{sources.month}</span>:
+          </span>
+          <span className="font-mono text-fg">{totalThisMonth} rows</span>
+          <span className="text-fg-subtle">(all-time: {totalAllTime})</span>
+        </div>
+        <button
+          onClick={() => setOpen(!open)}
+          className="text-caption text-accent hover:underline"
+        >
+          {open ? "Hide details" : "Show details"}
+        </button>
+      </div>
+
+      {open ? (
+        <div className="mt-3 space-y-2">
+          {sources.tables.map((t) => (
+            <div key={t.key} className="flex items-start gap-3 text-body-sm">
+              <span className={cn(
+                "font-mono tabular-nums w-12 text-right",
+                t.count === 0 ? "text-fg-subtle" : "text-fg",
+              )}>
+                {t.count}
+              </span>
+              <span className={cn("text-fg-subtle text-caption w-24",
+                                    t.count > 0 ? "" : "italic")}>
+                {t.total_count > 0 ? `${t.total_count} total` : "no data"}
+              </span>
+              <div className="flex-1 min-w-0">
+                <div className={cn("font-medium",
+                                    t.count === 0 ? "text-fg-muted" : "text-fg")}>
+                  {t.label}
+                </div>
+                {t.count === 0 ? (
+                  <div className="text-caption text-fg-subtle">{t.fills}</div>
+                ) : null}
+              </div>
+            </div>
+          ))}
+          {sources.note ? (
+            <p className="text-caption text-fg-subtle pt-1 border-t border-border/40">
+              {sources.note}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 
 /* ================================================================== */
 /* YTD strip — headline stats + 12-month bar chart                       */

@@ -406,6 +406,11 @@ def build_monthly_report(
     # ── 9. Lessons ──
     lessons = _build_lessons(months_data, capture_matrix, signal_audit, rejections)
 
+    # Surface raw source-table counts so the operator can immediately
+    # distinguish "empty DB" from "broker outage". The frontend now shows
+    # a banner with these + a hint per panel for what fills it.
+    data_sources = _data_source_snapshot(target_month)
+
     result = {
         "paper_mode": portfolio.mode == "paper",
         "current_month": current_month,
@@ -419,10 +424,74 @@ def build_monthly_report(
         "equity_curve": asdict(equity_curve),
         "analytics": asdict(analytics),
         "benchmark": asdict(benchmark),
+        "data_sources": data_sources,
     }
 
     cache.set(cache_key, result, CACHE_TTL)
     return result
+
+
+def _data_source_snapshot(target_month: str) -> dict:
+    """Snapshot of every table the monthly report reads, so the FE can
+    surface 'why is X empty?' without the operator guessing.
+
+    Each entry:
+      key          internal id
+      label        human-readable
+      count        rows in DB for the target month
+      total_count  rows in DB across ALL time
+      fills        CLI / workflow that populates this table
+    """
+    from trading.models import (
+        TradeJournal, SignalLog, AuditLog, StraddlePosition,
+        PortfolioSnapshot,
+    )
+    try:
+        y, m = target_month.split("-")
+        y_i, m_i = int(y), int(m)
+    except (ValueError, AttributeError):
+        y_i = m_i = None
+
+    def _count(qs, *, month: bool):
+        try:
+            if month and y_i and m_i:
+                return qs.filter(created_at__year=y_i, created_at__month=m_i).count()
+            return qs.count()
+        except Exception:  # noqa: BLE001
+            return 0
+
+    return {
+        "month": target_month,
+        "tables": [
+            {"key": "trade_journal", "label": "TradeJournal (filled + paper trades)",
+             "count": _count(TradeJournal.objects.all(), month=True),
+             "total_count": _count(TradeJournal.objects.all(), month=False),
+             "fills": "Live trading via `run_trading_agent`, paper trades via the agent console, or any directional / pyramid / straddle execution."},
+            {"key": "signal_log", "label": "SignalLog (every fired signal)",
+             "count": _count(SignalLog.objects.all(), month=True),
+             "total_count": _count(SignalLog.objects.all(), month=False),
+             "fills": "`python manage.py run_screener` for intraday signals; `run_ok_scanner` for swing signals. Run `enrich_signals` EOD for outcome + capture-rate."},
+            {"key": "audit_log", "label": "AuditLog (every agent / risk decision)",
+             "count": _count(AuditLog.objects.all(), month=True),
+             "total_count": _count(AuditLog.objects.all(), month=False),
+             "fills": "Every agent run writes an event; rejections are written by @RiskGuard when a planned trade fails the size/loss cap."},
+            {"key": "straddle_positions", "label": "StraddlePosition (active short straddles)",
+             "count": StraddlePosition.objects.filter(status="ACTIVE").count(),
+             "total_count": StraddlePosition.objects.count(),
+             "fills": "`python manage.py manage_straddle --register …` or via the agent console straddle workflow."},
+            {"key": "portfolio_snapshot", "label": "PortfolioSnapshot (capital history)",
+             "count": _count(PortfolioSnapshot.objects.all(), month=True),
+             "total_count": _count(PortfolioSnapshot.objects.all(), month=False),
+             "fills": "Reset / Seed cockpit (POST /portfolios/capital/) or `reset_trading_data --capital N`."},
+        ],
+        "note": (
+            "Empty rows mean the underlying activity hasn't happened yet. "
+            "The broker layer is fine — the monthly report only renders "
+            "what was actually traded/signalled. Use the Reset / Seed "
+            "cockpit to seed capital, then run the screener / agents to "
+            "fill the rest."
+        ),
+    }
 
 
 def _month_group_to_dict(mg: MonthGroup) -> dict:

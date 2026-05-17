@@ -117,7 +117,10 @@ def next_expiry_date(underlying: str = "NIFTY") -> Optional[date]:
 
         expiries = set()
         for key, inst in ticker_service._nfo_by_key.items():
-            if inst.get("name") == underlying and inst.get("instrumenttype") == "OPTIDX":
+            # Accept OPTIDX (index options) + OPTSTK (stock options) so
+            # callers asking for HDFCBANK's next expiry get a date too.
+            if (inst.get("name") == underlying
+                and inst.get("instrumenttype") in ("OPTIDX", "OPTSTK")):
                 exp_str = inst.get("expiry", "")
                 if exp_str:
                     try:

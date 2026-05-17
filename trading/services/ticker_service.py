@@ -183,27 +183,82 @@ class TickerService:
     # ──────────────────────────────────────────────
     # Token lookups
     # ──────────────────────────────────────────────
+    # Hardcoded index-spot tokens — Angel One doesn't list these as -EQ
+    # so the equity scrip-master lookup misses them. Centralising here
+    # so any caller (cockpit service, screener, planner) that does
+    # `get_token("NIFTY")` returns the correct token instead of None.
+    INDEX_SPOT_TOKENS: dict[str, tuple[str, str]] = {
+        # underlying → (token, exchange)
+        "NIFTY":     ("99926000", "NSE"),
+        "BANKNIFTY": ("99926009", "NSE"),
+        "FINNIFTY":  ("99926037", "NSE"),
+        "MIDCPNIFTY":("99926074", "NSE"),
+        "INDIAVIX":  ("99926017", "NSE"),
+        "SENSEX":    ("99919000", "BSE"),
+        "BANKEX":    ("99919012", "BSE"),
+    }
+
+    @classmethod
+    def resolve_exchange(cls, symbol: str) -> str:
+        """Best-effort exchange picker. Caller should still pass exchange
+        explicitly when known.
+
+          SENSEX / BANKEX (spot or options) → BSE / BFO
+          NIFTY / BANKNIFTY / FINNIFTY  (spot) → NSE
+          *_FUT or NIFTY/BANKNIFTY weekly options → NFO
+          everything else → NSE
+        """
+        s = (symbol or "").upper().strip()
+        if not s:
+            return "NSE"
+        # Index spots — exact match
+        if s in cls.INDEX_SPOT_TOKENS:
+            return cls.INDEX_SPOT_TOKENS[s][1]
+        # BSE family — options on BFO, spot on BSE
+        if s.startswith(("SENSEX", "BANKEX")):
+            return "BFO" if any(c.isdigit() for c in s) else "BSE"
+        # Index options / futures — NFO
+        if s.startswith(("NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY")) and any(c.isdigit() for c in s):
+            return "NFO"
+        # Stock futures / options — name + numeric strike → NFO
+        if s.endswith(("FUT", "CE", "PE")):
+            return "NFO"
+        return "NSE"
+
     def get_token(self, ticker: str, exchange: str = "NSE") -> Optional[str]:
         """
         Get Angel One token for a ticker.
 
         Args:
-            ticker: "RELIANCE", "HDFCBANK", etc.
-            exchange: "NSE" (default), "BSE", "NFO"
+            ticker: "RELIANCE", "HDFCBANK", "NIFTY", "SENSEX", …
+            exchange: "NSE" (default), "BSE", "NFO", "BFO"
 
         Returns:
             Token string or None if not found.
+
+        Falls back through:
+          1. Hardcoded INDEX_SPOT_TOKENS for index symbols (any exchange)
+          2. NSE name-index for plain equities
+          3. `-EQ` suffix lookup
+          4. Generic key lookup
         """
         self._ensure_loaded()
+        t = (ticker or "").upper().strip()
+
+        # 1) Index spot fallback — index names don't live in the -EQ
+        # name-index, but every caller (planner / cockpit / screener)
+        # expects get_token("NIFTY") to "just work".
+        if t in self.INDEX_SPOT_TOKENS:
+            return self.INDEX_SPOT_TOKENS[t][0]
 
         if exchange == "NSE":
-            info = self._nse_by_name.get(ticker)
+            info = self._nse_by_name.get(t)
             if info:
                 return info["token"]
             # Fallback: try with -EQ suffix
-            return self._all_by_key.get(f"NSE:{ticker}-EQ")
+            return self._all_by_key.get(f"NSE:{t}-EQ")
 
-        return self._all_by_key.get(f"{exchange}:{ticker}")
+        return self._all_by_key.get(f"{exchange}:{t}")
 
     def get_info(self, ticker: str) -> Optional[dict]:
         """
@@ -366,9 +421,12 @@ class TickerService:
 
         for key, inst in self._nfo_by_key.items():
             sym = inst.get("symbol", "")
+            # Accept both OPTIDX (NIFTY/BANKNIFTY/SENSEX) and OPTSTK
+            # (HDFCBANK/RELIANCE/…) — was OPTIDX-only and silently hid
+            # every stock option from the chain view.
             if (
                 inst.get("name") != underlying
-                or inst.get("instrumenttype") != "OPTIDX"
+                or inst.get("instrumenttype") not in ("OPTIDX", "OPTSTK")
                 or not sym.startswith(underlying)
             ):
                 continue
@@ -400,6 +458,73 @@ class TickerService:
                 break
 
         return sorted(strikes.values(), key=lambda x: x["strike"])
+
+    # ──────────────────────────────────────────────
+    # Futures (FUTIDX + FUTSTK) — first-class lookup helpers
+    # ──────────────────────────────────────────────
+    def list_futures(self, underlying: str) -> List[dict]:
+        """Return every future contract for `underlying`, sorted by expiry.
+
+        Works for index futures (NIFTY, BANKNIFTY, FINNIFTY → FUTIDX) AND
+        stock futures (HDFCBANK, RELIANCE → FUTSTK). Each row carries
+        token + symbol + expiry (DDMMYYYY string) so callers can
+        immediately invoke `broker.ltp("NFO", symbol, token)`.
+
+        Empty list when scrip master has no contracts (off-cycle, off
+        market).
+        """
+        self._ensure_loaded()
+        from datetime import datetime
+        u = (underlying or "").upper().strip()
+        out: list[dict] = []
+        for key, inst in self._nfo_by_key.items():
+            if inst.get("name") != u:
+                continue
+            if inst.get("instrumenttype") not in ("FUTIDX", "FUTSTK"):
+                continue
+            exp_str = inst.get("expiry", "")
+            try:
+                exp_date = datetime.strptime(exp_str, "%d%b%Y").date()
+            except (ValueError, TypeError):
+                exp_date = None
+            out.append({
+                "symbol": inst.get("symbol", ""),
+                "token": inst.get("token", ""),
+                "expiry": exp_str,
+                "expiry_date": exp_date.isoformat() if exp_date else None,
+                "lot_size": inst.get("lotsize"),
+                "instrument_type": inst.get("instrumenttype"),
+                "exch_seg": inst.get("exch_seg", "NFO"),
+            })
+        out.sort(key=lambda r: r["expiry_date"] or "")
+        return out
+
+    def get_future_token(self, underlying: str, *, month_offset: int = 0) -> Optional[dict]:
+        """Resolve the {symbol, token, expiry, exchange} of a future contract.
+
+        Args:
+            underlying:    "NIFTY", "BANKNIFTY", "HDFCBANK", …
+            month_offset:  0 = nearest live (default), 1 = next-month,
+                           2 = far-month, etc.
+
+        Returns None when no contract exists at the requested offset.
+        """
+        from datetime import date as dt_date
+        contracts = [
+            c for c in self.list_futures(underlying)
+            if c["expiry_date"] and dt_date.fromisoformat(c["expiry_date"]) >= dt_date.today()
+        ]
+        if not contracts or month_offset < 0 or month_offset >= len(contracts):
+            return None
+        c = contracts[month_offset]
+        return {
+            "symbol": c["symbol"],
+            "token": c["token"],
+            "expiry": c["expiry"],
+            "expiry_date": c["expiry_date"],
+            "lot_size": c["lot_size"],
+            "exchange": "NFO",   # futures live on NFO regardless of underlying
+        }
 
     # ──────────────────────────────────────────────
     # NIFTY 50 validation

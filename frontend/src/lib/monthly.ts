@@ -203,6 +203,20 @@ export interface BenchmarkComparison {
   nifty_end: number;
 }
 
+export interface DataSourceRow {
+  key: string;
+  label: string;
+  count: number;          // rows for the target month
+  total_count: number;    // rows across all time
+  fills: string;          // CLI / workflow that populates this table
+}
+
+export interface DataSources {
+  month: string;
+  tables: DataSourceRow[];
+  note?: string;
+}
+
 export interface MonthlyPayload {
   paper_mode: boolean;
   current_month: string;      // "2026-04"
@@ -218,6 +232,10 @@ export interface MonthlyPayload {
   equity_curve: EquityCurve;
   analytics: Analytics;
   benchmark: BenchmarkComparison;
+
+  /* Backend-provided data-source snapshot — surfaces empty-table state
+   * so the operator can tell "DB is empty" from "broker is down". */
+  data_sources?: DataSources;
 }
 
 /* ================================================================== */
