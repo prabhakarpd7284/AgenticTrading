@@ -33,6 +33,8 @@ import { Button } from "@/components/ui/Button";
 import { KPI } from "@/components/ui/KPI";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { useQueryClient } from "@tanstack/react-query";
+import { OpButton } from "@/features/ops/OpButton";
 
 /* ------------------------------------------------------------------ */
 /* Main page — live scanner only (backtest is in BacktesterPage)        */
@@ -42,6 +44,7 @@ export function SwingScannerPage() {
   const { data: pulse } = useMarketPulse();
   const { data, isLoading, isError, error, refetch, isFetching } =
     useSwingScanner({ isOpen: pulse?.is_market_open ?? false });
+  const qc = useQueryClient();
 
   const [showRules, setShowRules] = React.useState(false);
   const [filterAligned, setFilterAligned] = React.useState(false);
@@ -68,6 +71,15 @@ export function SwingScannerPage() {
           <Badge tone="neutral">{data.total} scanned</Badge>
           <Badge tone="success">{data.active} active</Badge>
           <span className="text-caption text-fg-subtle">{data.scan_date}</span>
+          {/* Re-run the OK scanner CLI against the live broker, then
+              invalidate the swing query so the new rows appear inline. */}
+          <OpButton
+            command="run_ok_scanner"
+            defaultArgs="--actionable-only"
+            label="Re-scan now"
+            description="Re-run the OK cycle scanner against live Angel One data — actionable phases only."
+            onSuccess={() => qc.invalidateQueries({ queryKey: ["swing-scanner"] })}
+          />
           <Button variant="ghost" size="icon" onClick={() => refetch()}
                   aria-label="Refresh" disabled={isFetching}>
             <RefreshCcw className={cn("h-4 w-4", isFetching && "animate-spin")} />

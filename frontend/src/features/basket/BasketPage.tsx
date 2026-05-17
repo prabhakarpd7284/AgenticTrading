@@ -6,14 +6,15 @@
  */
 import { Link } from "react-router-dom";
 import { BarChart3, RefreshCcw, TrendingUp } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
 
 import {
   useMarketPulse,
   useBasketStatus,
   phaseTone,
   type BasketSignal,
-  type BasketPayload,
 } from "@/lib/market-pulse";
+import { OpButton } from "@/features/ops/OpButton";
 import { cn, fmtNum } from "@/lib/utils";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
@@ -32,6 +33,7 @@ export function BasketPage() {
   const { data: pulse } = useMarketPulse();
   const { data, isLoading, isError, error, refetch, isFetching } =
     useBasketStatus({ isOpen: pulse?.is_market_open ?? false });
+  const qc = useQueryClient();
 
   if (isLoading) return <BasketLoading />;
   if (isError) return <BasketError error={error as Error} onRetry={() => refetch()} />;
@@ -52,6 +54,14 @@ export function BasketPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {/* Mood → signals dry run via CLI; on success refetch the page. */}
+          <OpButton
+            command="run_morning_basket"
+            defaultArgs="--dry-run"
+            label="Re-build (dry)"
+            description="Re-assess mood and rebuild signals without execution."
+            onSuccess={() => qc.invalidateQueries({ queryKey: ["basket-status"] })}
+          />
           <Button variant="ghost" size="icon" onClick={() => refetch()} disabled={isFetching}>
             <RefreshCcw className={cn("h-4 w-4", isFetching && "animate-spin")} />
           </Button>

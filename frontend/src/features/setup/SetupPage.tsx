@@ -42,6 +42,7 @@ import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { OpButton } from "@/features/ops/OpButton";
 
 export function SetupPage() {
   const { symbol = "" } = useParams();
@@ -158,6 +159,17 @@ function SetupHeader({
           <span className="text-caption text-fg-subtle">
             Updated {fmtRel(new Date(updatedAt).toISOString())}
           </span>
+
+          {/* Send the symbol to the planner CLI — read the rationale + RiskGuard
+              verdict in the streamed log. Doesn't auto-refetch the deterministic
+              setup view (different sources). */}
+          <OpButton
+            command="run_trading_agent"
+            defaultArgs={`"Plan a ${side} trade for ${data.symbol}"`}
+            label="Ask planner"
+            description={`Run the LLM planner for ${data.symbol} — see the rationale + risk verdict in the log.`}
+          />
+
           <Button
             variant="ghost"
             size="icon"

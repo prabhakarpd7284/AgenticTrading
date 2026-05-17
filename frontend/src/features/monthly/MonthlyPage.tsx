@@ -48,6 +48,7 @@ import {
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Skeleton } from "@/components/ui/Skeleton";
+import { OpButton } from "@/features/ops/OpButton";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/Tabs";
 
@@ -97,6 +98,8 @@ export function MonthlyPage() {
         dataUpdatedAt={dataUpdatedAt}
         source={source}
         onToggleSource={handleToggleSource}
+        monthKey={monthKey}
+        onOpFinished={() => queryClient.invalidateQueries({ queryKey: ["monthly-view"] })}
       />
 
       <YtdStrip
@@ -138,6 +141,7 @@ export function MonthlyPage() {
 
 function Header({
   data, onRefresh, isFetching, dataUpdatedAt, source, onToggleSource,
+  monthKey, onOpFinished,
 }: {
   data: MonthlyPayload;
   onRefresh: () => void;
@@ -145,7 +149,16 @@ function Header({
   dataUpdatedAt: number;
   source: "mock" | "live";
   onToggleSource: () => void;
+  monthKey: string;
+  onOpFinished: () => void;
 }) {
+  // Derive --from / --to for the currently-viewed month so the backtest
+  // ops drawer opens with the right window pre-filled.
+  const [year, mon] = monthKey.split("-").map(Number);
+  const monthStart = `${year}-${String(mon).padStart(2, "0")}-01`;
+  // Last day of month: roll to next month then back one day.
+  const lastDay = new Date(Date.UTC(year, mon, 0)).getUTCDate();
+  const monthEnd = `${year}-${String(mon).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
   return (
     <header className="flex items-end justify-between gap-4 flex-wrap">
       <div className="min-w-0">
@@ -191,6 +204,26 @@ function Header({
         <span className="text-caption text-fg-subtle">
           {fmtRel(new Date(dataUpdatedAt).toISOString())}
         </span>
+
+        {/* Re-run the signal-outcome enrichment (capture rates, win/loss labels)
+            then re-fetch the monthly view so the new numbers appear inline. */}
+        <OpButton
+          command="enrich_signals"
+          defaultArgs="--all"
+          label="Refresh signals"
+          description="Backfill EOD outcomes for every SignalLog row — drives the capture matrix + signal audit on this page."
+          onSuccess={onOpFinished}
+        />
+
+        {/* Re-backtest the swing strategy for the currently-viewed month. */}
+        <OpButton
+          command="run_ok_backtest"
+          defaultArgs={`--from ${monthStart} --to ${monthEnd}`}
+          label="Backtest this month"
+          description={`Run the Oliver-Kell cycle backtest over ${monthStart} → ${monthEnd}.`}
+          onSuccess={onOpFinished}
+        />
+
         <Button
           variant="ghost"
           size="icon"
