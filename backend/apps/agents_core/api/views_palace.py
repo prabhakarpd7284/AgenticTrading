@@ -1,23 +1,37 @@
-"""Two endpoints on top of the AI Tester mind palace.
+"""Endpoints on top of the AI Tester mind palace.
 
-  GET /api/v1/agents/palace/tasks/  →  JSON of every task + counts
-  GET /board/                       →  self-contained HTML Kanban board
+  GET  /api/v1/agents/palace/tasks/  →  JSON of every task + counts
+  POST /api/v1/agents/palace/run/    →  fires `run_ai_team --all-profiles`
+                                        in a background subprocess
+  GET  /api/v1/agents/palace/status/ →  is a run in progress + when did it start
+  GET  /board/                       →  self-contained HTML Kanban board
 
-Both deliberately AllowAny so the board can be left open in a tab and
-auto-refresh without needing a JWT.
+All AllowAny so the board can be left open in a tab and auto-refresh
+without needing a JWT.
 """
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 from collections import Counter
+from datetime import datetime, timezone
+from pathlib import Path
 
+from django.conf import settings
+from django.core.cache import cache
 from django.http import HttpResponse, JsonResponse
 from django.views.decorators.cache import never_cache
+from django.views.decorators.csrf import csrf_exempt
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.agents_core.tester import state
+
+
+_RUN_KEY = "agents:team_run"
+_RUN_TTL = 60 * 30   # 30 min — longer than any reasonable cycle
 
 
 class PalaceTasksView(APIView):
@@ -45,6 +59,132 @@ class PalaceTasksView(APIView):
 def task_board(request):
     """Single self-contained Jira-style HTML page."""
     return HttpResponse(_BOARD_HTML, content_type="text/html; charset=utf-8")
+
+
+def _is_alive(pid: int) -> bool:
+    """Cheap PID liveness probe — signal 0 doesn't actually signal."""
+    if not pid:
+        return False
+    try:
+        os.kill(pid, 0)
+    except (OSError, ProcessLookupError):
+        return False
+    return True
+
+
+@csrf_exempt
+@never_cache
+def team_run_view(request):
+    """POST /api/v1/agents/palace/run/  body: {profiles?: "all" | "default" | ..., skip_tester?: bool}
+
+    Spawns `python manage.py run_ai_team` in a detached subprocess so the
+    HTTP call returns immediately. Stores the PID + start time in the
+    Django cache; the status endpoint reads them to report progress.
+
+    Refuses to start a second run while one is alive.
+    """
+    if request.method != "POST":
+        return JsonResponse({"error": "POST only"}, status=405)
+
+    existing = cache.get(_RUN_KEY)
+    if existing and _is_alive(existing.get("pid", 0)):
+        return JsonResponse({
+            "started": False,
+            "already_running": True,
+            "started_at": existing.get("started_at"),
+            "pid": existing.get("pid"),
+        })
+
+    body = {}
+    try:
+        body = json.loads(request.body or b"{}")
+    except json.JSONDecodeError:
+        pass
+    profiles = (body.get("profiles") or "all").lower()
+    skip_tester = bool(body.get("skip_tester"))
+
+    cmd = ["python", "manage.py", "run_ai_team"]
+    if profiles == "all":
+        cmd.append("--all-profiles")
+    elif profiles:
+        cmd.extend(["--profile", profiles])
+    if skip_tester:
+        cmd.append("--skip-tester")
+
+    # Backend dir is two parents up from this file (api → agents_core → apps).
+    # Walk up explicitly so the subprocess inherits the right CWD even if the
+    # server was started from elsewhere.
+    backend_dir = Path(__file__).resolve().parents[3]
+    log_path = Path("/tmp") / "ai_team_run.log"
+
+    env = os.environ.copy()
+    env.setdefault("DJANGO_SETTINGS_MODULE", "config.settings.dev")
+
+    try:
+        with open(log_path, "ab") as logf:
+            logf.write(f"\n\n=== team run started at {datetime.now(timezone.utc).isoformat()} ===\n".encode())
+            proc = subprocess.Popen(
+                cmd, cwd=str(backend_dir), env=env,
+                stdout=logf, stderr=subprocess.STDOUT,
+                start_new_session=True,   # detach from the server process group
+            )
+    except Exception as e:  # noqa: BLE001
+        return JsonResponse({"started": False, "error": str(e)}, status=500)
+
+    record = {
+        "pid": proc.pid,
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "cmd": " ".join(cmd),
+        "log_path": str(log_path),
+    }
+    cache.set(_RUN_KEY, record, _RUN_TTL)
+    return JsonResponse({"started": True, **record})
+
+
+@never_cache
+def team_status_view(request):
+    """GET /api/v1/agents/palace/status/
+
+    Returns:
+      - running: bool
+      - started_at / pid / cmd: when running
+      - last_finished_at: latest agent_run end-timestamp from the palace
+      - log_tail: last 60 lines of the subprocess log so the FE can show
+                  step progress without exposing a streaming endpoint
+    """
+    rec = cache.get(_RUN_KEY)
+    running = False
+    if rec and _is_alive(rec.get("pid", 0)):
+        running = True
+    elif rec:
+        cache.delete(_RUN_KEY)
+
+    palace = state.load()
+    latest = palace.agent_runs[-1] if palace.agent_runs else None
+
+    log_tail = ""
+    log_path = (rec or {}).get("log_path") or "/tmp/ai_team_run.log"
+    try:
+        with open(log_path, "rb") as f:
+            try:
+                f.seek(0, os.SEEK_END)
+                size = f.tell()
+                f.seek(max(0, size - 4096), os.SEEK_SET)
+                log_tail = f.read().decode(errors="ignore").splitlines()[-60:]
+                log_tail = "\n".join(log_tail)
+            except Exception:  # noqa: BLE001
+                log_tail = ""
+    except FileNotFoundError:
+        log_tail = ""
+
+    return JsonResponse({
+        "running": running,
+        "started_at": (rec or {}).get("started_at"),
+        "pid": (rec or {}).get("pid"),
+        "cmd": (rec or {}).get("cmd"),
+        "last_finished_agent": (latest.__dict__ if latest else None),
+        "log_tail": log_tail,
+    })
 
 
 _BOARD_HTML = r"""<!doctype html>
@@ -281,7 +421,23 @@ _BOARD_HTML = r"""<!doctype html>
     <option value="60000">60s</option>
   </select>
   <button id="refresh">&#8635; Refresh</button>
+  <select id="run-profile" title="Profile for the team run">
+    <option value="all" selected>all personas</option>
+    <option value="default">default</option>
+    <option value="options">options</option>
+    <option value="futures">futures</option>
+    <option value="equity">equity</option>
+    <option value="intraday">intraday</option>
+    <option value="backtester">backtester</option>
+  </select>
+  <button id="run-team" style="background:var(--col-done);color:#0d1117;font-weight:600;">▶ Run AI Team</button>
 </header>
+
+<div id="run-strip" style="display:none;padding:10px 20px;border-bottom:1px solid var(--border-soft);background:var(--surface);font-size:12px;color:var(--fg-muted);">
+  <strong id="run-state" style="color:var(--fg);">—</strong>
+  <span id="run-cmd" style="margin-left:8px;font-family:ui-monospace,Menlo,monospace;color:var(--fg-subtle);"></span>
+  <pre id="run-log" style="margin:8px 0 0;padding:8px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;color:var(--fg-muted);max-height:140px;overflow:auto;font-size:11px;white-space:pre-wrap;"></pre>
+</div>
 
 <div class="profile-strip" id="profile-strip" aria-label="Filter by persona"></div>
 
@@ -550,6 +706,76 @@ function setRefresh(ms) {
   if (timer) { clearInterval(timer); timer = null; }
   if (ms > 0) timer = setInterval(fetchTasks, ms);
 }
+
+/* ───────────── Run AI Team button + status poller ─────────────── */
+async function runTeam() {
+  const profile = document.getElementById("run-profile").value;
+  if (!confirm(
+    `Trigger AI team cycle with profile = "${profile}"?\n\n` +
+    `This takes 3-6 minutes and burns LLM credits.`
+  )) return;
+  const btn = document.getElementById("run-team");
+  btn.disabled = true; btn.textContent = "Starting…";
+  try {
+    const r = await fetch("/api/v1/agents/palace/run/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Accept": "application/json" },
+      body: JSON.stringify({ profiles: profile }),
+    });
+    const data = await r.json();
+    if (data.error) { alert("Failed to start: " + data.error); btn.disabled = false; btn.textContent = "▶ Run AI Team"; return; }
+    if (data.already_running) {
+      alert("A team run is already in progress (started " + relTime(data.started_at) + ").");
+    }
+    startStatusPolling();
+  } catch (e) {
+    alert("Could not start run: " + e.message);
+    btn.disabled = false; btn.textContent = "▶ Run AI Team";
+  }
+}
+
+let statusTimer = null;
+async function pollTeamStatus() {
+  try {
+    const r = await fetch("/api/v1/agents/palace/status/");
+    const data = await r.json();
+    const strip = document.getElementById("run-strip");
+    const btn = document.getElementById("run-team");
+    if (data.running) {
+      strip.style.display = "";
+      document.getElementById("run-state").textContent =
+        "● running · started " + relTime(data.started_at) + " · pid " + data.pid;
+      document.getElementById("run-cmd").textContent = data.cmd || "";
+      document.getElementById("run-log").textContent = data.log_tail || "(waiting for output…)";
+      btn.disabled = true; btn.textContent = "Running…";
+    } else {
+      if (btn.disabled) {
+        // Just finished — flash a one-shot toast + refresh tasks
+        strip.style.display = "";
+        document.getElementById("run-state").textContent = "✓ finished";
+        document.getElementById("run-log").textContent = data.log_tail || "";
+        btn.disabled = false; btn.textContent = "▶ Run AI Team";
+        fetchTasks();
+        // Auto-hide the strip after 30s
+        setTimeout(() => { strip.style.display = "none"; }, 30000);
+      }
+      stopStatusPolling();
+    }
+  } catch (e) {
+    console.warn("status poll failed:", e);
+  }
+}
+function startStatusPolling() {
+  if (statusTimer) return;
+  pollTeamStatus();
+  statusTimer = setInterval(pollTeamStatus, 5000);
+}
+function stopStatusPolling() {
+  if (statusTimer) { clearInterval(statusTimer); statusTimer = null; }
+}
+document.getElementById("run-team").onclick = runTeam;
+// Resume polling if a run is already in flight at page load
+pollTeamStatus();
 
 document.getElementById("refresh").onclick = fetchTasks;
 document.getElementById("d-close").onclick = closeDrawer;
