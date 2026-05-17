@@ -84,73 +84,181 @@ import {
   type SizerResponse, type SlippageEdgeResponse,
 } from "@/lib/cockpits";
 
+type CategoryId = "capital" | "options" | "setups" | "tape" | "sectors" | "exec" | "tools";
+
+const CATEGORIES: { id: CategoryId; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
+  { id: "capital", label: "Capital & Risk",      icon: Briefcase },
+  { id: "options", label: "Options & Expiry",    icon: Sigma },
+  { id: "setups",  label: "Setups & Signals",    icon: Target },
+  { id: "tape",    label: "Tape & Microstructure", icon: Waves },
+  { id: "sectors", label: "Sectors & Flow",      icon: Radar },
+  { id: "exec",    label: "Execution & Trades",  icon: Receipt },
+  { id: "tools",   label: "Tools",               icon: Calculator },
+];
+
 const TABS = [
-  { id: "capital",       label: "Capital",      icon: Briefcase },
-  { id: "plan-vs-actual",label: "Plan vs Actual", icon: GitCompareArrows },
-  { id: "greeks",        label: "Greeks",       icon: Sigma },
-  { id: "signal-funnel", label: "Signal Funnel",icon: Target },
-  { id: "risk-budget",   label: "Risk Budget",  icon: Gauge },
-  { id: "expiry",        label: "Expiry",       icon: Clock },
-  { id: "broker-recon",  label: "Broker Recon", icon: GitCompareArrows },
-  { id: "edge-decay",    label: "Edge Decay",   icon: TrendingDown },
-  { id: "theta",         label: "Theta",        icon: LineChart },
-  { id: "regime",        label: "Regime",       icon: Activity },
-  { id: "correlation",   label: "Correlation",  icon: Grid3X3 },
-  { id: "post-mortem",   label: "Post-Mortem",  icon: Microscope },
-  { id: "gap-risk",      label: "Gap Risk",     icon: Sunrise },
-  { id: "liquidity",     label: "Liquidity",    icon: Droplets },
-  { id: "sizer",         label: "What-If Sizer", icon: Calculator },
-  { id: "stops",         label: "Structural Stops", icon: Shield },
-  { id: "forced-flat",   label: "Forced Flat",  icon: Flag },
-  { id: "slippage-edge", label: "Slippage vs Edge", icon: Scale },
-  { id: "orb",           label: "Opening Range", icon: Zap },
-  { id: "vwap",          label: "VWAP Bands",   icon: Compass },
-  { id: "first5",        label: "First 5-min",  icon: DaybreakIcon },
-  { id: "base",          label: "Base Quality", icon: Award },
-  { id: "mtf",           label: "MTF Stages",   icon: Layers },
-  { id: "breakout",      label: "Fresh vs Extended", icon: Activity },
-  { id: "orb-fail",      label: "OR Failure",   icon: ZapOff },
-  { id: "ledger",        label: "Edge Ledger",  icon: Receipt },
-  { id: "rotation",      label: "Capital Rotation", icon: RotateCw },
-  { id: "gap-fill",      label: "Gap-Fill Prob", icon: Hourglass },
-  { id: "second5",       label: "2nd 5-min",    icon: BookOpen },
-  { id: "vol-regime",    label: "Vol Regime",   icon: Waves },
-  { id: "sector-rrg",    label: "Sector RRG",   icon: Radar },
-  { id: "dispersion",    label: "Sector Disp.", icon: FlaskConical },
-  { id: "tape",          label: "Tape Speed",   icon: Activity },
-  { id: "news-shock",    label: "News Shocks",  icon: Bell },
-  { id: "fii-dii",       label: "FII/DII Flow", icon: LineChart },
-  { id: "depth",         label: "Depth Proxy",  icon: BarChart3 },
-  { id: "earnings",      label: "Earnings",     icon: Calendar },
-  { id: "stock-rrg",     label: "Stock RRG",    icon: Crosshair },
-  { id: "partial-fill",  label: "Partial Fill", icon: PieChart },
-  { id: "isector",       label: "Sector Heatmap (5m)", icon: Flame },
-  { id: "reset",         label: "Reset / Seed", icon: Eraser },
+  // Capital & Risk
+  { cat: "capital", id: "capital",       label: "Capital",      icon: Briefcase },
+  { cat: "capital", id: "risk-budget",   label: "Risk Budget",  icon: Gauge },
+  { cat: "capital", id: "gap-risk",      label: "Gap Risk",     icon: Sunrise },
+  { cat: "capital", id: "correlation",   label: "Correlation",  icon: Grid3X3 },
+  { cat: "capital", id: "stops",         label: "Structural Stops", icon: Shield },
+
+  // Options & Expiry
+  { cat: "options", id: "greeks",        label: "Greeks",       icon: Sigma },
+  { cat: "options", id: "theta",         label: "Theta",        icon: LineChart },
+  { cat: "options", id: "expiry",        label: "Expiry",       icon: Clock },
+
+  // Setups & Signals
+  { cat: "setups", id: "signal-funnel", label: "Signal Funnel",icon: Target },
+  { cat: "setups", id: "edge-decay",    label: "Edge Decay",   icon: TrendingDown },
+  { cat: "setups", id: "regime",        label: "Regime",       icon: Activity },
+  { cat: "setups", id: "mtf",           label: "MTF Stages",   icon: Layers },
+  { cat: "setups", id: "breakout",      label: "Fresh vs Extended", icon: Activity },
+  { cat: "setups", id: "base",          label: "Base Quality", icon: Award },
+  { cat: "setups", id: "orb",           label: "Opening Range", icon: Zap },
+  { cat: "setups", id: "orb-fail",      label: "OR Failure",   icon: ZapOff },
+  { cat: "setups", id: "first5",        label: "First 5-min",  icon: DaybreakIcon },
+  { cat: "setups", id: "second5",       label: "2nd 5-min",    icon: BookOpen },
+  { cat: "setups", id: "gap-fill",      label: "Gap-Fill Prob", icon: Hourglass },
+
+  // Tape & Microstructure
+  { cat: "tape", id: "vwap",          label: "VWAP Bands",   icon: Compass },
+  { cat: "tape", id: "vol-regime",    label: "Vol Regime",   icon: Waves },
+  { cat: "tape", id: "tape",          label: "Tape Speed",   icon: Activity },
+  { cat: "tape", id: "liquidity",     label: "Liquidity",    icon: Droplets },
+  { cat: "tape", id: "depth",         label: "Depth Proxy",  icon: BarChart3 },
+
+  // Sectors & Flow
+  { cat: "sectors", id: "sector-rrg",    label: "Sector RRG",   icon: Radar },
+  { cat: "sectors", id: "stock-rrg",     label: "Stock RRG",    icon: Crosshair },
+  { cat: "sectors", id: "dispersion",    label: "Sector Disp.", icon: FlaskConical },
+  { cat: "sectors", id: "isector",       label: "Sector Heatmap (5m)", icon: Flame },
+  { cat: "sectors", id: "fii-dii",       label: "FII/DII Flow", icon: LineChart },
+  { cat: "sectors", id: "news-shock",    label: "News Shocks",  icon: Bell },
+  { cat: "sectors", id: "earnings",      label: "Earnings",     icon: Calendar },
+
+  // Execution & Trades
+  { cat: "exec", id: "plan-vs-actual",label: "Plan vs Actual", icon: GitCompareArrows },
+  { cat: "exec", id: "ledger",        label: "Edge Ledger",  icon: Receipt },
+  { cat: "exec", id: "partial-fill",  label: "Partial Fill", icon: PieChart },
+  { cat: "exec", id: "post-mortem",   label: "Post-Mortem",  icon: Microscope },
+  { cat: "exec", id: "broker-recon",  label: "Broker Recon", icon: GitCompareArrows },
+  { cat: "exec", id: "forced-flat",   label: "Forced Flat",  icon: Flag },
+  { cat: "exec", id: "rotation",      label: "Capital Rotation", icon: RotateCw },
+
+  // Tools
+  { cat: "tools", id: "sizer",         label: "What-If Sizer", icon: Calculator },
+  { cat: "tools", id: "slippage-edge", label: "Slippage vs Edge", icon: Scale },
+  { cat: "tools", id: "reset",         label: "Reset / Seed", icon: Eraser },
 ] as const;
 
 export function CockpitsPage() {
+  const [category, setCategory] = React.useState<CategoryId>("capital");
+  const [search, setSearch] = React.useState("");
+  const [activeTab, setActiveTab] = React.useState<string>("capital");
+
+  // Search hits every tab regardless of category.
+  const searchHits = React.useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return null;
+    return TABS.filter((t) =>
+      t.label.toLowerCase().includes(q) || t.id.toLowerCase().includes(q),
+    );
+  }, [search]);
+
+  const visibleTabs = searchHits ?? TABS.filter((t) => t.cat === category);
+
+  // Switching category jumps to its first tab; search jumps to first hit.
+  React.useEffect(() => {
+    if (visibleTabs.length > 0 && !visibleTabs.some((t) => t.id === activeTab)) {
+      setActiveTab(visibleTabs[0].id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [category, searchHits]);
+
+  const perCategoryCounts = React.useMemo(() => {
+    const m: Record<string, number> = {};
+    for (const t of TABS) m[t.cat] = (m[t.cat] ?? 0) + 1;
+    return m;
+  }, []);
+
   return (
-    <div className="px-6 py-6 space-y-6 max-w-[1440px] mx-auto">
-      <header>
-        <p className="text-caption uppercase tracking-wider text-fg-subtle">Trader cockpits</p>
-        <h1 className="text-h1 text-fg flex items-center gap-2">
-          <BarChart3 className="h-6 w-6 text-accent" aria-hidden />
-          Cockpits
-        </h1>
-        <p className="text-body-sm text-fg-muted mt-1">
-          Ten read-only aggregations across capital, plan vs actual, Greeks, risk,
-          expiry, broker reconciliation, edge decay, theta burn, and market regime.
-        </p>
+    <div className="px-6 py-6 space-y-4 max-w-[1440px] mx-auto">
+      <header className="flex items-end justify-between flex-wrap gap-3">
+        <div>
+          <p className="text-caption uppercase tracking-wider text-fg-subtle">Trader cockpits</p>
+          <h1 className="text-h1 text-fg flex items-center gap-2">
+            <BarChart3 className="h-6 w-6 text-accent" aria-hidden />
+            Cockpits
+            <span className="text-caption text-fg-subtle font-normal ml-1">
+              {TABS.length} panels
+            </span>
+          </h1>
+        </div>
+        <div className="flex items-center gap-2">
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search panels…"
+            className="h-9 px-3 w-56 bg-surface border border-border rounded-sm text-body-sm"
+          />
+          {search ? (
+            <button
+              onClick={() => setSearch("")}
+              className="h-9 px-2 text-caption text-fg-subtle hover:text-fg"
+              aria-label="Clear search"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          ) : null}
+        </div>
       </header>
 
-      <Tabs defaultValue="capital">
-        <TabsList className="flex-wrap h-auto">
-          {TABS.map(({ id, label, icon: Icon }) => (
-            <TabsTrigger key={id} value={id} className="gap-1.5">
-              <Icon className="h-3.5 w-3.5" aria-hidden /> {label}
-            </TabsTrigger>
-          ))}
-        </TabsList>
+      <div className="grid grid-cols-[200px_1fr] gap-4">
+        {/* Category sidebar */}
+        <nav className="space-y-1" aria-label="Cockpit categories">
+          {CATEGORIES.map(({ id, label, icon: Icon }) => {
+            const active = !search && id === category;
+            return (
+              <button
+                key={id}
+                onClick={() => { setSearch(""); setCategory(id); }}
+                className={cn(
+                  "w-full flex items-center justify-between gap-2 px-3 h-9 text-body-sm rounded-sm border",
+                  "transition-colors",
+                  active
+                    ? "border-accent/40 bg-accent/10 text-fg"
+                    : "border-border bg-surface text-fg-muted hover:bg-surface-2 hover:text-fg",
+                )}
+              >
+                <span className="flex items-center gap-2">
+                  <Icon className="h-3.5 w-3.5" />
+                  {label}
+                </span>
+                <span className="text-caption text-fg-subtle">{perCategoryCounts[id]}</span>
+              </button>
+            );
+          })}
+          {search ? (
+            <div className="px-3 pt-2 text-caption text-fg-subtle">
+              {searchHits!.length} match{searchHits!.length === 1 ? "" : "es"} across all categories.
+            </div>
+          ) : null}
+        </nav>
+
+        {/* Right side: per-category tab strip + tab content */}
+        <div className="min-w-0">
+          <Tabs value={activeTab} onValueChange={setActiveTab}>
+            <TabsList className="flex-wrap h-auto">
+              {visibleTabs.length === 0 ? (
+                <span className="text-body-sm text-fg-subtle px-2 py-1">No panels match "{search}".</span>
+              ) : visibleTabs.map(({ id, label, icon: Icon }) => (
+                <TabsTrigger key={id} value={id} className="gap-1.5">
+                  <Icon className="h-3.5 w-3.5" aria-hidden /> {label}
+                </TabsTrigger>
+              ))}
+            </TabsList>
 
         <TabsContent value="capital"><CapitalPanel /></TabsContent>
         <TabsContent value="plan-vs-actual"><PlanVsActualPanel /></TabsContent>
@@ -193,7 +301,9 @@ export function CockpitsPage() {
         <TabsContent value="partial-fill"><PartialFillPanel /></TabsContent>
         <TabsContent value="isector"><IntradaySectorHeatmapPanel /></TabsContent>
         <TabsContent value="reset"><ResetPanel /></TabsContent>
-      </Tabs>
+          </Tabs>
+        </div>
+      </div>
     </div>
   );
 }
