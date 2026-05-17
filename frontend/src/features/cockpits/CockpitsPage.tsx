@@ -40,6 +40,31 @@ function KPI({ label, value, hint, tone = "neutral" }: {
     </div>
   );
 }
+
+/* ─────────────────────────────────────────────────────────────────── *
+ * HelpBlock — explainer card shown at the top of every cockpit tab.   *
+ * Three slots: what the metric is, why it matters, when to act.       *
+ * ─────────────────────────────────────────────────────────────────── */
+function HelpBlock({ what, why, act }: { what: string; why: string; act: string }) {
+  return (
+    <div className="rounded-md border border-border bg-surface-2/50 p-3 text-body-sm">
+      <div className="grid md:grid-cols-3 gap-3">
+        <Help label="What this is" text={what} />
+        <Help label="Why it matters" text={why} />
+        <Help label="When to act" text={act} />
+      </div>
+    </div>
+  );
+}
+
+function Help({ label, text }: { label: string; text: string }) {
+  return (
+    <div>
+      <div className="text-caption uppercase tracking-wider text-fg-subtle mb-1">{label}</div>
+      <p className="text-fg-muted leading-snug">{text}</p>
+    </div>
+  );
+}
 import {
   simulateSizer, useBrokerRecon, useCapitalCockpit, useCorrelationMatrix,
   useEdgeDecay, useExpiryCockpit, useGapRisk, useGreeksHeatmap, useLiquidityMap,
@@ -128,6 +153,11 @@ function CapitalPanel() {
   if (isLoading || !data) return <LoadingPanel />;
   return (
     <PanelWrap>
+      <HelpBlock
+        what="Where every rupee of your capital is sitting right now — deployed in positions, locked as margin, or free to deploy."
+        why="Notional says how big your bets look on paper; delta-adjusted shows the real directional bet after accounting for option deltas. Leverage above 3× on intraday or 1× on overnight is where stops get triggered by noise."
+        act="If leverage > 3× and the regime is choppy, scale a position down. If free margin < 10% of capital, stop opening new positions until something closes."
+      />
       <section className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <KPI label="Total capital" value={fmtInr(data.total_capital)} />
         <KPI label="Deployed" value={fmtInr(data.deployed_capital)} />
@@ -175,6 +205,11 @@ function PlanVsActualPanel() {
   if (isLoading || !data) return <LoadingPanel />;
   return (
     <PanelWrap>
+      <HelpBlock
+        what="For every trade, what the AI planned vs what the broker actually filled — slippage in basis points (1 bp = 0.01%)."
+        why="Slippage is silent edge erosion. A strategy that backtests at +30 bps/trade and slips 35 bps/trade is net-negative without you noticing."
+        act="If avg |slippage| > 30 bps, switch to limit orders or trade smaller. Symbols showing consistent positive slippage are illiquid — kick them off the watchlist."
+      />
       <section className="grid grid-cols-2 sm:grid-cols-3 gap-3">
         <KPI label="Trades analysed" value={String(data.count)} />
         <KPI label="Avg |slippage|" value={`${fmtNum(data.avg_abs_slippage_bps, 1)} bps`}
@@ -228,6 +263,11 @@ function GreeksPanel() {
   if (isLoading || !data) return <LoadingPanel />;
   return (
     <PanelWrap>
+      <HelpBlock
+        what="Aggregated option Greeks per underlying × expiry. Δ = directional exposure, Γ = how fast Δ moves, Θ = daily decay you collect/pay, V = sensitivity to a 1-vol-point change in IV."
+        why="A 'flat' position with Δ near 0 still bleeds if Θ is paying and rips if Γ explodes near expiry. You need to see all four together to know what's actually risky."
+        act="On NIFTY Tue / SENSEX Thu, if |Δ| > 50 lots and DTE < 1, hedge with futures. If |Γ| spikes near expiry, close ATM and re-strike further out."
+      />
       {data.note ? (
         <Card><CardContent className="py-3 text-body-sm text-fg-muted">{data.note}</CardContent></Card>
       ) : null}
@@ -280,6 +320,11 @@ function SignalFunnelPanel() {
   const t = data.totals;
   return (
     <PanelWrap>
+      <HelpBlock
+        what="The four-stage funnel from signal to outcome: how many fired → cleared @RiskGuard → got executed → ended profitable."
+        why="A leaky funnel is your real edge problem. If 100 fire and only 5 hit, the bottleneck might be risk rules, sizing, or the strategy itself — knowing where matters more than the total count."
+        act="If risk_passed/fired < 30%, your @RiskGuard limits are too tight or your strategies are over-aggressive — fix one. If profitable/executed < 40%, the strategies need re-tuning, not the funnel."
+      />
       <section className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <KPI label="Fired" value={String(t.fired)} />
         <KPI label="Risk passed" value={`${t.risk_passed} (${fmtPct(safeDiv(t.risk_passed, t.fired), 0)})`} />
@@ -332,6 +377,11 @@ function RiskBudgetPanel() {
   const used = data.used_risk_pct;
   return (
     <PanelWrap>
+      <HelpBlock
+        what={`Your daily risk budget — 3% of capital is the hard daily-loss cap (₹${(data.capital * 0.03).toLocaleString("en-IN")}). 'Used risk' is the sum of every open position's loss-if-stop-hit, expressed as % of capital.`}
+        why="Going over the 3% cap triggers @RiskGuard to reject every new trade until next session. The drawdown waterfall shows how many days you've actually breached vs survived — emotional state moves with this number."
+        act="If used_risk > 50%, stop opening new positions until something closes. If drawdown trends down for 5+ days, halve sizing and review the losing strategies in Edge Decay."
+      />
       <section className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <KPI label="Capital" value={fmtInr(data.capital)} />
         <KPI label="Daily P&amp;L" value={fmtInr(data.daily_pnl)}
@@ -370,6 +420,11 @@ function ExpiryPanel() {
   const { data, isLoading } = useExpiryCockpit(underlying);
   return (
     <PanelWrap>
+      <HelpBlock
+        what="Live countdown to expiry-day close (15:15 IST), the strike where most open interest sits ('pin'), and the close-list of every position you must square off."
+        why="ATM gamma explodes after 15:15 — a normal 0.5% move becomes a 5× P&L swing. Holding past 15:15 isn't trading, it's gambling. The pin strike tells you where the market expects the spot to land."
+        act="If is_expiry_day = YES and countdown < 1h, close everything in the close-list now. If pin is within 0.25% of spot and you're short ATM, exit immediately — gamma squeeze risk."
+      />
       <div className="flex items-center gap-2">
         {["NIFTY", "BANKNIFTY", "SENSEX"].map((u) => (
           <button
@@ -436,6 +491,11 @@ function BrokerReconPanel() {
   if (isLoading || !data) return <LoadingPanel />;
   return (
     <PanelWrap>
+      <HelpBlock
+        what="Diff between what the broker (Angel One) reports for today and what your TradeJournal believes happened. Lists rows that exist only in one side."
+        why="Drift here means the v2 stack lost an order, double-booked a trade, or a paper trade leaked into live numbers. Realised P&L computed on stale data gets every downstream metric wrong."
+        act="If mismatched_count > 0, open the offending row in the journal and reconcile by hand before trusting anything else on this dashboard. If the broker side is empty, the broker login failed — re-auth in /brokers."
+      />
       <section className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <KPI label="Broker rows" value={String(data.broker_count)} />
         <KPI label="Journal rows" value={String(data.journal_count)} />
@@ -481,29 +541,61 @@ function ReconList({ title, rows }: { title: string; rows: { symbol: string; sid
 function EdgeDecayPanel() {
   const { data, isLoading } = useEdgeDecay();
   if (isLoading || !data) return <LoadingPanel />;
-  if (data.series.length === 0) return <EmptyState title="Not enough trades to compute edge decay" />;
+  // Backend returns series as {strategy: [points]}; tolerate the older array shape too.
+  const seriesList: { strategy: string; points: { expectancy: number; win_rate: number; as_of?: string; n?: number; avg_r?: number }[] }[] =
+    Array.isArray(data.series)
+      ? (data.series as { strategy: string; points: { expectancy: number; win_rate: number; as_of?: string; n?: number; avg_r?: number }[] }[])
+      : Object.entries(data.series as Record<string, { expectancy: number; win_rate: number; as_of?: string; n?: number; avg_r?: number }[]>)
+          .map(([strategy, points]) => ({ strategy, points }));
+
+  if (seriesList.length === 0)
+    return (
+      <PanelWrap>
+        <HelpBlock
+          what={`Rolling ${data.window}-trade expectancy and win-rate per strategy, in trade order.`}
+          why="Strategies don't stay profitable forever. If expectancy is trending down for 3+ buckets, the setup is decaying — competition caught up, regime shifted, or you're trading a stale signal."
+          act="Pause or down-size any strategy where expectancy turns negative or win-rate drops 10+ points over the last 3 windows. Compare against the Regime tab to see if it's the regime, not the setup."
+        />
+        <EmptyState title="Not enough closed trades yet" description={`Need at least ${data.window} closed trades per strategy.`} />
+      </PanelWrap>
+    );
+
   const palette = ["#22c55e", "#3b82f6", "#f59e0b", "#ef4444", "#8b5cf6", "#06b6d4"];
   return (
     <PanelWrap>
-      {data.series.map((s, idx) => (
-        <Card key={s.strategy}>
-          <CardHeader>
-            <CardTitle>{s.strategy}</CardTitle>
-            <CardDescription>Rolling {data.window}-trade expectancy.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <ResponsiveContainer width="100%" height={200}>
-              <RLineChart data={s.points}>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
-                <XAxis dataKey="trade_idx" tick={{ fill: "var(--color-fg-muted)", fontSize: 11 }} />
-                <YAxis tick={{ fill: "var(--color-fg-muted)", fontSize: 11 }} />
-                <ReTooltip />
-                <Line type="monotone" dataKey="expectancy" stroke={palette[idx % palette.length]} dot={false} strokeWidth={2} />
-              </RLineChart>
-            </ResponsiveContainer>
-          </CardContent>
-        </Card>
-      ))}
+      <HelpBlock
+        what={`Rolling ${data.window}-trade expectancy and win-rate per strategy, plotted in trade order.`}
+        why="If the green line is sloping down on a strategy, your edge is fading — the market caught up or the regime shifted. Catching this early avoids paying a tuition fee."
+        act="Pause or down-size any strategy where expectancy turns negative for 3 windows in a row. Cross-check against the Regime tab — sometimes the strategy is fine, the regime just changed."
+      />
+      {seriesList.map((s, idx) => {
+        const points = (s.points || []).map((p, i) => ({ ...p, idx: i }));
+        const latest = points[points.length - 1];
+        return (
+          <Card key={s.strategy}>
+            <CardHeader>
+              <CardTitle>{s.strategy}</CardTitle>
+              <CardDescription>
+                {points.length} window{points.length === 1 ? "" : "s"} of {data.window} trades
+                {latest ? ` · latest expectancy ${fmtInr(latest.expectancy)} · win-rate ${fmtNum(latest.win_rate, 0)}%` : ""}
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {points.length === 0 ? <EmptyState title="No data" /> : (
+                <ResponsiveContainer width="100%" height={200}>
+                  <RLineChart data={points}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+                    <XAxis dataKey="idx" tick={{ fill: "var(--color-fg-muted)", fontSize: 11 }} />
+                    <YAxis tick={{ fill: "var(--color-fg-muted)", fontSize: 11 }} />
+                    <ReTooltip />
+                    <Line type="monotone" dataKey="expectancy" stroke={palette[idx % palette.length]} dot={false} strokeWidth={2} />
+                  </RLineChart>
+                </ResponsiveContainer>
+              )}
+            </CardContent>
+          </Card>
+        );
+      })}
     </PanelWrap>
   );
 }
@@ -512,9 +604,24 @@ function EdgeDecayPanel() {
 function ThetaPanel() {
   const { data, isLoading } = useThetaForecast();
   if (isLoading || !data) return <LoadingPanel />;
-  if (data.count === 0) return <EmptyState title="No active short-premium positions" />;
+  if (data.count === 0)
+    return (
+      <PanelWrap>
+        <HelpBlock
+          what="Per-minute premium-decay projection for every open short-premium position from now until expiry."
+          why="Theta is income from being short premium. The curve tells you the *shape* of that income — most decay happens in the last 24h, so a position that looks 'fine' today might bleed badly tomorrow."
+          act="If a position's premium-remaining stops decaying (curve flattens with spot moving), gamma is winning over theta — close before it inverts."
+        />
+        <EmptyState title="No active short-premium positions" description="Activates when there's at least one short straddle or sold leg open." />
+      </PanelWrap>
+    );
   return (
     <PanelWrap>
+      <HelpBlock
+        what="Per-minute premium-decay projection for every open short-premium position from now until expiry."
+        why="Theta is income from being short premium. The curve tells you the *shape* of that income — most decay happens in the last 24h, so a position that looks 'fine' today might bleed badly tomorrow."
+        act="If a position's premium-remaining stops decaying (curve flattens with spot moving), gamma is winning over theta — close before it inverts."
+      />
       {data.positions.map((p) => (
         <Card key={p.position_id}>
           <CardHeader>
@@ -549,6 +656,11 @@ function RegimePanel() {
   for (const c of data.cells) cellMap.set(`${c.strategy}|${c.regime}`, c);
   return (
     <PanelWrap>
+      <HelpBlock
+        what="Every strategy's average P&L per trade, sliced by which market regime it was traded in. Green cells = strategy makes money in that regime."
+        why="Most strategies have ONE regime where they print and another where they bleed. Trading the wrong strategy in the wrong regime is the most common edge-killer — this map shows you exactly which combinations to avoid."
+        act="Turn off any strategy whose expectancy in the *current* regime is negative. If a strategy is universally green, scale it up; if universally red, retire it."
+      />
       <div className="flex items-center gap-2">
         <span className="text-body-sm text-fg-muted">Current regime:</span>
         <Badge tone="info">{data.current_regime || "unknown"}</Badge>
@@ -600,7 +712,16 @@ function CorrelationPanel() {
   const { data, isLoading } = useCorrelationMatrix();
   if (isLoading || !data) return <LoadingPanel />;
   if (data.symbols.length === 0)
-    return <EmptyState title="No open positions to correlate" />;
+    return (
+      <PanelWrap>
+        <HelpBlock
+          what="Pairwise return correlation across every open underlying + 'independent bets' count. Sector & factor concentration shown below."
+          why="Five 'different' trades that all correlate 0.9 are actually ONE bet sized 5×. When the market sneezes, you lose 5× the budget you thought you had."
+          act="If independent_bets < 3 and you have > 5 positions, you're concentrated — close one underlying or hedge with a futures short."
+        />
+        <EmptyState title="No open positions to correlate" />
+      </PanelWrap>
+    );
 
   const cell = (rho: number) => {
     const a = Math.min(1, Math.abs(rho));
@@ -611,6 +732,11 @@ function CorrelationPanel() {
   };
   return (
     <PanelWrap>
+      <HelpBlock
+        what="Pairwise return correlation across every open underlying + 'independent bets' count. Sector & factor concentration shown below."
+        why="Five 'different' trades that all correlate 0.9 are actually ONE bet sized 5×. When the market sneezes, you lose 5× the budget you thought you had."
+        act="If independent_bets < 3 and you have > 5 positions, you're concentrated — close one underlying or hedge with a futures short."
+      />
       <section className="grid grid-cols-2 sm:grid-cols-3 gap-3">
         <KPI label="Open underlyings" value={String(data.symbols.length)} />
         <KPI label="Independent bets" value={String(data.independent_bets)}
@@ -696,6 +822,11 @@ function PostMortemPanel() {
   const { data, isLoading } = usePostMortem(month);
   return (
     <PanelWrap>
+      <HelpBlock
+        what="Every closed trade in the chosen month, auto-classified into one of seven failure modes (SL too tight, exit too early, sizing too small, slippage, news shock, regime mismatch, thesis wrong)."
+        why="Without attribution, every loss feels random and unfixable. With it, you can see 'I lose ₹40k/month to stops triggered by noise' and actually do something about it (widen ATR-based stops, swap to a slower timeframe)."
+        act="Tally up the top cause and fix one thing per month. SL too tight → widen by 0.5× ATR. Exit too early → trail with a slower MA. Sizing too small → trust the planner more on high-conviction signals."
+      />
       <div className="flex items-center gap-2">
         <label className="text-body-sm text-fg-muted">Month</label>
         <input
@@ -764,11 +895,25 @@ function GapRiskPanel() {
   const { data, isLoading } = useGapRisk();
   if (isLoading || !data) return <LoadingPanel />;
   if (data.positions.length === 0)
-    return <EmptyState title="No overnight positions" description="Gap risk dashboard activates when at least one position carries to next session." />;
+    return (
+      <PanelWrap>
+        <HelpBlock
+          what="For positions held overnight, projected P&L at ±0.5/1/2% gaps + a pre-market hedge checklist."
+          why="A gap-down opens at the worst possible price — no stop fires, you wear the loss. Knowing the dollar number BEFORE the bell means you can hedge tonight, not panic at 9:15."
+          act="If worst-case at ±2% > daily-loss cap, buy protective wings tonight. Check SGX NIFTY at 8:30 IST — if implied gap > 1%, queue your forced-exit before market open."
+        />
+        <EmptyState title="No overnight positions" description="Gap risk dashboard activates when at least one position carries to next session." />
+      </PanelWrap>
+    );
 
   const steps = ["-2", "-1", "-0.5", "0.5", "1", "2"];
   return (
     <PanelWrap>
+      <HelpBlock
+        what="For positions held overnight, projected P&L at ±0.5/1/2% gaps + a pre-market hedge checklist."
+        why="A gap-down opens at the worst possible price — no stop fires, you wear the loss. Knowing the dollar number BEFORE the bell means you can hedge tonight, not panic at 9:15."
+        act="If worst-case at ±2% > daily-loss cap, buy protective wings tonight. Check SGX NIFTY at 8:30 IST — if implied gap > 1%, queue your forced-exit before market open."
+      />
       <section className="grid grid-cols-2 sm:grid-cols-3 gap-3">
         <KPI label="Positions" value={String(data.positions.length)} />
         <KPI label="Implied gap" value={`${fmtNum(data.implied_gap_pct, 2)}%`}
@@ -837,6 +982,11 @@ function LiquidityPanel() {
   if (isLoading || !data) return <LoadingPanel />;
   return (
     <PanelWrap>
+      <HelpBlock
+        what="Bid/ask spread (in basis points), depth proxy, and rolling 50-fill average slippage for every symbol in your watchlist + open positions."
+        why="A 25-bp spread is fine on entry but kills you on a quick reverse — you give up 50bps in spread alone. Scaling into illiquid names = paying tuition twice."
+        act="Avoid symbols where spread_bps > 20 unless you're using limit orders. If avg_slippage > 30bps for a symbol, switch to slice-by-time execution or drop the symbol."
+      />
       {data.note ? (
         <Card><CardContent className="py-3 text-body-sm text-fg-muted">{data.note}</CardContent></Card>
       ) : null}
@@ -914,6 +1064,11 @@ function SizerPanel() {
 
   return (
     <PanelWrap>
+      <HelpBlock
+        what="Type a hypothetical trade and see exactly what it would do to your portfolio — margin used, free cash, leverage, and worst-case loss if your stop hits."
+        why="The difference between '1 lot feels safe' and '1 lot uses 18% of free margin' is the difference between a controlled day and a margin call. Run the math BEFORE you click."
+        act="If worst-case loss > daily-loss cap room, halve the qty and try again. If leverage post-trade > 3×, close something else first. Entry blank → pulls live LTP automatically."
+      />
       <Card>
         <CardHeader>
           <CardTitle>What-If Position Sizer</CardTitle>

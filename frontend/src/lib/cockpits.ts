@@ -110,9 +110,19 @@ export interface BrokerRecon {
   broker_note?: string;
 }
 
+export interface EdgeDecayPoint {
+  as_of?: string;
+  trade_idx?: number;
+  expectancy: number;
+  win_rate: number;
+  avg_r?: number;
+  n?: number;
+}
+
 export interface EdgeDecay {
   window: number;
-  series: { strategy: string; points: { trade_idx: number; expectancy: number; win_rate: number }[] }[];
+  // Backend returns {strategy_name: [points]}; older shape was an array.
+  series: Record<string, EdgeDecayPoint[]> | { strategy: string; points: EdgeDecayPoint[] }[];
 }
 
 export interface ThetaForecast {
