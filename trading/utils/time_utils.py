@@ -120,14 +120,24 @@ def get_candle_date_range(now: datetime = None) -> tuple:
 def cap_end_time(date_str: str, now: datetime = None) -> str:
     """
     Cap candle end time to current time if fetching today's data.
-    Prevents Angel One "future datetime" error.
+    Prevents Angel One AB1012 "From datetime can't be greater than current datetime".
 
-    Returns: "{date_str} HH:MM" string.
+    Accepts either ``"YYYY-MM-DD"`` or ``"YYYY-MM-DD HH:MM"``.
+    Returns ``"YYYY-MM-DD HH:MM"``.
+
+    Pre-market on a trading day → clamps to 09:15 so the broker doesn't 400 on a
+    time that's after wall-clock but before candles exist. Callers should
+    additionally pivot to ``last_trading_day()`` if they need actual data.
     """
     if now is None:
         now = datetime.now()
-    from datetime import date
-    if date_str == date.today().isoformat():
+    day_part = date_str.split(" ", 1)[0]
+    if day_part == now.date().isoformat():
+        # Today — cap at current wall-clock or market close, whichever earlier.
+        # Floor at MARKET_OPEN to keep the format valid pre-market (the caller
+        # will get [] back from the broker and should fall back to last_trading_day).
         end_t = min(now.time(), MARKET_CLOSE)
-        return f"{date_str} {end_t.strftime('%H:%M')}"
-    return f"{date_str} 15:30"
+        if end_t < MARKET_OPEN:
+            end_t = MARKET_OPEN
+        return f"{day_part} {end_t.strftime('%H:%M')}"
+    return f"{day_part} 15:30"

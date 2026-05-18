@@ -255,6 +255,29 @@ class BrokerClient:
         if exchange is None:
             exchange = self._INDEX_EXCHANGE.get(str(symbol_token), "NSE")
 
+        # Defensive clamp: Angel One returns AB1012 if `fromdate` or `todate`
+        # is in the future relative to broker wall-clock. This happens on every
+        # pre-market fetch where the caller passes "today 09:15 → 15:30".
+        # Short-circuit if the requested window can't possibly have data yet,
+        # so callers see [] + a clear log instead of a stack trace from the SDK.
+        try:
+            from trading.utils.time_utils import cap_end_time
+            now = datetime.now()
+            now_str = now.strftime("%Y-%m-%d %H:%M")
+            if start > now_str:
+                logger.warning(
+                    f"fetch_candles: window {start}..{end} is entirely in the future "
+                    f"(now={now_str}); skipping broker call. "
+                    f"Use trading.utils.time_utils.last_trading_day() for a fallback date."
+                )
+                return []
+            capped = cap_end_time(end, now=now)
+            if capped != end:
+                logger.info(f"fetch_candles: clamped end {end} -> {capped}")
+                end = capped
+        except Exception as e:
+            logger.debug(f"fetch_candles: clamp skipped ({e})")
+
         params = {
             "exchange": exchange,
             "symboltoken": symbol_token,
@@ -564,21 +587,34 @@ class DataService:
     def fetch_intraday(
         self,
         symbol: str,
-        date: str,
+        date: Optional[str] = None,
         interval: str = "FIVE_MINUTE",
     ) -> Dict[str, Any]:
         """
-        Fetch enriched intraday data for a symbol on a given date.
+        Fetch enriched intraday data for a symbol.
+
+        Session-phase aware: if ``date`` is today and the market hasn't opened
+        yet (or is closed / weekend), the response pivots to ``last_trading_day``
+        and the returned dict carries ``is_live=False`` + ``data_age_days`` so
+        the planner knows the structure isn't from a live session.
 
         Args:
             symbol: NSE symbol, e.g. 'MFSL'
-            date: Date string '%Y-%m-%d'
+            date: Date string '%Y-%m-%d'. If None, auto-selects via
+                ``time_utils.get_candle_date_range``.
             interval: FIVE_MINUTE, ONE_HOUR, etc.
 
         Returns:
-            dict with keys: symbol, date, candle_count, last_close,
-                            day_high, day_low, range_pct, summary
+            dict with keys: symbol, date, requested_date, is_live, data_age_days,
+                            session_phase, candle_count, last_close, day_high,
+                            day_low, range_pct, summary
         """
+        from datetime import date as _date
+
+        from trading.utils.time_utils import (
+            can_fetch_candles, get_session_phase, last_trading_day,
+        )
+
         self._ensure_broker()
 
         from trading.services.ticker_service import ticker_service
@@ -586,20 +622,43 @@ class DataService:
         if not token:
             return {"error": f"Token not found for {symbol}", "symbol": symbol}
 
-        start = f"{date} 09:15"
-        end = f"{date} 15:30"
+        requested = date or _date.today().isoformat()
+        phase = get_session_phase()
+        is_today = requested == _date.today().isoformat()
 
-        raw = self._broker.fetch_candles(token, start, end, interval)
+        # If the caller asked for today but live candles aren't available,
+        # pivot to the last completed session. Explicit past dates are
+        # passed through untouched.
+        if is_today and not can_fetch_candles():
+            effective = last_trading_day().isoformat()
+        else:
+            effective = requested
+
+        raw = self._broker.fetch_candles(
+            token, f"{effective} 09:15", f"{effective} 15:30", interval,
+        )
         if not raw:
-            return {"error": "No candle data returned", "symbol": symbol}
+            return {
+                "error": "No candle data returned",
+                "symbol": symbol,
+                "requested_date": requested,
+                "effective_date": effective,
+                "session_phase": phase,
+            }
 
         df = enrich_ohlcv(raw)
+        days_old = (_date.today() - _date.fromisoformat(effective)).days
+        is_live = is_today and effective == requested
 
         # Build summary dict for the graph state
         last_row = df.iloc[-1]
         return {
             "symbol": symbol,
-            "date": date,
+            "date": effective,
+            "requested_date": requested,
+            "is_live": is_live,
+            "data_age_days": days_old,
+            "session_phase": phase,
             "candle_count": len(df),
             "open": float(df.iloc[0]["open"]),
             "last_close": float(last_row["close"]),
@@ -610,18 +669,44 @@ class DataService:
             "new_lows": int(df["new_low"].sum()),
             "doji_count": int(df["doji"].sum()),
             "pivot": float(last_row.get("pivot", 0)),
-            "summary": self._build_text_summary(df, symbol, date),
+            "summary": self._build_text_summary(
+                df, symbol, effective,
+                is_live=is_live, session_phase=phase, days_old=days_old,
+            ),
         }
 
-    def _build_text_summary(self, df: pd.DataFrame, symbol: str, date: str) -> str:
-        """Build a text summary of market data for LLM context."""
+    def _build_text_summary(
+        self,
+        df: pd.DataFrame,
+        symbol: str,
+        date: str,
+        is_live: bool = True,
+        session_phase: str = "REGULAR",
+        days_old: int = 0,
+    ) -> str:
+        """Build a text summary of market data for LLM context.
+
+        The header makes data freshness explicit so the planner can choose
+        between live-structure reasoning and prior-session reasoning.
+        """
         if df.empty:
             return f"No data available for {symbol} on {date}"
 
         last = df.iloc[-1]
         first = df.iloc[0]
+
+        if is_live:
+            header = f"Market Data for {symbol} on {date} (LIVE — {session_phase}):"
+        else:
+            age = "yesterday" if days_old == 1 else f"{days_old} days ago"
+            header = (
+                f"Market Data for {symbol} — last completed session {date} "
+                f"({age}). Current phase: {session_phase}. "
+                f"Live ticks not yet available; reason from this structure."
+            )
+
         return (
-            f"Market Data for {symbol} on {date}:\n"
+            f"{header}\n"
             f"  Open: {first['open']:.2f} | Last Close: {last['close']:.2f}\n"
             f"  Day High: {df['high'].max():.2f} | Day Low: {df['low'].min():.2f}\n"
             f"  Range: {last.get('range', 0):.2f} ({last.get('range_percent', 0):.2f}%)\n"

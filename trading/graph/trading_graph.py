@@ -192,18 +192,18 @@ def fetch_data_node(state: TradingState) -> dict:
             "symbol": "",
         }
 
-    today = date.today().isoformat()
-    logger.info(f"Fetching data for {symbol} on {today}")
+    from trading.utils.time_utils import get_session_phase
+    phase = get_session_phase()
+    logger.info(f"Fetching data for {symbol} (session={phase})")
 
     try:
-        data = _data_service.fetch_intraday(symbol, today)
+        # fetch_intraday auto-pivots to last_trading_day pre-market / weekend.
+        data = _data_service.fetch_intraday(symbol)
 
         if "error" in data:
-            # Data fetch failed but don't block workflow —
-            # planner can still work with RAG context alone
             fallback = (
-                f"Market data unavailable for {symbol} on {today}.\n"
-                f"Reason: {data['error']}\n"
+                f"Market data unavailable for {symbol}.\n"
+                f"Reason: {data['error']} (session={phase})\n"
                 f"Planner should rely on RAG context and strategy rules."
             )
             logger.warning(f"Data fetch issue for {symbol}: {data['error']} — continuing with RAG only")
@@ -211,7 +211,7 @@ def fetch_data_node(state: TradingState) -> dict:
                 "symbol": symbol,
                 "market_data": data,
                 "market_data_raw": fallback,
-                "error": None,  # don't propagate — let planner decide
+                "error": None,
             }
 
         return {
@@ -224,7 +224,7 @@ def fetch_data_node(state: TradingState) -> dict:
     except Exception as e:
         logger.exception(f"Data fetch failed: {e}")
         fallback = (
-            f"Market data unavailable for {symbol} on {today}.\n"
+            f"Market data unavailable for {symbol} (session={phase}).\n"
             f"Reason: {str(e)}\n"
             f"Planner should rely on RAG context and strategy rules."
         )
@@ -232,7 +232,7 @@ def fetch_data_node(state: TradingState) -> dict:
             "symbol": symbol,
             "market_data": None,
             "market_data_raw": fallback,
-            "error": None,  # don't block workflow
+            "error": None,
         }
 
 
