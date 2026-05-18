@@ -86,10 +86,20 @@ echo "[1/3] starting Django ASGI  → http://localhost:8000"
 # --- Celery worker --------------------------------------------------------
 if [[ "$WITH_CELERY" == "1" ]]; then
     echo "[2/3] starting Celery worker"
+    # NOTE on -Q: three tasks declare custom queues:
+    #   apps.agents_core.tasks.run.execute_run     → "agents"
+    #   apps.trading.tasks.outbox.process_outbox   → "orders"
+    #   apps.strategies.tasks.backtest.*           → "backtests"
+    # The default celery worker only consumes the "celery" queue, so without
+    # naming these explicitly here, every API-triggered agent run / order /
+    # backtest message piles up in Redis forever and the run sits in
+    # status=queued. In dev we run one worker across all queues; in prod
+    # you'd run separate workers per queue for isolation.
     (
         cd "$BACKEND_DIR"
         DJANGO_SETTINGS_MODULE=config.settings.dev \
             "$VENV_CELERY" -A config worker -l info \
+            -Q celery,agents,orders,backtests \
             >"$ROOT/logs/celery.log" 2>&1 &
         echo $! >"$ROOT/logs/celery.pid"
     )
