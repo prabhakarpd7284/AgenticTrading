@@ -7,6 +7,7 @@ export * from "./Skeleton";
 export * from "./EmptyState";
 export * from "./ErrorState";
 export * from "./Dialog";
+export * from "./Sheet";
 export * from "./Tabs";
 export * from "./Tooltip";
 export * from "./DataTable";

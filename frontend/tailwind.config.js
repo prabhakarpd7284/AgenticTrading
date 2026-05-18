@@ -87,6 +87,11 @@ export default {
         "fade-in":  { "0%": { opacity: 0 }, "100%": { opacity: 1 } },
         "slide-up": { "0%": { opacity: 0, transform: "translateY(4px)" },
                       "100%": { opacity: 1, transform: "translateY(0)" } },
+        // Right-edge sheet entrance — used by the side-panel primitive
+        // (components/ui/Sheet). 8px overshoot so the eye notices the
+        // arrival without being aggressive.
+        "slide-in-right": { "0%": { opacity: 0, transform: "translateX(8px)" },
+                            "100%": { opacity: 1, transform: "translateX(0)" } },
         shimmer:    { "0%": { backgroundPosition: "-400px 0" },
                       "100%": { backgroundPosition: "400px 0" } },
         pulseGlow:  { "0%,100%": { boxShadow: "0 0 0 0 rgb(var(--accent) / 0.0)" },
@@ -95,6 +100,7 @@ export default {
       animation: {
         "fade-in":  "fade-in 180ms cubic-bezier(0.16, 1, 0.3, 1)",
         "slide-up": "slide-up 240ms cubic-bezier(0.16, 1, 0.3, 1)",
+        "slide-in-right": "slide-in-right 220ms cubic-bezier(0.16, 1, 0.3, 1)",
         shimmer:    "shimmer 1.4s linear infinite",
         "pulse-glow": "pulseGlow 600ms cubic-bezier(0.2, 0, 0, 1) 1",
       },

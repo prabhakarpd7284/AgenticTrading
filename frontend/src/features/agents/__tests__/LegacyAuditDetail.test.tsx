@@ -8,13 +8,14 @@ import type { AuditEntry, EventDetail } from "@/lib/v2";
 
 /**
  * Legacy audit rows in the rail used to be visually-prominent but
- * non-interactive — a dead end. Now they open a detail Dialog that
- * surfaces the full Event row (payload, severity, cross-links) and
- * offers a "Open run" jump when the event ties to a workflow_run.
+ * non-interactive — a dead end. Now they open a right-edge Sheet
+ * (non-modal so the rail stays clickable) that surfaces the full
+ * Event row (payload, severity, cross-links) and offers an
+ * "Open run" jump when the event ties to a workflow_run.
  *
  * This test covers:
- *   - clicking a row with an `id` opens the dialog,
- *   - the dialog renders the payload + cross-links from /events/{id}/,
+ *   - clicking a row with an `id` opens the panel,
+ *   - the panel renders the payload + cross-links from /events/{id}/,
  *   - "Open run" navigates to /agents/<workflow_run> when set,
  *   - rows without an `id` (older bridge payloads) stay inert.
  */
@@ -116,7 +117,7 @@ function renderPage(onLoc: (path: string) => void) {
 }
 
 describe("AgentConsolePage — legacy audit row click", () => {
-  it("opens the EventDetailDialog when clicking a row with id, shows payload, and jumps to the run", async () => {
+  it("opens the right-edge detail panel when clicking a row with id, shows payload, and jumps to the run", async () => {
     let lastPath = "";
     renderPage((p) => { lastPath = p; });
 
