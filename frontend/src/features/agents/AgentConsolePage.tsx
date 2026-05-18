@@ -2,7 +2,9 @@ import * as React from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
-  AlertTriangle, Bot, ChevronRight, CircleDot, Clock, Play, Send, ShieldCheck, Sparkles,
+  AlertTriangle, Bot, Brain, ChevronRight, CircleDot, Clock, Database,
+  Play, Radio, Send, ShieldCheck, Sparkles, Terminal, Wifi, WifiOff, Wrench,
+  type LucideIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -17,10 +19,13 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Badge } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { Skeleton } from "@/components/ui/Skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/Tabs";
+import { FreshnessIndicator } from "@/components/ui/FreshnessIndicator";
 import {
   Dialog, DialogContent, DialogDescription, DialogTitle, DialogTrigger,
 } from "@/components/ui/Dialog";
+import { OpButton } from "@/features/ops/OpButton";
 
 export function AgentConsolePage() {
   const qc = useQueryClient();
@@ -54,6 +59,12 @@ export function AgentConsolePage() {
 
   /* ---------- selected run + stream ---------- */
   const [events, setEvents] = React.useState<AgentEvent[]>([]);
+  // Connection status drives the inline banner. "connecting" covers both the
+  // initial handshake and exponential-backoff reconnects (lib/ws auto-retries
+  // up to 30s). "closed_auth" is a terminal state — the server rejected the
+  // JWT and the lib won't retry. "live" means the socket is open right now.
+  type WsState = "connecting" | "live" | "reconnecting" | "closed_auth";
+  const [wsState, setWsState] = React.useState<WsState>("connecting");
   const feedRef = React.useRef<HTMLDivElement>(null);
   const wsRef = React.useRef<ReturnType<typeof connect>>();
 
@@ -63,9 +74,19 @@ export function AgentConsolePage() {
     setEvents([]);
     wsRef.current?.close();
     if (!selected) return;
-    wsRef.current = connect(`/ws/agents/${selected.id}/`, (msg) => {
-      setEvents((prev) => [...prev, msg as unknown as AgentEvent]);
-    });
+    setWsState("connecting");
+    wsRef.current = connect(
+      `/ws/agents/${selected.id}/`,
+      (msg) => setEvents((prev) => [...prev, msg as unknown as AgentEvent]),
+      {
+        onOpen: () => setWsState("live"),
+        onClose: (ev) => {
+          // 4401/4403 = auth failure, lib stops retrying.
+          if (ev.code === 4401 || ev.code === 4403) setWsState("closed_auth");
+          else setWsState("reconnecting");
+        },
+      },
+    );
     return () => wsRef.current?.close();
   }, [selected?.id]);
 
@@ -180,7 +201,7 @@ export function AgentConsolePage() {
             />
           </div>
         ) : (
-          <RunDetail run={selected} events={events} feedRef={feedRef} />
+          <RunDetail run={selected} events={events} feedRef={feedRef} wsState={wsState} />
         )}
       </section>
     </div>
@@ -191,15 +212,20 @@ export function AgentConsolePage() {
 /* Run detail                                                           */
 /* =================================================================== */
 function RunDetail({
-  run, events, feedRef,
+  run, events, feedRef, wsState,
 }: {
   run: AgentRun;
   events: AgentEvent[];
   feedRef: React.RefObject<HTMLDivElement>;
+  wsState: "connecting" | "live" | "reconnecting" | "closed_auth";
 }) {
   const planEvt = events.find((e) => e.node === "planner" && e.type === "result");
   const riskEvt = events.find((e) => e.node === "risk"    && e.type === "result");
   const execEvt = events.find((e) => e.node === "execute" && e.type === "result");
+
+  const lastTs = events.length ? events[events.length - 1].ts : undefined;
+  const kpis = computeKpis(events);
+  const cli = cliForStrategy(run.strategy_name);
 
   return (
     <>
@@ -213,14 +239,39 @@ function RunDetail({
             run {run.id} · started {fmtRel(run.started_at)} ago
           </div>
         </div>
+        {/* Live freshness pill — reads the timestamp the backend stamps on each
+            WS event. Operators glance here to confirm the stream is healthy. */}
+        <FreshnessIndicator
+          label="Last event"
+          timestamp={lastTs}
+          freshMs={3_000}
+          staleMs={30_000}
+        />
+        {cli && (
+          <OpButton
+            command={cli.command}
+            defaultArgs={cli.args}
+            label="Run via CLI"
+            description={cli.description}
+            icon={<Terminal className="mr-1.5 size-4" />}
+            variant="secondary"
+            size="sm"
+          />
+        )}
         <Badge tone="neutral">
           <Clock className="h-3 w-3 mr-1" aria-hidden /> {fmtRel(run.created_at)}
         </Badge>
       </header>
 
+      <WsStatusBanner state={wsState} />
+
+      {/* KPI strip — read at a glance: how many events, distinct steps, LLM
+          calls so far, time elapsed since the first event. */}
+      <KpiStrip kpis={kpis} />
+
       {/* Risk breach banner */}
       {riskEvt && (riskEvt.payload as any)?.approved === false && (
-        <div role="alert" className="mx-5 mt-5 rounded-md border border-danger/40 bg-pnl-down/5 p-4 flex gap-3 items-start">
+        <div role="alert" className="mx-5 mt-3 rounded-md border border-danger/40 bg-pnl-down/5 p-4 flex gap-3 items-start">
           <AlertTriangle className="h-5 w-5 text-danger shrink-0 mt-0.5" aria-hidden />
           <div className="flex-1">
             <div className="text-body-sm font-semibold text-fg">@RiskGuard blocked this plan</div>
@@ -249,11 +300,11 @@ function RunDetail({
             aria-label="Agent event stream"
           >
             {events.length === 0 ? (
-              <div className="text-body-sm text-fg-subtle">
-                Waiting for events — the desk will stream reasoning, tool calls, and decisions here.
-              </div>
+              <StreamSkeleton wsState={wsState} />
             ) : (
-              events.map((e) => <EventBubble key={e.seq} ev={e} />)
+              events.map((e, i) => (
+                <EventBubble key={e.seq} ev={e} prev={i > 0 ? events[i - 1] : undefined} />
+              ))
             )}
           </div>
         </TabsContent>
@@ -272,22 +323,23 @@ function RunDetail({
   );
 }
 
-function EventBubble({ ev }: { ev: AgentEvent }) {
-  const agentByNode: Record<string, { label: string; tone: "brand" | "info" | "warning" | "success" | "danger" }> = {
-    fetch_data:       { label: "@DataAnalyst",    tone: "info"    },
-    retrieve_context: { label: "@PortfolioTracker",tone: "brand"  },
-    planner:          { label: "@DirectionalTrader",tone: "brand" },
-    generate_action:  { label: "@OptionsStrategist",tone: "brand" },
-    risk:             { label: "@RiskGuard",      tone: "warning" },
-    validate_action:  { label: "@RiskGuard",      tone: "warning" },
-    execute:          { label: "@Broker",         tone: "success" },
-    journal:          { label: "@Journal",        tone: "info"    },
-  };
-  const a = agentByNode[ev.node] ?? { label: ev.node, tone: "info" as const };
+function EventBubble({ ev, prev }: { ev: AgentEvent; prev?: AgentEvent }) {
+  const a = agentForNode(ev.node);
+  const kind = inferStepKind(ev.node);
+  const KindIcon = kind.Icon;
+  const ts = ev.ts ? new Date(ev.ts) : null;
+  const delta = ev.ts && prev?.ts
+    ? new Date(ev.ts).getTime() - new Date(prev.ts).getTime()
+    : null;
+  const clock = ts ? ts.toLocaleTimeString("en-IN", { hour12: false }) : null;
+  const deltaStr = delta != null
+    ? delta < 1000 ? `+${delta}ms` : `+${(delta / 1000).toFixed(1)}s`
+    : null;
 
   if (ev.type === "token") {
     return (
       <div className="flex gap-2">
+        <KindIcon className={cn("h-4 w-4 shrink-0 mt-0.5", kind.colorCls)} aria-hidden />
         <Badge tone={a.tone}>{a.label}</Badge>
         <span className="text-body-sm text-fg whitespace-pre-wrap">{String((ev.payload as any)?.text ?? "")}</span>
       </div>
@@ -301,13 +353,93 @@ function EventBubble({ ev }: { ev: AgentEvent }) {
       isError ? "border-danger/40 bg-pnl-down/5" : "border-border bg-surface-2",
     )}>
       <div className="flex items-center gap-2 mb-1">
+        <KindIcon
+          className={cn("h-4 w-4 shrink-0", isError ? "text-danger" : kind.colorCls)}
+          aria-label={kind.label}
+        />
         <Badge tone={isError ? "danger" : a.tone}>{a.label}</Badge>
         <span className="text-caption text-fg-subtle font-mono uppercase tracking-wider">{ev.type}</span>
-        <span className="text-caption text-fg-subtle ml-auto">#{ev.seq}</span>
+        {clock && (
+          <span className="text-caption text-fg-subtle font-mono tabular ml-auto" title={ts?.toISOString()}>
+            {clock}{deltaStr && <span className="text-fg-subtle/70"> · {deltaStr}</span>}
+          </span>
+        )}
+        <span className={cn("text-caption text-fg-subtle font-mono", !clock && "ml-auto")}>#{ev.seq}</span>
       </div>
       <pre className="text-caption font-mono text-fg-muted whitespace-pre-wrap break-all max-h-64 overflow-auto">
         {safeStringify(ev.payload)}
       </pre>
+    </div>
+  );
+}
+
+/* ---------- KPI strip ---------- */
+function KpiStrip({ kpis }: { kpis: KpiSummary }) {
+  return (
+    <dl className="mx-5 mt-5 grid grid-cols-4 gap-2 rounded-md border border-border bg-surface-2/40 p-2">
+      <KpiCell label="Events" value={String(kpis.eventCount)} />
+      <KpiCell label="Steps" value={String(kpis.distinctNodes)} />
+      <KpiCell label="LLM calls" value={String(kpis.llmCalls)} />
+      <KpiCell
+        label="Elapsed"
+        value={kpis.elapsedMs == null ? "—" : formatElapsed(kpis.elapsedMs)}
+      />
+    </dl>
+  );
+}
+
+function KpiCell({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="px-3 py-1.5">
+      <dt className="text-caption text-fg-subtle uppercase tracking-wider">{label}</dt>
+      <dd className="text-body-sm text-fg font-mono tabular mt-0.5">{value}</dd>
+    </div>
+  );
+}
+
+/* ---------- WS status banner ---------- */
+function WsStatusBanner({ state }: { state: "connecting" | "live" | "reconnecting" | "closed_auth" }) {
+  if (state === "live" || state === "connecting") return null;
+  if (state === "reconnecting") {
+    return (
+      <div role="status" className="mx-5 mt-3 rounded-md border border-warn/40 bg-warn/5 px-3 py-2 flex items-center gap-2 text-body-sm text-fg-muted">
+        <WifiOff className="h-4 w-4 text-warn" aria-hidden />
+        <span>Connection lost — reconnecting…</span>
+      </div>
+    );
+  }
+  // closed_auth — terminal; user has to refresh or re-auth.
+  return (
+    <div role="alert" className="mx-5 mt-3 rounded-md border border-danger/40 bg-pnl-down/5 px-3 py-2 flex items-center gap-2 text-body-sm text-fg">
+      <WifiOff className="h-4 w-4 text-danger" aria-hidden />
+      <span>Stream auth failed. Refresh the page to retry.</span>
+    </div>
+  );
+}
+
+/* ---------- Skeleton while waiting for first event ---------- */
+function StreamSkeleton({ wsState }: { wsState: "connecting" | "live" | "reconnecting" | "closed_auth" }) {
+  const subline =
+    wsState === "live"
+      ? "Connected — waiting for the first event."
+      : wsState === "reconnecting"
+        ? "Reconnecting to the run stream…"
+        : wsState === "closed_auth"
+          ? "Stream auth failed. Refresh the page to retry."
+          : "Connecting to the run stream…";
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-2 text-body-sm text-fg-subtle">
+        {wsState === "live" ? (
+          <Wifi className="h-4 w-4 text-pnl-up" aria-hidden />
+        ) : (
+          <WifiOff className="h-4 w-4 text-fg-subtle" aria-hidden />
+        )}
+        {subline}
+      </div>
+      <Skeleton className="h-16 w-full" />
+      <Skeleton className="h-16 w-5/6" />
+      <Skeleton className="h-16 w-4/6" />
     </div>
   );
 }
@@ -452,4 +584,168 @@ function RunDot({ status }: { status: AgentRun["status"] }) {
 
 function safeStringify(v: unknown) {
   try { return JSON.stringify(v, null, 2); } catch { return String(v); }
+}
+
+/* =================================================================== */
+/* Agent + StepKind classification                                      */
+/* =================================================================== */
+
+// Persona labels per workflow node — these are stable across the three
+// workflows (equity / straddle / pyramid). Keep additions in lock-step
+// with the strategy plugins' graph nodes.
+const AGENT_BY_NODE: Record<string, { label: string; tone: "brand" | "info" | "warning" | "success" | "danger" }> = {
+  fetch_data:       { label: "@DataAnalyst",      tone: "info"    },
+  retrieve_context: { label: "@PortfolioTracker", tone: "brand"   },
+  planner:          { label: "@DirectionalTrader",tone: "brand"   },
+  generate_action:  { label: "@OptionsStrategist",tone: "brand"   },
+  risk:             { label: "@RiskGuard",        tone: "warning" },
+  validate_action:  { label: "@RiskGuard",        tone: "warning" },
+  execute:          { label: "@Broker",           tone: "success" },
+  journal:          { label: "@Journal",          tone: "info"    },
+  init:             { label: "@System",           tone: "info"    },
+};
+
+export function agentForNode(node: string) {
+  return AGENT_BY_NODE[node] ?? { label: node, tone: "info" as const };
+}
+
+// StepKind icons follow the redesign-v2 plan: 🧠 LLM, 🛡 risk, 📡 broker,
+// ⚙ deterministic service, 📓 persistence. Operators learn the symbols
+// fast and can scan a long timeline at a glance.
+export type StepKind = "llm" | "risk" | "broker" | "service" | "persist" | "init";
+
+interface KindInfo {
+  kind: StepKind;
+  Icon: LucideIcon;
+  colorCls: string;
+  label: string;
+}
+
+const STEP_KIND_BY_NODE: Record<string, KindInfo> = {
+  fetch_data:       { kind: "service", Icon: Wrench,   colorCls: "text-fg-muted", label: "Deterministic service" },
+  retrieve_context: { kind: "service", Icon: Wrench,   colorCls: "text-fg-muted", label: "Deterministic service" },
+  planner:          { kind: "llm",     Icon: Brain,    colorCls: "text-brand",    label: "LLM step" },
+  generate_action:  { kind: "llm",     Icon: Brain,    colorCls: "text-brand",    label: "LLM step" },
+  risk:             { kind: "risk",    Icon: ShieldCheck,colorCls: "text-warn",   label: "Risk engine" },
+  validate_action:  { kind: "risk",    Icon: ShieldCheck,colorCls: "text-warn",   label: "Risk engine" },
+  execute:          { kind: "broker",  Icon: Radio,    colorCls: "text-pnl-up",   label: "Broker call" },
+  journal:          { kind: "persist", Icon: Database, colorCls: "text-fg-muted", label: "Persistence" },
+  init:             { kind: "init",    Icon: Sparkles, colorCls: "text-fg-subtle",label: "Init" },
+};
+
+export function inferStepKind(node: string): KindInfo {
+  return STEP_KIND_BY_NODE[node] ?? {
+    kind: "service",
+    Icon: Wrench,
+    colorCls: "text-fg-subtle",
+    label: node,
+  };
+}
+
+/* =================================================================== */
+/* KPI computation                                                      */
+/* =================================================================== */
+export interface KpiSummary {
+  eventCount: number;
+  distinctNodes: number;
+  llmCalls: number;
+  /** ms between first and last event with ts; null if <2 timestamped events. */
+  elapsedMs: number | null;
+}
+
+export function computeKpis(events: AgentEvent[]): KpiSummary {
+  const nodes = new Set<string>();
+  let llmCalls = 0;
+  let firstTs: number | null = null;
+  let lastTs: number | null = null;
+  let timestamped = 0;
+
+  for (const ev of events) {
+    nodes.add(ev.node);
+    // Count distinct LLM-kind steps that produced a result (not every token).
+    // A 50-token streaming planner shouldn't read as "50 LLM calls".
+    if (inferStepKind(ev.node).kind === "llm" && ev.type === "result") {
+      llmCalls += 1;
+    }
+    if (ev.ts) {
+      const t = new Date(ev.ts).getTime();
+      if (!Number.isNaN(t)) {
+        timestamped += 1;
+        if (firstTs == null || t < firstTs) firstTs = t;
+        if (lastTs == null || t > lastTs) lastTs = t;
+      }
+    }
+  }
+
+  // "Elapsed" needs a span. With <2 timestamped events the KPI strip renders
+  // "—" rather than misleading "0ms".
+  const elapsedMs =
+    timestamped >= 2 && firstTs != null && lastTs != null
+      ? lastTs - firstTs
+      : null;
+
+  return {
+    eventCount: events.length,
+    distinctNodes: nodes.size,
+    llmCalls,
+    elapsedMs,
+  };
+}
+
+function formatElapsed(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
+  const m = Math.floor(ms / 60_000);
+  const s = Math.floor((ms % 60_000) / 1000);
+  return `${m}m ${s}s`;
+}
+
+/* =================================================================== */
+/* Strategy → CLI mapping (for the inline OpButton)                     */
+/* =================================================================== */
+// Best-effort match against StrategyCatalog.name (lowercased). The
+// strategy plugins live in backend/plugins/strategy_*; their names map
+// onto the equivalent management commands. If we can't match, we hide
+// the CLI button rather than show a useless one.
+export function cliForStrategy(
+  name: string | undefined,
+): { command: string; args: string; description: string } | null {
+  if (!name) return null;
+  const n = name.toLowerCase();
+  if (n.includes("directional") || n.includes("equity") || n.includes("intraday")) {
+    return {
+      command: "run_trading_agent",
+      args: "--show-journal",
+      description: "Inspect the equity directional journal or fire a new plan.",
+    };
+  }
+  if (n.includes("straddle")) {
+    return {
+      command: "manage_straddle",
+      args: "--list",
+      description: "List, register, or close short-straddle positions.",
+    };
+  }
+  if (n.includes("pyramid")) {
+    return {
+      command: "run_pyramid",
+      args: "--strike 24200 --type CE --dry-run",
+      description: "Pyramid backtest on intraday option candles (dry-run by default).",
+    };
+  }
+  if (n.includes("screener")) {
+    return {
+      command: "run_screener",
+      args: "",
+      description: "Run the live intraday screener.",
+    };
+  }
+  if (n.includes("swing") || n.includes("ok")) {
+    return {
+      command: "run_ok_scanner",
+      args: "--actionable-only",
+      description: "Oliver Kell daily/weekly cycle scan.",
+    };
+  }
+  return null;
 }

@@ -45,6 +45,9 @@ export interface AgentEvent {
   node: string;
   type: "token" | "state" | "result" | "error" | "info";
   payload: Record<string, unknown>;
+  /** Server-side ISO timestamp stamped at emit time. Optional — older
+   *  publishers (pre-May-2026) and unit-test fixtures may omit it. */
+  ts?: string;
 }
 
 export interface JournalEntry {

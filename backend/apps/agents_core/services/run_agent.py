@@ -35,10 +35,18 @@ class ChannelsPublisher:
         except Exception:  # noqa: BLE001
             log.exception("agentstep.save_failed", run_id=str(self.run_id))
 
+        # Stamp the wire payload with a server-side timestamp so the UI can
+        # render per-event clock times + inter-step latencies without trusting
+        # the operator's local clock. We attach it at emit time (not on the
+        # AgentEvent contract) so plugin nodes don't have to construct it —
+        # AgentStep.created_at remains the canonical persisted timestamp.
+        payload = event.model_dump()
+        payload["ts"] = timezone.now().isoformat()
+
         group = f"agent.{self.tenant_id}.{self.run_id}"
         try:
             asyncio.run(
-                self._layer.group_send(group, {"type": "agent.event", "event": event.model_dump()})
+                self._layer.group_send(group, {"type": "agent.event", "event": payload})
             )
         except Exception:  # noqa: BLE001
             log.exception("channel.group_send_failed", run_id=str(self.run_id))
