@@ -401,6 +401,12 @@ def audit(request):
     )
     feed = [
         {
+            # Surface the underlying Event PK so the UI can click through to
+            # /api/v1/events/<id>/ for the full row (payload, severity,
+            # workflow_run linkage, etc.). Without this, the legacy compat
+            # shape was a write-only projection and the audit list in the
+            # Agents Console couldn't open a detail view.
+            "id":     e.id,
             "time":   e.ts.strftime("%H:%M:%S"),
             "type":   _EVENT_TO_LEGACY.get(e.type, e.type),
             "symbol": (e.payload or {}).get("symbol", "") or (e.text.split()[0] if e.text else ""),

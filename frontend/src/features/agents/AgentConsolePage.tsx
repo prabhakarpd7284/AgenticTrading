@@ -3,7 +3,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   AlertTriangle, Bot, Brain, ChevronRight, CircleDot, Clock, Database,
-  Play, Radio, Send, ShieldCheck, Sparkles, Terminal, Wifi, WifiOff, Wrench,
+  ExternalLink, Play, Radio, Send, ShieldCheck, Sparkles, Terminal,
+  Wifi, WifiOff, Wrench,
   type LucideIcon,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -12,7 +13,7 @@ import { api } from "@/lib/api";
 import { connect } from "@/lib/ws";
 import type { AgentEvent, AgentRun, Portfolio, StrategySchema } from "@/types";
 import { cn, fmtRel } from "@/lib/utils";
-import { useAuditFeed } from "@/lib/v2";
+import { useAuditFeed, useEvent } from "@/lib/v2";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
@@ -56,6 +57,10 @@ export function AgentConsolePage() {
   // content on day one (the legacy DB has 398 AuditLog rows from the
   // Streamlit-era pipelines).
   const { data: legacyAudit = [] } = useAuditFeed(50);
+
+  // Which legacy audit row (Event PK) the user has clicked to inspect.
+  // `undefined` keeps the EventDetailDialog suspended (useEvent gates on it).
+  const [auditEventId, setAuditEventId] = React.useState<number | undefined>();
 
   /* ---------- selected run + stream ---------- */
   const [events, setEvents] = React.useState<AgentEvent[]>([]);
@@ -170,17 +175,44 @@ export function AgentConsolePage() {
                     Legacy audit log · {legacyAudit.length}
                   </div>
                   <ul className="divide-y divide-border">
-                    {legacyAudit.map((e, i) => (
-                      <li key={i} className="px-4 py-2.5 flex items-start gap-2">
-                        <div className="flex-1 min-w-0">
-                          <div className="text-body-sm text-fg truncate">{e.detail}</div>
-                          <div className="text-caption text-fg-subtle font-mono">
-                            {e.time}{e.symbol && ` · ${e.symbol}`}
+                    {legacyAudit.map((e, i) => {
+                      // Older bridge payloads may omit `id`. Rows without an
+                      // id can't link to a detail page so we render them as
+                      // plain <li> with a "no detail" hint instead of a
+                      // dead button.
+                      const inner = (
+                        <>
+                          <div className="flex-1 min-w-0">
+                            <div className="text-body-sm text-fg truncate">{e.detail}</div>
+                            <div className="text-caption text-fg-subtle font-mono">
+                              {e.time}{e.symbol && ` · ${e.symbol}`}
+                            </div>
                           </div>
-                        </div>
-                        <Badge tone="neutral" className="shrink-0">{e.type.split("_")[0]}</Badge>
-                      </li>
-                    ))}
+                          <Badge tone="neutral" className="shrink-0">{e.type.split("_")[0]}</Badge>
+                        </>
+                      );
+                      return (
+                        <li key={e.id ?? i}>
+                          {e.id != null ? (
+                            <button
+                              type="button"
+                              onClick={() => setAuditEventId(e.id)}
+                              className="w-full text-left px-4 py-2.5 flex items-start gap-2 hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:outline-none"
+                              aria-label={`Open detail for ${e.type} at ${e.time}`}
+                            >
+                              {inner}
+                            </button>
+                          ) : (
+                            <div
+                              className="px-4 py-2.5 flex items-start gap-2 opacity-80"
+                              title="No detail available for this entry"
+                            >
+                              {inner}
+                            </div>
+                          )}
+                        </li>
+                      );
+                    })}
                   </ul>
                 </div>
               )}
@@ -204,6 +236,18 @@ export function AgentConsolePage() {
           <RunDetail run={selected} events={events} feedRef={feedRef} wsState={wsState} />
         )}
       </section>
+
+      {/* Detail dialog for a clicked legacy audit row. The dialog is the
+          rail's portal into the v2 Event log — useEvent only fires when an
+          id is set, so this stays cheap when nothing is selected. */}
+      <EventDetailDialog
+        id={auditEventId}
+        onClose={() => setAuditEventId(undefined)}
+        onJumpToRun={(runUuid) => {
+          setAuditEventId(undefined);
+          nav(`/agents/${runUuid}`);
+        }}
+      />
     </div>
   );
 }
@@ -442,6 +486,129 @@ function StreamSkeleton({ wsState }: { wsState: "connecting" | "live" | "reconne
       <Skeleton className="h-16 w-4/6" />
     </div>
   );
+}
+
+/* =================================================================== */
+/* Event detail dialog (legacy audit row drilldown)                     */
+/* =================================================================== */
+function EventDetailDialog({
+  id, onClose, onJumpToRun,
+}: {
+  id: number | undefined;
+  onClose: () => void;
+  onJumpToRun: (runUuid: string) => void;
+}) {
+  const { data: ev, isLoading, isError } = useEvent(id);
+  const open = id != null;
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
+      <DialogContent className="w-[min(92vw,720px)] max-h-[85vh] overflow-auto">
+        <DialogTitle>Event detail</DialogTitle>
+        <DialogDescription>
+          Full row from the unified Event log. Type, severity, payload, and any
+          workflow / trade / order linkage.
+        </DialogDescription>
+
+        {isLoading && (
+          <div className="mt-4 space-y-2" aria-label="Loading event">
+            <Skeleton className="h-5 w-1/2" />
+            <Skeleton className="h-32 w-full" />
+            <Skeleton className="h-5 w-1/3" />
+          </div>
+        )}
+
+        {isError && (
+          <div role="alert" className="mt-4 rounded-md border border-danger/40 bg-pnl-down/5 p-3 text-body-sm text-fg">
+            Failed to load event. The row may have been pruned or you lack permission.
+          </div>
+        )}
+
+        {ev && (
+          <div className="mt-4 space-y-4">
+            {/* ── Identity strip ── */}
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge tone={severityTone(ev.severity)}>{ev.severity}</Badge>
+              <span className="text-body-sm font-mono text-fg">{ev.type}</span>
+              <span className="text-caption text-fg-subtle font-mono">
+                {new Date(ev.ts).toLocaleString("en-IN", { hour12: false })}
+              </span>
+              <span className="text-caption text-fg-subtle ml-auto">#{ev.id}</span>
+            </div>
+
+            {/* ── Human-readable line ── */}
+            {ev.text && (
+              <p className="text-body-sm text-fg whitespace-pre-wrap border-l-2 border-border pl-3">
+                {ev.text}
+              </p>
+            )}
+
+            {/* ── Cross-links ── */}
+            <dl className="grid grid-cols-[max-content_1fr] gap-x-3 gap-y-1 text-caption font-mono">
+              <dt className="text-fg-subtle">actor</dt>
+              <dd className="text-fg">{ev.actor_kind}{ev.actor_user != null && ` · user ${ev.actor_user}`}</dd>
+              {ev.step_name && (
+                <>
+                  <dt className="text-fg-subtle">step</dt>
+                  <dd className="text-fg">{ev.step_name}</dd>
+                </>
+              )}
+              {ev.request_id && (
+                <>
+                  <dt className="text-fg-subtle">request</dt>
+                  <dd className="text-fg break-all">{ev.request_id}</dd>
+                </>
+              )}
+              {ev.trade_id && (
+                <>
+                  <dt className="text-fg-subtle">trade</dt>
+                  <dd className="text-fg break-all">{ev.trade_id}</dd>
+                </>
+              )}
+              {ev.order && (
+                <>
+                  <dt className="text-fg-subtle">order</dt>
+                  <dd className="text-fg break-all">{ev.order}</dd>
+                </>
+              )}
+              {ev.signal_id != null && (
+                <>
+                  <dt className="text-fg-subtle">signal</dt>
+                  <dd className="text-fg">{ev.signal_id}</dd>
+                </>
+              )}
+            </dl>
+
+            {/* ── Payload JSON ── */}
+            <div>
+              <div className="text-caption uppercase tracking-wider text-fg-subtle mb-1">payload</div>
+              <pre className="text-caption font-mono text-fg-muted whitespace-pre-wrap break-all max-h-72 overflow-auto rounded-sm border border-border bg-surface-2 p-3">
+                {ev.payload ? safeStringify(ev.payload) : "(empty)"}
+              </pre>
+            </div>
+
+            {/* ── Actions ── */}
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-border">
+              {ev.workflow_run && (
+                <Button
+                  size="sm"
+                  onClick={() => onJumpToRun(ev.workflow_run!)}
+                  leading={<ExternalLink className="h-3.5 w-3.5" />}
+                >
+                  Open run
+                </Button>
+              )}
+              <Button variant="secondary" size="sm" onClick={onClose}>Close</Button>
+            </div>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function severityTone(s: "info" | "warn" | "error"): "info" | "warning" | "danger" {
+  return s === "error" ? "danger" : s === "warn" ? "warning" : "info";
 }
 
 function JsonCard({ title, payload, emptyHint }: { title: string; payload?: unknown; emptyHint: string }) {

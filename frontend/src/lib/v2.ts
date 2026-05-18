@@ -94,10 +94,32 @@ export interface Trade {
 }
 
 export interface AuditEntry {
+  /** Underlying Event PK — present in v2; absent on rows produced by older
+   *  bridge code. Drives click-through to /events/{id}/ for detail. */
+  id?: number;
   time: string;
   type: string;
   symbol: string;
   detail: string;
+}
+
+/** Full Event row as returned by /api/v1/events/{id}/. See backend
+ *  EventSerializer (apps/events/api/views.py) for canonical field list. */
+export interface EventDetail {
+  id: number;
+  ts: string;
+  type: string;
+  severity: "info" | "warn" | "error";
+  actor_kind: string;
+  actor_user: number | null;
+  workflow_run: string | null;   // UUID of the AgentRun, if any
+  step_name: string;
+  trade_id: string | null;
+  order: string | null;
+  signal_id: number | null;
+  payload: Record<string, unknown> | null;
+  text: string;
+  request_id: string;
 }
 
 export interface RiskOverview {
@@ -216,6 +238,18 @@ export function useAuditFeed(limit = 25) {
         .get<{ results: AuditEntry[] }>(`/events/audit/?limit=${limit}`)
         .then((r) => r.data.results),
     refetchInterval: REFETCH_MS,
+  });
+}
+
+/** Fetch a single Event row from /api/v1/events/{id}/.
+ *  Enabled only when `id` is set — call sites pass `undefined` to suspend the
+ *  fetch (e.g. while the detail dialog is closed). */
+export function useEvent(id: number | undefined) {
+  return useQuery({
+    queryKey: ["event", id],
+    queryFn: () => api.get<EventDetail>(`/events/${id}/`).then((r) => r.data),
+    enabled: id != null,
+    staleTime: 60_000,   // Event rows are append-only; cache aggressively.
   });
 }
 
