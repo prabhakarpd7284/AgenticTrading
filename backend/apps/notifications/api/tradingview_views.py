@@ -405,6 +405,89 @@ class GroupedSignalsView(APIView):
         return Response({"by": by, "rows": rows, "window_days": days})
 
 
+class GroupedSignalsDetailView(APIView):
+    """Drill-in for a single bucket in the grouped-signals view.
+
+    Returns up to 50 raw Signal rows that aggregate into the bucket the
+    operator clicked. Query params mirror GroupedSignalsView so the same
+    filters compose:
+
+      by=symbol|strategy|source|day   (default: symbol)
+      key=<bucket key>                (required — e.g. "RELIANCE")
+      days=N                          (default 7, max 90)
+      source=...                      (optional source filter)
+      watchlist=<uuid>                (optional)
+
+    Response: {key, by, rows: [{id, signal_time, symbol, side, source,
+    strategy, entry_price, reasons, indicators, trade_id, outcome}, ...]}
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        tenant = request.tenant
+        by = (request.query_params.get("by") or "symbol").lower()
+        if by not in _VALID_GROUP_BY:
+            return Response(
+                {"detail": f"by must be one of {sorted(_VALID_GROUP_BY)}"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        key = request.query_params.get("key") or ""
+        if not key:
+            return Response({"detail": "key is required"}, status=400)
+
+        try:
+            days = min(max(int(request.query_params.get("days") or 7), 1), 90)
+        except ValueError:
+            days = 7
+        since = timezone.now() - timedelta(days=days)
+
+        qs = Signal.objects.filter(tenant=tenant, signal_time__gte=since)
+
+        source = request.query_params.get("source")
+        if source:
+            qs = qs.filter(source=source.upper())
+
+        watchlist_id = request.query_params.get("watchlist")
+        if watchlist_id:
+            wl = (Watchlist.objects
+                  .filter(tenant=tenant, owner=request.user, pk=watchlist_id)
+                  .first())
+            if wl and wl.symbols:
+                qs = qs.filter(symbol__in=wl.symbols)
+            else:
+                qs = qs.none()
+
+        # Final bucket filter. The `day` group field is virtual so we filter
+        # on raw signal_date instead.
+        if by == "day":
+            from datetime import date as _date
+            try:
+                d = _date.fromisoformat(key)
+                qs = qs.filter(signal_date=d)
+            except ValueError:
+                return Response({"detail": "day key must be ISO yyyy-mm-dd"}, status=400)
+        else:
+            field_map = {"symbol": "symbol", "strategy": "strategy", "source": "source"}
+            qs = qs.filter(**{field_map[by]: key})
+
+        rows = list(
+            qs.order_by("-signal_time")
+              .values(
+                  "id", "signal_time", "symbol", "side", "source",
+                  "strategy", "entry_price", "stoploss", "target",
+                  "reasons", "indicators", "trade_id", "outcome",
+              )[:50]
+        )
+        for r in rows:
+            if r.get("signal_time"):
+                r["signal_time"] = r["signal_time"].isoformat()
+            if r.get("trade_id"):
+                r["trade_id"] = str(r["trade_id"])
+
+        return Response({"by": by, "key": key, "rows": rows})
+
+
 def _group_signals(qs, by: str) -> list[dict]:
     """Bucket the queryset by the chosen dimension. Returns rows sorted by
     `count desc` (most active first). `day` returns ISO date strings; the

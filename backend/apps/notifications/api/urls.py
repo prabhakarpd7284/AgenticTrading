@@ -2,6 +2,7 @@ from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
 from apps.notifications.api.tradingview_views import (
+    GroupedSignalsDetailView,
     GroupedSignalsView,
     TradingViewLinkViewSet,
 )
@@ -23,5 +24,11 @@ urlpatterns = [
         "tradingview/signals/",
         GroupedSignalsView.as_view(),
         name="tradingview-grouped-signals",
+    ),
+    # Drill-in for one bucket — clicked-row → side panel with raw rows.
+    path(
+        "tradingview/signals/detail/",
+        GroupedSignalsDetailView.as_view(),
+        name="tradingview-grouped-signals-detail",
     ),
 ]

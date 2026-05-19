@@ -1,31 +1,30 @@
 /**
- * TradingView Manager — dedicated page for managing the TradingView
- * integration: webhook links, watchlists, and a faceted view of incoming
- * signals.
+ * TradingView Manager — sidebar + main pane layout.
  *
- *   /tradingview
+ *   ┌─Sidebar 260px ──────┬─Main pane ──────────────────────────┐
+ *   │ WATCHLISTS    [+]   │ Signals · group by · filters         │
+ *   │ ● All signals       │                                       │
+ *   │ ─ Top-N rank        │ GROUPED ROWS (click → drill-in)       │
+ *   │ ─ TV hot            │                                       │
+ *   │                     │                                       │
+ *   │ WEBHOOK LINKS [+]   │                                       │
+ *   │ ─ TV alerts ●       │                                       │
+ *   └─────────────────────┴───────────────────────────────────────┘
  *
- *   ┌─ KPI strip ─────────────────────────────────────────────────────────┐
- *   │ Links · Watchlists · Signals (7d) · Last alert                       │
- *   └──────────────────────────────────────────────────────────────────────┘
- *   ┌─ Webhook links (reuses TradingViewSection from broker page) ────────┐
- *   ...
- *   ┌─ Watchlists ─────────────────────────────────────────────────────────┐
- *   ...
- *   ┌─ Signals · group by [symbol|strategy|source|day] ───────────────────┐
- *   ...
+ * Sidebar = filter + management list (compact rows). Main pane = signals
+ * feed (primary). Sheets handle settings + drill-in so the main pane never
+ * loses focus. Replaces the old three-section stack which forced operators
+ * to scroll past management UI to see what was firing.
  */
 import * as React from "react";
 import { toast } from "sonner";
 import {
-  Plus, RefreshCw, Sparkles, Tag, Trash2, X, Zap,
+  AlertCircle, ChevronDown, ChevronRight, Copy, ExternalLink, Plus,
+  RefreshCw, Settings, Sparkles, Trash2, X, Zap,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
-import {
-  Card, CardContent, CardDescription, CardHeader, CardTitle,
-} from "@/components/ui/Card";
 import {
   Dialog, DialogContent, DialogDescription, DialogTitle,
 } from "@/components/ui/Dialog";
@@ -33,138 +32,749 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { FreshnessIndicator } from "@/components/ui/FreshnessIndicator";
 import { Input } from "@/components/ui/Input";
 import { Skeleton } from "@/components/ui/Skeleton";
+import {
+  Sheet, SheetBody, SheetContent, SheetFooter, SheetHeader, SheetTitle,
+} from "@/components/ui/Sheet";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/Tabs";
 
 import {
   type GroupedSignalRow, type SignalGroupBy,
-  type Watchlist, type WatchlistKind,
+  type TradingViewLink, type TradingViewSignalRow,
+  type WatchlistKind,
   WATCHLIST_KIND_META,
-  useAddSymbolsToWatchlist, useCreateWatchlist,
-  useDeleteWatchlist, useGroupedSignals,
-  useRefreshWatchlist,
-  useRemoveSymbolsFromWatchlist, useTradingViewLinks,
-  useWatchlistKinds, useWatchlists, useUpdateWatchlist,
+  useAddSymbolsToWatchlist, useCreateTradingViewLink, useCreateWatchlist,
+  useDeleteTradingViewLink, useDeleteWatchlist,
+  useGroupedSignals, useGroupedSignalsDetail,
+  useRefreshWatchlist, useRemoveSymbolsFromWatchlist,
+  useRotateTradingViewSecret, useTradingViewLinks, useTradingViewRecent,
+  useUpdateTradingViewLink, useUpdateWatchlist,
+  useWatchlistKinds, useWatchlists,
 } from "@/lib/v2";
-import { cn, fmtRel } from "@/lib/utils";
+import { cn, fmtRel, safeStringify } from "@/lib/utils";
 
-import { TradingViewSection } from "@/features/broker/TradingViewSection";
+const WATCHLIST_FILTER_ALL = "__all__";
 
 
 export function TradingViewPage() {
-  const linksQ = useTradingViewLinks();
-  const watchlistsQ = useWatchlists();
-  const groupedQ = useGroupedSignals({ by: "symbol", days: 7 });
-
-  const totalSignals = (groupedQ.data?.rows || []).reduce((s, r) => s + r.count, 0);
-  const lastAlert = (linksQ.data || [])
-    .map((l) => l.last_received_at)
-    .filter(Boolean)
-    .sort()
-    .at(-1);
+  // Sidebar selection — "all signals" by default. Picking a watchlist
+  // filters the main signals feed to its symbols.
+  const [watchlistFilter, setWatchlistFilter] = React.useState<string>(WATCHLIST_FILTER_ALL);
+  const [editingLinkId, setEditingLinkId] = React.useState<string | undefined>();
+  const [editingWatchlistId, setEditingWatchlistId] = React.useState<string | undefined>();
+  const [drillKey, setDrillKey] = React.useState<string | undefined>();
+  const [newWatchlistOpen, setNewWatchlistOpen] = React.useState(false);
+  const [newLinkOpen, setNewLinkOpen] = React.useState(false);
 
   return (
-    <div className="px-6 py-6 space-y-6 max-w-[1440px] mx-auto">
-      <header>
-        <p className="text-caption uppercase tracking-wider text-fg-subtle">Integration</p>
-        <h1 className="text-h1 text-fg">TradingView Manager</h1>
-        <p className="text-body-sm text-fg-muted mt-1 max-w-2xl">
-          Webhook URLs, named watchlists, and grouped incoming signals — all
-          in one place. Configure auto-fire per link to turn alerts into
-          AgentRuns (RiskGuard still gates execution).
-        </p>
-      </header>
+    <div className="grid grid-cols-[260px_1fr] min-h-[calc(100vh-3.5rem)]">
+      <SidebarPane
+        watchlistFilter={watchlistFilter}
+        onWatchlistFilterChange={setWatchlistFilter}
+        onEditWatchlist={setEditingWatchlistId}
+        onEditLink={setEditingLinkId}
+        onNewWatchlist={() => setNewWatchlistOpen(true)}
+        onNewLink={() => setNewLinkOpen(true)}
+      />
 
-      {/* ── KPI strip ───────────────────────────────────────────────── */}
-      <dl className="grid grid-cols-2 md:grid-cols-4 gap-2 rounded-md border border-border bg-surface-2/40 p-2">
-        <KpiCell
-          label="Webhook links"
-          value={String((linksQ.data || []).length)}
-        />
-        <KpiCell
-          label="Watchlists"
-          value={String((watchlistsQ.data || []).length)}
-        />
-        <KpiCell
-          label="Signals · 7d"
-          value={String(totalSignals)}
-        />
-        <KpiCell
-          label="Last alert"
-          value={lastAlert ? `${fmtRel(lastAlert)} ago` : "—"}
-        />
-      </dl>
+      <MainPane
+        watchlistFilter={watchlistFilter === WATCHLIST_FILTER_ALL ? undefined : watchlistFilter}
+        groupBy={undefined}    /* MainPane owns its own group/window state */
+        onRowDrill={setDrillKey}
+      />
 
-      {/* ── Webhook links (reused section) ──────────────────────────── */}
-      <TradingViewSection />
-
-      {/* ── Watchlists ──────────────────────────────────────────────── */}
-      <WatchlistsCard />
-
-      {/* ── Grouped signals ─────────────────────────────────────────── */}
-      <GroupedSignalsCard />
+      {/* ── Sheets + Dialogs (rendered outside main flow) ─────────── */}
+      <NewWatchlistDialog open={newWatchlistOpen} onClose={() => setNewWatchlistOpen(false)} />
+      <NewLinkDialog open={newLinkOpen} onClose={() => setNewLinkOpen(false)} />
+      <LinkSettingsSheet
+        linkId={editingLinkId}
+        onClose={() => setEditingLinkId(undefined)}
+      />
+      <WatchlistSheet
+        watchlistId={editingWatchlistId}
+        onClose={() => setEditingWatchlistId(undefined)}
+      />
+      <SignalDrillSheet
+        drillKey={drillKey}
+        watchlistFilter={watchlistFilter === WATCHLIST_FILTER_ALL ? undefined : watchlistFilter}
+        onClose={() => setDrillKey(undefined)}
+      />
     </div>
   );
 }
 
 
 /* =================================================================== */
-/* Watchlists                                                           */
+/* Sidebar                                                              */
 /* =================================================================== */
 
-function WatchlistsCard() {
-  const { data: watchlists = [], isLoading } = useWatchlists();
-  const [newOpen, setNewOpen] = React.useState(false);
+function SidebarPane({
+  watchlistFilter, onWatchlistFilterChange,
+  onEditWatchlist, onEditLink,
+  onNewWatchlist, onNewLink,
+}: {
+  watchlistFilter: string;
+  onWatchlistFilterChange: (id: string) => void;
+  onEditWatchlist: (id: string) => void;
+  onEditLink: (id: string) => void;
+  onNewWatchlist: () => void;
+  onNewLink: () => void;
+}) {
+  const { data: watchlists = [], isLoading: wlLoading } = useWatchlists();
+  const { data: links = [], isLoading: linksLoading } = useTradingViewLinks();
 
   return (
-    <Card>
-      <CardHeader className="flex flex-row items-start justify-between gap-3">
-        <div>
-          <CardTitle className="flex items-center gap-2">
-            Watchlists
-            <Badge tone="neutral">{watchlists.length}</Badge>
-          </CardTitle>
-          <CardDescription>
-            Named symbol lists. Use as a soft filter on the signals view below,
-            or as a reference when configuring auto-fire allowlists.
-          </CardDescription>
-        </div>
-        <Button size="sm" onClick={() => setNewOpen(true)} leading={<Plus className="h-3.5 w-3.5" />}>
-          New watchlist
-        </Button>
-      </CardHeader>
-      <CardContent>
-        {isLoading ? (
-          <Skeleton className="h-24 w-full" />
-        ) : watchlists.length === 0 ? (
-          <EmptyState
-            icon={<Tag />}
-            title="No watchlists yet"
-            description="Create one to group symbols you want to track from TradingView alerts."
+    <aside className="border-r border-border bg-surface/50 flex flex-col min-h-0 overflow-auto">
+      <div className="h-12 px-4 flex items-center border-b border-border sticky top-0 bg-surface/80 backdrop-blur z-sticky">
+        <h2 className="text-body-sm font-semibold text-fg">TradingView</h2>
+      </div>
+
+      <SidebarSection
+        title="Watchlists"
+        count={watchlists.length}
+        onAdd={onNewWatchlist}
+        addLabel="New watchlist"
+      >
+        <SidebarRow
+          selected={watchlistFilter === WATCHLIST_FILTER_ALL}
+          onClick={() => onWatchlistFilterChange(WATCHLIST_FILTER_ALL)}
+          title="All signals"
+          subtitle="No symbol filter"
+        />
+        {wlLoading && <SidebarSkeleton n={3} />}
+        {watchlists.map((wl) => (
+          <SidebarRow
+            key={wl.id}
+            selected={watchlistFilter === wl.id}
+            onClick={() => onWatchlistFilterChange(wl.id)}
+            onEdit={() => onEditWatchlist(wl.id)}
+            title={wl.name}
+            kindBadge={wl.kind}
+            subtitle={`${wl.symbol_count} symbol${wl.symbol_count === 1 ? "" : "s"}`}
+            extraNote={wl.is_auto && wl.symbols_refreshed_at
+              ? `· refresh ${fmtRel(wl.symbols_refreshed_at)} ago`
+              : undefined}
           />
-        ) : (
-          <ul className="space-y-3" role="list">
-            {watchlists.map((w) => <WatchlistRow key={w.id} watchlist={w} />)}
-          </ul>
+        ))}
+        {!wlLoading && watchlists.length === 0 && (
+          <p className="px-4 py-2 text-caption text-fg-subtle">No watchlists yet.</p>
         )}
-      </CardContent>
-      <NewWatchlistDialog open={newOpen} onClose={() => setNewOpen(false)} />
-    </Card>
+      </SidebarSection>
+
+      <SidebarSection
+        title="Webhook links"
+        count={links.length}
+        onAdd={onNewLink}
+        addLabel="Connect TradingView"
+      >
+        {linksLoading && <SidebarSkeleton n={2} />}
+        {links.map((l) => (
+          <SidebarRow
+            key={l.id}
+            onClick={() => onEditLink(l.id)}
+            title={l.display_name || "Unnamed link"}
+            statusDot={l.is_active ? "active" : "inactive"}
+            subtitle={
+              `${l.receive_count} alert${l.receive_count === 1 ? "" : "s"}` +
+              (l.last_received_at ? ` · ${fmtRel(l.last_received_at)} ago` : "")
+            }
+            extraNote={l.autofire_enabled ? "· autofire on" : undefined}
+          />
+        ))}
+        {!linksLoading && links.length === 0 && (
+          <p className="px-4 py-2 text-caption text-fg-subtle">
+            Connect a webhook to start receiving TradingView alerts.
+          </p>
+        )}
+      </SidebarSection>
+    </aside>
   );
 }
 
-function WatchlistRow({ watchlist }: { watchlist: Watchlist }) {
+function SidebarSection({
+  title, count, onAdd, addLabel, children,
+}: {
+  title: string;
+  count?: number;
+  onAdd: () => void;
+  addLabel: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="border-b border-border">
+      <div className="px-4 py-2 flex items-center justify-between bg-surface-2/40">
+        <span className="text-caption uppercase tracking-wider text-fg-subtle">
+          {title}{count != null && ` · ${count}`}
+        </span>
+        <button
+          type="button"
+          onClick={onAdd}
+          aria-label={addLabel}
+          className="inline-flex h-6 w-6 items-center justify-center rounded-xs text-fg-subtle hover:text-fg hover:bg-surface-2"
+        >
+          <Plus className="h-3.5 w-3.5" />
+        </button>
+      </div>
+      <ul className="py-1" role="list">{children}</ul>
+    </div>
+  );
+}
+
+function SidebarRow({
+  title, subtitle, extraNote, kindBadge,
+  selected, onClick, onEdit, statusDot,
+}: {
+  title: string;
+  subtitle?: string;
+  extraNote?: string;
+  kindBadge?: WatchlistKind;
+  selected?: boolean;
+  onClick: () => void;
+  onEdit?: () => void;
+  statusDot?: "active" | "inactive";
+}) {
+  const meta = kindBadge ? WATCHLIST_KIND_META[kindBadge] : null;
+  return (
+    <li className={cn(
+      "group flex items-center gap-2 px-4 py-1.5 text-body-sm cursor-pointer",
+      selected ? "bg-accent/10 border-l-2 border-l-accent" : "hover:bg-surface-2",
+    )}>
+      {statusDot && (
+        <span
+          aria-hidden
+          className={cn(
+            "h-1.5 w-1.5 rounded-full shrink-0",
+            statusDot === "active" ? "bg-pnl-up" : "bg-fg-subtle",
+          )}
+        />
+      )}
+      <button
+        type="button"
+        onClick={onClick}
+        className="flex-1 min-w-0 text-left"
+      >
+        <div className="flex items-center gap-1.5 min-w-0">
+          <span className="truncate text-fg">{title}</span>
+          {meta?.isAuto && (
+            <Sparkles className="h-3 w-3 text-brand shrink-0" aria-label="auto" />
+          )}
+        </div>
+        {(subtitle || extraNote) && (
+          <div className="text-caption text-fg-subtle truncate">
+            {subtitle}{extraNote && ` ${extraNote}`}
+          </div>
+        )}
+      </button>
+      {onEdit && (
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); onEdit(); }}
+          aria-label={`Edit ${title}`}
+          className="opacity-0 group-hover:opacity-100 h-6 w-6 inline-flex items-center justify-center rounded-xs text-fg-subtle hover:text-fg hover:bg-surface"
+        >
+          <Settings className="h-3.5 w-3.5" />
+        </button>
+      )}
+    </li>
+  );
+}
+
+function SidebarSkeleton({ n }: { n: number }) {
+  return (
+    <>
+      {Array.from({ length: n }).map((_, i) => (
+        <li key={i} className="px-4 py-1.5"><Skeleton className="h-8 w-full" /></li>
+      ))}
+    </>
+  );
+}
+
+
+/* =================================================================== */
+/* Main pane — signals feed                                             */
+/* =================================================================== */
+
+const GROUP_BY_OPTIONS: { key: SignalGroupBy; label: string }[] = [
+  { key: "symbol",   label: "Symbol"   },
+  { key: "strategy", label: "Strategy" },
+  { key: "source",   label: "Source"   },
+  { key: "day",      label: "Day"      },
+];
+
+function MainPane({
+  watchlistFilter, onRowDrill,
+}: {
+  watchlistFilter: string | undefined;
+  groupBy?: SignalGroupBy;
+  onRowDrill: (key: string) => void;
+}) {
+  const [groupBy, setGroupBy] = React.useState<SignalGroupBy>("symbol");
+  const [days, setDays] = React.useState(7);
+  const [source, setSource] = React.useState<string>("");
+
+  const { data, isLoading, dataUpdatedAt } = useGroupedSignals({
+    by: groupBy,
+    days,
+    source: source || undefined,
+    watchlist: watchlistFilter,
+  });
+
+  const totalCount = (data?.rows || []).reduce((s, r) => s + r.count, 0);
+
+  return (
+    <section className="flex flex-col min-w-0">
+      <header className="h-12 px-5 border-b border-border flex items-center gap-3 sticky top-0 bg-bg/80 backdrop-blur z-sticky">
+        <h1 className="text-body-sm font-semibold text-fg flex items-center gap-2">
+          Signals
+          <Badge tone="neutral">{totalCount}</Badge>
+        </h1>
+        <div className="ml-auto flex items-center gap-2 flex-wrap">
+          <FreshnessIndicator
+            label="Refreshed"
+            timestamp={dataUpdatedAt}
+            freshMs={30_000}
+            staleMs={120_000}
+            compact
+          />
+          <select
+            value={days}
+            onChange={(e) => setDays(Number(e.target.value))}
+            aria-label="Time window"
+            className="h-8 rounded-xs bg-surface border border-border px-2 text-body-sm"
+          >
+            <option value={1}>24h</option>
+            <option value={7}>7d</option>
+            <option value={30}>30d</option>
+            <option value={90}>90d</option>
+          </select>
+          <select
+            value={source}
+            onChange={(e) => setSource(e.target.value)}
+            aria-label="Source"
+            className="h-8 rounded-xs bg-surface border border-border px-2 text-body-sm"
+          >
+            <option value="">All sources</option>
+            <option value="TRADINGVIEW">TradingView</option>
+            <option value="SCREENER">Screener</option>
+            <option value="OK_SCANNER">OK Scanner</option>
+            <option value="PREMARKET">Premarket</option>
+          </select>
+        </div>
+      </header>
+
+      <Tabs value={groupBy} onValueChange={(v) => setGroupBy(v as SignalGroupBy)}>
+        <TabsList className="px-5 mt-3">
+          {GROUP_BY_OPTIONS.map((opt) => (
+            <TabsTrigger key={opt.key} value={opt.key}>{opt.label}</TabsTrigger>
+          ))}
+        </TabsList>
+      </Tabs>
+
+      <div className="flex-1 min-h-0 overflow-auto px-5 py-3">
+        {isLoading ? (
+          <div className="space-y-2">
+            <Skeleton className="h-10 w-full" />
+            <Skeleton className="h-10 w-full" />
+            <Skeleton className="h-10 w-full" />
+          </div>
+        ) : !data || data.rows.length === 0 ? (
+          <EmptyState
+            icon={<Zap />}
+            title="No signals yet"
+            description={`Nothing fired in the last ${days} day${days === 1 ? "" : "s"}${
+              watchlistFilter ? " for this watchlist" : ""
+            }. Connect a TradingView webhook or wait for the screener to pick something up.`}
+          />
+        ) : (
+          <GroupedRowsTable
+            rows={data.rows}
+            by={groupBy}
+            onRowClick={onRowDrill}
+          />
+        )}
+      </div>
+    </section>
+  );
+}
+
+function GroupedRowsTable({
+  rows, by, onRowClick,
+}: {
+  rows: GroupedSignalRow[];
+  by: SignalGroupBy;
+  onRowClick: (key: string) => void;
+}) {
+  const max = Math.max(...rows.map((r) => r.count), 1);
+  return (
+    <ul className="space-y-1" role="list">
+      {rows.map((r) => (
+        <li key={r.key}>
+          <button
+            type="button"
+            onClick={() => onRowClick(r.key)}
+            className="w-full grid grid-cols-[1fr_auto_auto_auto_auto] items-center gap-3 px-2 py-2 rounded-xs hover:bg-surface-2 text-left"
+            aria-label={`Open detail for ${r.key}`}
+          >
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <span className="text-body-sm text-fg font-mono truncate" title={r.key}>
+                  {by === "day" ? formatDayLabel(r.key) : r.key || "(unknown)"}
+                </span>
+                {r.latest_action && (
+                  <Badge tone={r.latest_action === "SELL" ? "warning" : "success"}>
+                    latest {r.latest_action}
+                  </Badge>
+                )}
+              </div>
+              <div
+                className="mt-1 h-1 rounded-full bg-surface overflow-hidden"
+                aria-label={`${r.count} signals`}
+              >
+                <div className="h-full bg-accent" style={{ width: `${(r.count / max) * 100}%` }} />
+              </div>
+            </div>
+            <span className="text-body-sm font-mono text-fg tabular w-12 text-right">{r.count}</span>
+            <span className="text-caption text-pnl-up font-mono tabular w-8 text-right">+{r.buys}</span>
+            <span className="text-caption text-pnl-down font-mono tabular w-8 text-right">−{r.sells}</span>
+            <span className="text-caption text-fg-subtle font-mono w-20 text-right">
+              {r.latest_at ? `${fmtRel(r.latest_at)} ago` : "—"}
+            </span>
+          </button>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function formatDayLabel(iso: string): string {
+  try {
+    return new Date(iso).toLocaleDateString("en-IN", {
+      month: "short", day: "numeric", year: "2-digit",
+    });
+  } catch {
+    return iso;
+  }
+}
+
+
+/* =================================================================== */
+/* Signal drill-in sheet                                                */
+/* =================================================================== */
+
+function SignalDrillSheet({
+  drillKey, watchlistFilter, onClose,
+}: {
+  drillKey: string | undefined;
+  watchlistFilter: string | undefined;
+  onClose: () => void;
+}) {
+  // Match the MainPane's filter state for consistency. In a more rigorous
+  // design we'd lift this state to TradingViewPage and pass it through —
+  // here we just default to "symbol / 7d" matching the table's defaults.
+  const { data, isLoading, isError } = useGroupedSignalsDetail({
+    by: "symbol",
+    key: drillKey,
+    days: 7,
+    watchlist: watchlistFilter,
+  });
+  const open = drillKey != null;
+
+  return (
+    <Sheet open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
+      <SheetContent>
+        <SheetHeader>
+          <SheetTitle>
+            {drillKey ? drillKey : "Signal detail"}
+          </SheetTitle>
+        </SheetHeader>
+        <SheetBody>
+          {isLoading && <Skeleton className="h-40 w-full" />}
+          {isError && (
+            <div role="alert" className="text-body-sm text-danger">Couldn't load signal detail.</div>
+          )}
+          {data && data.rows.length === 0 && (
+            <p className="text-body-sm text-fg-subtle">No raw signals in the window.</p>
+          )}
+          {data && data.rows.length > 0 && (
+            <ul className="space-y-2" role="list">
+              {data.rows.map((row) => (
+                <li key={row.id} className="rounded-sm border border-border bg-surface-2 p-3 text-body-sm">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <Badge tone={row.side === "SELL" ? "warning" : "success"}>{row.side}</Badge>
+                    <Badge tone="neutral">{row.source}</Badge>
+                    {row.strategy && <span className="text-fg-muted">{row.strategy}</span>}
+                    <span className="text-caption text-fg-subtle ml-auto" title={row.signal_time}>
+                      {fmtRel(row.signal_time)} ago
+                    </span>
+                  </div>
+                  <div className="mt-1 text-caption text-fg-muted font-mono">
+                    entry {row.entry_price} · SL {row.stoploss} · TP {row.target}
+                    {row.outcome && row.outcome !== "PENDING" && (
+                      <> · <Badge tone="neutral">{row.outcome}</Badge></>
+                    )}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </SheetBody>
+        <SheetFooter>
+          <Button variant="secondary" size="sm" onClick={onClose}>Close</Button>
+        </SheetFooter>
+      </SheetContent>
+    </Sheet>
+  );
+}
+
+
+/* =================================================================== */
+/* Link settings sheet (progressive)                                    */
+/* =================================================================== */
+
+function LinkSettingsSheet({
+  linkId, onClose,
+}: { linkId: string | undefined; onClose: () => void }) {
+  const { data: links = [] } = useTradingViewLinks();
+  const link = links.find((l) => l.id === linkId);
+  const update = useUpdateTradingViewLink();
+  const rotate = useRotateTradingViewSecret();
+  const remove = useDeleteTradingViewLink();
+  const { data: watchlists = [] } = useWatchlists();
+  const { data: recent = [] } = useTradingViewRecent(linkId);
+
+  const [draft, setDraft] = React.useState<TradingViewLink | undefined>(link);
+  React.useEffect(() => setDraft(link), [link?.id, link?.updated_at]);
+
+  // Section visibility — collapsed by default for "Auto-fire" unless it's
+  // already on (operator clearly cares) and "Recent alerts" always.
+  const [autofireOpen, setAutofireOpen] = React.useState(false);
+  const [recentOpen, setRecentOpen] = React.useState(false);
+  React.useEffect(() => {
+    if (link) setAutofireOpen(link.autofire_enabled);
+  }, [link?.id, link?.autofire_enabled]);
+
+  if (!draft) {
+    return (
+      <Sheet open={false} onOpenChange={(o) => { if (!o) onClose(); }}>
+        <SheetContent><div /></SheetContent>
+      </Sheet>
+    );
+  }
+
+  const patch = async (changes: Partial<TradingViewLink>) => {
+    const next = { ...draft, ...changes };
+    setDraft(next);
+    await update.mutateAsync({ id: next.id, ...changes });
+  };
+
+  const onCopy = async () => {
+    await navigator.clipboard.writeText(draft.webhook_url);
+    toast.success("Webhook URL copied");
+  };
+
+  const onRotate = async () => {
+    if (!window.confirm("Rotate the webhook secret? The old URL stops working immediately.")) return;
+    await rotate.mutateAsync(draft.id);
+    toast.success("Rotated — paste the new URL into TradingView.");
+  };
+
+  const onDelete = async () => {
+    if (!window.confirm(`Delete "${draft.display_name || "unnamed"}"?`)) return;
+    await remove.mutateAsync(draft.id);
+    toast.success("Link removed");
+    onClose();
+  };
+
+  return (
+    <Sheet open={!!link} onOpenChange={(o) => { if (!o) onClose(); }}>
+      <SheetContent>
+        <SheetHeader>
+          <div className="flex items-center gap-2 flex-wrap">
+            <SheetTitle className="flex-1 min-w-0 truncate">{draft.display_name || "Unnamed link"}</SheetTitle>
+            <ToggleRow
+              compact
+              label="Active"
+              checked={draft.is_active}
+              onChange={(v) => patch({ is_active: v })}
+            />
+          </div>
+        </SheetHeader>
+
+        <SheetBody>
+          <div className="space-y-4">
+            {/* Basics */}
+            <Input
+              label="Name"
+              value={draft.display_name}
+              onChange={(e) => setDraft({ ...draft, display_name: e.target.value })}
+              onBlur={() => patch({ display_name: draft.display_name })}
+            />
+
+            {/* Webhook URL */}
+            <div>
+              <div className="text-caption uppercase tracking-wider text-fg-subtle mb-1">Webhook URL</div>
+              <div className="flex items-center gap-2 rounded-sm border border-border bg-surface px-2 py-1.5">
+                <code className="flex-1 text-caption font-mono text-fg-muted truncate" title={draft.webhook_url}>
+                  {draft.webhook_url}
+                </code>
+                <Button size="sm" variant="secondary" onClick={onCopy} leading={<Copy className="h-3.5 w-3.5" />}>
+                  Copy
+                </Button>
+                <Button
+                  size="sm" variant="secondary"
+                  onClick={onRotate} loading={rotate.isPending}
+                  leading={<RefreshCw className="h-3.5 w-3.5" />}
+                >
+                  Rotate
+                </Button>
+              </div>
+              {draft.last_error && (
+                <div role="alert" className="flex items-start gap-2 text-caption text-warn mt-2">
+                  <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" aria-hidden />
+                  <span className="break-all">{draft.last_error}</span>
+                </div>
+              )}
+            </div>
+
+            {/* Auto-fire — collapsible */}
+            <CollapsibleSection
+              title="Auto-fire workflow"
+              statusBadge={draft.autofire_enabled ? <Badge tone="warning">on</Badge> : undefined}
+              open={autofireOpen}
+              onOpenChange={setAutofireOpen}
+            >
+              <ToggleRow
+                label="Spawn an AgentRun on every parsed alert"
+                hint="RiskGuard still gates execution."
+                checked={draft.autofire_enabled}
+                onChange={(v) => patch({ autofire_enabled: v })}
+              />
+              {draft.autofire_enabled && (
+                <div className="mt-3 space-y-3">
+                  <Input
+                    label="Strategy name"
+                    hint="One of: directional, short_straddle, pyramid, ..."
+                    value={draft.default_strategy_name}
+                    onChange={(e) => setDraft({ ...draft, default_strategy_name: e.target.value })}
+                    onBlur={() => patch({ default_strategy_name: draft.default_strategy_name })}
+                  />
+                  <Input
+                    label="Allowed actions (comma-separated)"
+                    hint="Empty = allow all. Example: BUY,SELL"
+                    value={(draft.allowed_actions || []).join(",")}
+                    onChange={(e) => setDraft({
+                      ...draft,
+                      allowed_actions: e.target.value.split(",").map((s) => s.trim().toUpperCase()).filter(Boolean),
+                    })}
+                    onBlur={() => patch({ allowed_actions: draft.allowed_actions })}
+                  />
+                  <div>
+                    <div className="text-body-sm text-fg mb-1">Restrict to watchlist (optional)</div>
+                    <select
+                      value={draft.watchlist || ""}
+                      onChange={(e) => patch({ watchlist: e.target.value || null })}
+                      className="h-9 w-full rounded-xs bg-surface border border-border px-2 text-body-sm"
+                    >
+                      <option value="">No symbol gate</option>
+                      {watchlists.map((w) => (
+                        <option key={w.id} value={w.id}>
+                          {w.name} · {w.symbol_count} symbol{w.symbol_count === 1 ? "" : "s"}
+                          {w.is_auto ? " (auto)" : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              )}
+            </CollapsibleSection>
+
+            {/* Recent alerts — collapsible */}
+            <CollapsibleSection
+              title="Recent alerts"
+              statusBadge={<Badge tone="neutral">{recent.length}</Badge>}
+              open={recentOpen}
+              onOpenChange={setRecentOpen}
+            >
+              {recent.length === 0 ? (
+                <p className="text-caption text-fg-subtle">No alerts received yet.</p>
+              ) : (
+                <ul className="space-y-2" role="list">
+                  {recent.slice(0, 10).map((r) => <RecentAlertRow key={r.id} row={r} />)}
+                </ul>
+              )}
+            </CollapsibleSection>
+          </div>
+        </SheetBody>
+
+        <SheetFooter>
+          <Button
+            size="sm" variant="secondary"
+            onClick={onDelete} loading={remove.isPending}
+            leading={<Trash2 className="h-3.5 w-3.5" />}
+          >
+            Delete link
+          </Button>
+          <Button variant="secondary" size="sm" onClick={onClose}>Close</Button>
+        </SheetFooter>
+      </SheetContent>
+    </Sheet>
+  );
+}
+
+function RecentAlertRow({ row }: { row: TradingViewSignalRow }) {
+  const parsed = row.parsed as { symbol?: string; action?: string; price?: number };
+  return (
+    <li className="rounded-sm border border-border bg-surface px-3 py-2">
+      <div className="flex items-center gap-2 text-body-sm">
+        <span className="text-fg-subtle font-mono">{fmtRel(row.received_at)} ago</span>
+        {row.parse_error ? (
+          <Badge tone="danger">parse failed</Badge>
+        ) : (
+          <>
+            <Badge tone={parsed.action === "SELL" ? "warning" : "success"}>{parsed.action || "?"}</Badge>
+            <span className="text-fg">{parsed.symbol || "?"}</span>
+            {parsed.price != null && (
+              <span className="text-fg-subtle font-mono">@ {parsed.price}</span>
+            )}
+          </>
+        )}
+        {row.workflow_run && <Badge tone="brand">Run fired</Badge>}
+      </div>
+      {row.parse_error && (
+        <div className="text-caption text-warn mt-1 break-all">{row.parse_error}</div>
+      )}
+    </li>
+  );
+}
+
+
+/* =================================================================== */
+/* Watchlist edit sheet                                                 */
+/* =================================================================== */
+
+function WatchlistSheet({
+  watchlistId, onClose,
+}: { watchlistId: string | undefined; onClose: () => void }) {
+  const { data: watchlists = [] } = useWatchlists();
+  const watchlist = watchlists.find((w) => w.id === watchlistId);
   const update = useUpdateWatchlist();
   const remove = useDeleteWatchlist();
   const add = useAddSymbolsToWatchlist();
   const rm = useRemoveSymbolsFromWatchlist();
   const refresh = useRefreshWatchlist();
 
-  const meta = WATCHLIST_KIND_META[watchlist.kind];
-  const [editingName, setEditingName] = React.useState(false);
-  const [draftName, setDraftName] = React.useState(watchlist.name);
+  const [name, setName] = React.useState(watchlist?.name || "");
   const [newSymbol, setNewSymbol] = React.useState("");
+  React.useEffect(() => setName(watchlist?.name || ""), [watchlist?.id, watchlist?.name]);
 
-  React.useEffect(() => setDraftName(watchlist.name), [watchlist.name]);
+  if (!watchlist) {
+    return (
+      <Sheet open={false} onOpenChange={(o) => { if (!o) onClose(); }}>
+        <SheetContent><div /></SheetContent>
+      </Sheet>
+    );
+  }
+
+  const meta = WATCHLIST_KIND_META[watchlist.kind];
 
   const onAddSymbol = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -174,20 +784,19 @@ function WatchlistRow({ watchlist }: { watchlist: Watchlist }) {
     setNewSymbol("");
   };
 
-  const onRenameCommit = async () => {
-    if (draftName.trim() && draftName.trim() !== watchlist.name) {
-      await update.mutateAsync({ id: watchlist.id, name: draftName.trim() });
-    }
-    setEditingName(false);
-  };
-
-  const onRemoveOne = (sym: string) =>
-    rm.mutateAsync({ id: watchlist.id, symbols: [sym] });
+  const onRemoveOne = (sym: string) => rm.mutateAsync({ id: watchlist.id, symbols: [sym] });
 
   const onDelete = async () => {
     if (!window.confirm(`Delete watchlist "${watchlist.name}"?`)) return;
     await remove.mutateAsync(watchlist.id);
     toast.success("Watchlist deleted");
+    onClose();
+  };
+
+  const onRename = async () => {
+    if (name.trim() && name.trim() !== watchlist.name) {
+      await update.mutateAsync({ id: watchlist.id, name: name.trim() });
+    }
   };
 
   const onRefresh = async () => {
@@ -196,42 +805,81 @@ function WatchlistRow({ watchlist }: { watchlist: Watchlist }) {
   };
 
   return (
-    <li className="rounded-md border border-border bg-surface-2 p-4 space-y-3">
-      <div className="flex items-center gap-3 flex-wrap">
-        {editingName ? (
-          <input
-            value={draftName}
-            onChange={(e) => setDraftName(e.target.value)}
-            onBlur={onRenameCommit}
-            onKeyDown={(e) => e.key === "Enter" && onRenameCommit()}
-            autoFocus
-            className="text-body-sm font-semibold text-fg bg-surface border border-accent/60 rounded-xs px-2 py-0.5"
-          />
-        ) : (
-          <button
-            type="button"
-            onClick={() => setEditingName(true)}
-            className="text-body-sm font-semibold text-fg hover:text-accent"
-          >
-            {watchlist.name}
-          </button>
-        )}
-        <Badge tone={watchlist.is_auto ? "brand" : "neutral"} title={meta.blurb}>
-          {watchlist.is_auto && <Sparkles className="h-3 w-3 mr-1" aria-hidden />}
-          {meta.label}
-        </Badge>
-        <Badge tone="neutral">{watchlist.symbol_count} symbol{watchlist.symbol_count === 1 ? "" : "s"}</Badge>
-        {watchlist.is_auto && watchlist.symbols_refreshed_at && (
-          <span className="text-caption text-fg-subtle" title={watchlist.symbols_refreshed_at}>
-            Refreshed {fmtRel(watchlist.symbols_refreshed_at)} ago
-          </span>
-        )}
-        <div className="ml-auto flex items-center gap-2">
+    <Sheet open={!!watchlistId} onOpenChange={(o) => { if (!o) onClose(); }}>
+      <SheetContent>
+        <SheetHeader>
+          <div className="flex items-center gap-2">
+            <Badge tone={watchlist.is_auto ? "brand" : "neutral"}>
+              {watchlist.is_auto && <Sparkles className="h-3 w-3 mr-1" aria-hidden />}
+              {meta.label}
+            </Badge>
+            <SheetTitle className="flex-1 truncate">{watchlist.name}</SheetTitle>
+          </div>
+        </SheetHeader>
+
+        <SheetBody>
+          <div className="space-y-4">
+            <Input
+              label="Name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              onBlur={onRename}
+            />
+
+            {watchlist.is_auto && (
+              <div className="rounded-md border border-border bg-surface-2 p-3 text-caption text-fg-subtle">
+                <div className="font-mono break-all">config {JSON.stringify(watchlist.config)}</div>
+                {watchlist.symbols_refreshed_at && (
+                  <div className="mt-1">
+                    Refreshed {fmtRel(watchlist.symbols_refreshed_at)} ago
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div>
+              <div className="text-caption uppercase tracking-wider text-fg-subtle mb-2">
+                Symbols · {watchlist.symbol_count}
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {watchlist.symbols.map((sym) =>
+                  watchlist.is_auto ? (
+                    <span
+                      key={sym}
+                      className="inline-flex items-center rounded-xs bg-surface border border-border px-2 py-0.5 text-caption font-mono text-fg"
+                    >
+                      {sym}
+                    </span>
+                  ) : (
+                    <SymbolChip key={sym} symbol={sym} onRemove={() => onRemoveOne(sym)} />
+                  ),
+                )}
+                {!watchlist.is_auto && (
+                  <form onSubmit={onAddSymbol} className="inline-flex items-center gap-1">
+                    <input
+                      type="text"
+                      value={newSymbol}
+                      onChange={(e) => setNewSymbol(e.target.value.toUpperCase())}
+                      placeholder="+ symbol"
+                      className={cn(
+                        "h-7 px-2 rounded-xs text-caption font-mono",
+                        "bg-surface border border-border focus:border-accent focus:outline-none",
+                        "w-24 placeholder:text-fg-subtle",
+                      )}
+                    />
+                    {newSymbol && <Button type="submit" size="sm" loading={add.isPending}>Add</Button>}
+                  </form>
+                )}
+              </div>
+            </div>
+          </div>
+        </SheetBody>
+
+        <SheetFooter>
           {watchlist.is_auto && (
             <Button
               size="sm" variant="secondary"
-              onClick={onRefresh}
-              loading={refresh.isPending}
+              onClick={onRefresh} loading={refresh.isPending}
               leading={<RefreshCw className="h-3.5 w-3.5" />}
             >
               Refresh
@@ -239,56 +887,15 @@ function WatchlistRow({ watchlist }: { watchlist: Watchlist }) {
           )}
           <Button
             size="sm" variant="secondary"
-            onClick={onDelete}
-            loading={remove.isPending}
+            onClick={onDelete} loading={remove.isPending}
             leading={<Trash2 className="h-3.5 w-3.5" />}
           >
             Delete
           </Button>
-        </div>
-      </div>
-
-      {/* Auto kinds: config summary line + non-editable chip readout */}
-      {watchlist.is_auto && (
-        <div className="text-caption text-fg-subtle font-mono">
-          config {JSON.stringify(watchlist.config)}
-        </div>
-      )}
-
-      {/* Symbol chips — manual kinds let you edit, auto kinds are read-only */}
-      <div className="flex flex-wrap gap-1.5">
-        {watchlist.symbols.map((sym) =>
-          watchlist.is_auto ? (
-            <span
-              key={sym}
-              className="inline-flex items-center rounded-xs bg-surface border border-border px-2 py-0.5 text-caption font-mono text-fg"
-            >
-              {sym}
-            </span>
-          ) : (
-            <SymbolChip key={sym} symbol={sym} onRemove={() => onRemoveOne(sym)} />
-          ),
-        )}
-        {!watchlist.is_auto && (
-          <form onSubmit={onAddSymbol} className="inline-flex items-center gap-1">
-            <input
-              type="text"
-              value={newSymbol}
-              onChange={(e) => setNewSymbol(e.target.value.toUpperCase())}
-              placeholder="+ symbol"
-              className={cn(
-                "h-7 px-2 rounded-xs text-caption font-mono",
-                "bg-surface border border-border focus:border-accent focus:outline-none",
-                "w-24 placeholder:text-fg-subtle",
-              )}
-            />
-            {newSymbol && (
-              <Button type="submit" size="sm" loading={add.isPending}>Add</Button>
-            )}
-          </form>
-        )}
-      </div>
-    </li>
+          <Button variant="secondary" size="sm" onClick={onClose}>Close</Button>
+        </SheetFooter>
+      </SheetContent>
+    </Sheet>
   );
 }
 
@@ -308,22 +915,25 @@ function SymbolChip({ symbol, onRemove }: { symbol: string; onRemove: () => void
   );
 }
 
+
+/* =================================================================== */
+/* New-watchlist dialog                                                 */
+/* =================================================================== */
+
 function NewWatchlistDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [name, setName] = React.useState("");
   const [kind, setKind] = React.useState<WatchlistKind>("MANUAL");
   const [symbolsRaw, setSymbolsRaw] = React.useState("");
   const [config, setConfig] = React.useState<Record<string, unknown>>({});
   const create = useCreateWatchlist();
-  // Backend-canonical defaults — single source of truth for window_days,
-  // top_n, source, etc. The local meta keeps only UI strings.
   const { data: kindsMeta } = useWatchlistKinds();
+
   const defaultsByKind = React.useMemo(() => {
     const m: Partial<Record<WatchlistKind, Record<string, unknown>>> = {};
     for (const k of kindsMeta || []) m[k.kind] = k.defaults;
     return m;
   }, [kindsMeta]);
 
-  // Reset config to the picked kind's backend-canonical defaults on switch.
   React.useEffect(() => {
     setConfig({ ...(defaultsByKind[kind] || {}) });
   }, [kind, defaultsByKind]);
@@ -353,8 +963,8 @@ function NewWatchlistDialog({ open, onClose }: { open: boolean; onClose: () => v
       onClose();
     } catch (err) {
       const detail = (err as any)?.response?.data;
-      const msg = detail?.name || detail?.config || detail?.detail || "Failed to create watchlist";
-      toast.error(typeof msg === "string" ? msg : JSON.stringify(msg));
+      const msg = detail?.name || detail?.config || detail?.detail || "Failed to create";
+      toast.error(typeof msg === "string" ? msg : safeStringify(msg));
     }
   };
 
@@ -374,10 +984,8 @@ function NewWatchlistDialog({ open, onClose }: { open: boolean; onClose: () => v
             onChange={(e) => setName(e.target.value)}
             autoFocus
           />
-
           <KindPicker value={kind} onChange={setKind} />
 
-          {/* Kind-specific config inputs */}
           {kind === "MANUAL" && (
             <Input
               label="Symbols"
@@ -441,8 +1049,6 @@ function KindPicker({
   );
 }
 
-/** Per-kind config form fields. Keeps the dialog focused — each kind only
- *  asks for what its resolver actually reads. */
 function ConfigInputs({
   kind, config, onChange,
 }: {
@@ -476,8 +1082,7 @@ function ConfigInputs({
         <Input
           label="Window (days)"
           type="number"
-          min={1}
-          max={90}
+          min={1} max={90}
           value={String(config.window_days ?? 7)}
           onChange={(e) => set("window_days", Number(e.target.value) || 7)}
         />
@@ -487,8 +1092,7 @@ function ConfigInputs({
         <Input
           label="Top N"
           type="number"
-          min={1}
-          max={200}
+          min={1} max={200}
           value={String(config.top_n ?? 20)}
           onChange={(e) => set("top_n", Number(e.target.value) || 20)}
         />
@@ -498,8 +1102,7 @@ function ConfigInputs({
         <Input
           label="Window (hours)"
           type="number"
-          min={1}
-          max={24 * 30}
+          min={1} max={24 * 30}
           value={String(config.window_hours ?? 24)}
           onChange={(e) => set("window_hours", Number(e.target.value) || 24)}
         />
@@ -507,7 +1110,7 @@ function ConfigInputs({
 
       {kind === "SHORTLIST_TODAY" && (
         <p className="text-caption text-fg-subtle">
-          No knobs — pulls today's shortlist with outcomes WATCHING/TRIGGERED/TRADED.
+          No knobs — pulls today's shortlist (WATCHING / TRIGGERED / TRADED).
         </p>
       )}
     </div>
@@ -516,161 +1119,160 @@ function ConfigInputs({
 
 
 /* =================================================================== */
-/* Grouped signals                                                      */
+/* New-link dialog (replaces the old ConnectDialog)                     */
 /* =================================================================== */
 
-const GROUP_BY_OPTIONS: { key: SignalGroupBy; label: string }[] = [
-  { key: "symbol",   label: "Symbol"   },
-  { key: "strategy", label: "Strategy" },
-  { key: "source",   label: "Source"   },
-  { key: "day",      label: "Day"      },
-];
+function NewLinkDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const [name, setName] = React.useState("");
+  const create = useCreateTradingViewLink();
+  const [created, setCreated] = React.useState<TradingViewLink | null>(null);
 
-function GroupedSignalsCard() {
-  const [by, setBy] = React.useState<SignalGroupBy>("symbol");
-  const [days, setDays] = React.useState(7);
-  const [watchlistFilter, setWatchlistFilter] = React.useState<string>("");
-  const { data: watchlists = [] } = useWatchlists();
-  const { data, isLoading, dataUpdatedAt } = useGroupedSignals({
-    by, days, watchlist: watchlistFilter || undefined,
-  });
+  React.useEffect(() => {
+    if (!open) {
+      const t = setTimeout(() => { setName(""); setCreated(null); }, 250);
+      return () => clearTimeout(t);
+    }
+  }, [open]);
+
+  const onSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const link = await create.mutateAsync({ display_name: name.trim() || "TradingView alert" });
+    setCreated(link);
+  };
 
   return (
-    <Card>
-      <CardHeader className="flex flex-row items-start justify-between gap-3 flex-wrap">
-        <div>
-          <CardTitle>Signals</CardTitle>
-          <CardDescription>
-            Aggregated incoming signals — from TradingView, screener, OK scanner,
-            premarket basket — within the chosen time window.
-          </CardDescription>
-        </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          <FreshnessIndicator
-            label="Refreshed"
-            timestamp={dataUpdatedAt}
-            freshMs={30_000}
-            staleMs={120_000}
-          />
-          <select
-            value={days}
-            onChange={(e) => setDays(Number(e.target.value))}
-            className="h-8 rounded-xs bg-surface border border-border px-2 text-body-sm"
-            aria-label="Time window"
-          >
-            <option value={1}>Last 24h</option>
-            <option value={7}>Last 7d</option>
-            <option value={30}>Last 30d</option>
-            <option value={90}>Last 90d</option>
-          </select>
-          {watchlists.length > 0 && (
-            <select
-              value={watchlistFilter}
-              onChange={(e) => setWatchlistFilter(e.target.value)}
-              className="h-8 rounded-xs bg-surface border border-border px-2 text-body-sm"
-              aria-label="Filter by watchlist"
-            >
-              <option value="">All symbols</option>
-              {watchlists.map((w) => (
-                <option key={w.id} value={w.id}>{w.name}</option>
-              ))}
-            </select>
-          )}
-        </div>
-      </CardHeader>
+    <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
+      <DialogContent className="w-[min(92vw,560px)] max-h-[85vh] overflow-auto">
+        <DialogTitle>Connect TradingView</DialogTitle>
+        <DialogDescription>
+          Generates a private webhook URL. Paste it into TradingView's alert dialog under
+          Notifications → Webhook URL.
+        </DialogDescription>
 
-      <Tabs value={by} onValueChange={(v) => setBy(v as SignalGroupBy)} className="px-5">
-        <TabsList>
-          {GROUP_BY_OPTIONS.map((opt) => (
-            <TabsTrigger key={opt.key} value={opt.key}>{opt.label}</TabsTrigger>
-          ))}
-        </TabsList>
-      </Tabs>
-
-      <CardContent>
-        {isLoading ? (
-          <div className="space-y-2">
-            <Skeleton className="h-10 w-full" />
-            <Skeleton className="h-10 w-full" />
-            <Skeleton className="h-10 w-full" />
-          </div>
-        ) : !data || data.rows.length === 0 ? (
-          <EmptyState
-            icon={<Zap />}
-            title="No signals yet"
-            description={`Nothing fired in the last ${days} day${days === 1 ? "" : "s"}. Connect a TradingView alert above, or wait for the screener to pick something up.`}
-          />
+        {!created ? (
+          <form onSubmit={onSubmit} className="mt-4 space-y-3">
+            <Input
+              label="Name"
+              hint="Operator-facing label."
+              placeholder="My TradingView strategy"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              autoFocus
+            />
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <Button type="button" variant="secondary" onClick={onClose}>Cancel</Button>
+              <Button type="submit" loading={create.isPending}>Create webhook URL</Button>
+            </div>
+          </form>
         ) : (
-          <GroupedRowsTable rows={data.rows} by={by} />
+          <CreatedView link={created} onDone={onClose} />
         )}
-      </CardContent>
-    </Card>
+      </DialogContent>
+    </Dialog>
   );
 }
 
-function GroupedRowsTable({ rows, by }: { rows: GroupedSignalRow[]; by: SignalGroupBy }) {
-  const max = Math.max(...rows.map((r) => r.count), 1);
+function CreatedView({ link, onDone }: { link: TradingViewLink; onDone: () => void }) {
+  const [copied, setCopied] = React.useState(false);
+  const onCopy = async () => {
+    await navigator.clipboard.writeText(link.webhook_url);
+    setCopied(true);
+    toast.success("Webhook URL copied");
+  };
   return (
-    <ul className="space-y-1" role="list">
-      {rows.map((r) => (
-        <li
-          key={r.key}
-          className="grid grid-cols-[1fr_auto_auto_auto_auto] items-center gap-3 px-2 py-2 rounded-xs hover:bg-surface-2"
-        >
-          {/* Bar + label */}
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <span className="text-body-sm text-fg font-mono truncate" title={r.key}>
-                {by === "day" ? formatDayLabel(r.key) : r.key || "(unknown)"}
-              </span>
-              {r.latest_action && (
-                <Badge tone={r.latest_action === "SELL" ? "warning" : "success"}>
-                  latest {r.latest_action}
-                </Badge>
-              )}
-            </div>
-            <div
-              className="mt-1 h-1 rounded-full bg-surface overflow-hidden"
-              aria-label={`${r.count} signals`}
-            >
-              <div
-                className="h-full bg-accent"
-                style={{ width: `${(r.count / max) * 100}%` }}
-              />
-            </div>
-          </div>
-          <span className="text-body-sm font-mono text-fg tabular w-12 text-right">{r.count}</span>
-          <span className="text-caption text-pnl-up font-mono tabular w-8 text-right">+{r.buys}</span>
-          <span className="text-caption text-pnl-down font-mono tabular w-8 text-right">−{r.sells}</span>
-          <span className="text-caption text-fg-subtle font-mono w-20 text-right">
-            {r.latest_at ? `${fmtRel(r.latest_at)} ago` : "—"}
-          </span>
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-function formatDayLabel(iso: string): string {
-  try {
-    return new Date(iso).toLocaleDateString("en-IN", {
-      month: "short", day: "numeric", year: "2-digit",
-    });
-  } catch {
-    return iso;
-  }
-}
-
-
-/* =================================================================== */
-/* KPI helper                                                           */
-/* =================================================================== */
-
-function KpiCell({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="px-3 py-1.5">
-      <dt className="text-caption text-fg-subtle uppercase tracking-wider">{label}</dt>
-      <dd className="text-body-sm text-fg font-mono tabular mt-0.5">{value}</dd>
+    <div className="mt-4 space-y-4">
+      <div className="rounded-md border border-pnl-up/30 bg-pnl-up/5 p-3 text-body-sm text-fg">
+        Webhook created. <strong>Copy the URL now</strong> and paste it into TradingView.
+      </div>
+      <div>
+        <div className="text-caption uppercase tracking-wider text-fg-subtle mb-1">Webhook URL</div>
+        <div className="flex items-center gap-2 rounded-sm border border-border bg-surface-2 px-2 py-2">
+          <code className="flex-1 text-caption font-mono text-fg break-all">{link.webhook_url}</code>
+          <Button size="sm" onClick={onCopy} leading={<Copy className="h-3.5 w-3.5" />}>
+            {copied ? "Copied" : "Copy"}
+          </Button>
+        </div>
+      </div>
+      <details className="text-caption text-fg-muted">
+        <summary className="cursor-pointer text-fg-subtle hover:text-fg select-none">
+          Sample TradingView alert message
+        </summary>
+        <pre className="mt-2 rounded-sm bg-surface-2 border border-border p-3 whitespace-pre-wrap break-all font-mono">
+{`{
+  "symbol": "{{ticker}}",
+  "action": "{{strategy.order.action}}",
+  "price": {{close}},
+  "comment": "{{strategy.order.comment}}"
+}`}
+        </pre>
+        <p className="mt-2">
+          Plain text like <code>BUY HDFCBANK @ 1500</code> is also accepted.
+        </p>
+      </details>
+      <div className="flex items-center justify-end gap-2">
+        <Button onClick={onDone} leading={<ExternalLink className="h-3.5 w-3.5" />}>Done</Button>
+      </div>
     </div>
+  );
+}
+
+
+/* =================================================================== */
+/* Shared helpers                                                       */
+/* =================================================================== */
+
+function CollapsibleSection({
+  title, statusBadge, open, onOpenChange, children,
+}: {
+  title: string;
+  statusBadge?: React.ReactNode;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="rounded-md border border-border">
+      <button
+        type="button"
+        onClick={() => onOpenChange(!open)}
+        className="w-full flex items-center gap-2 px-3 py-2 text-body-sm text-fg hover:bg-surface-2"
+        aria-expanded={open}
+      >
+        {open ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+        <span className="font-semibold">{title}</span>
+        {statusBadge && <span className="ml-auto">{statusBadge}</span>}
+      </button>
+      {open && <div className="px-3 pb-3 pt-1">{children}</div>}
+    </div>
+  );
+}
+
+function ToggleRow({
+  label, hint, checked, onChange, compact,
+}: {
+  label: string;
+  hint?: string;
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  compact?: boolean;
+}) {
+  return (
+    <label className={cn("flex cursor-pointer gap-3", compact ? "items-center" : "items-start")}>
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+        className={cn(
+          "h-4 w-4 rounded-xs border-border bg-surface",
+          "checked:bg-accent checked:border-accent",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60",
+          !compact && "mt-1",
+        )}
+      />
+      <div className="flex-1">
+        <div className="text-body-sm text-fg">{label}</div>
+        {hint && <div className="text-caption text-fg-subtle mt-0.5">{hint}</div>}
+      </div>
+    </label>
   );
 }

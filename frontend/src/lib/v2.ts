@@ -625,6 +625,56 @@ export interface GroupedSignalsResponse {
   window_days: number;
 }
 
+export interface GroupedSignalDetailRow {
+  id: number;
+  signal_time: string;
+  symbol: string;
+  side: string;
+  source: string;
+  strategy: string;
+  entry_price: number;
+  stoploss: number;
+  target: number;
+  reasons: string[];
+  indicators: Record<string, unknown>;
+  trade_id: string | null;
+  outcome: string;
+}
+
+export interface GroupedSignalDetailResponse {
+  by: SignalGroupBy;
+  key: string;
+  rows: GroupedSignalDetailRow[];
+}
+
+/** Drill-in for a single bucket in the grouped-signals view. Gated on
+ *  `key`/`by` being set so the underlying network call only fires when the
+ *  detail panel is actually open. */
+export function useGroupedSignalsDetail(params: {
+  by?: SignalGroupBy;
+  key?: string;
+  days?: number;
+  source?: string;
+  watchlist?: string;
+}) {
+  const qs = new URLSearchParams();
+  if (params.by)        qs.set("by", params.by);
+  if (params.key)       qs.set("key", params.key);
+  if (params.days)      qs.set("days", String(params.days));
+  if (params.source)    qs.set("source", params.source);
+  if (params.watchlist) qs.set("watchlist", params.watchlist);
+  return useQuery({
+    queryKey: ["tradingview-grouped-detail", params],
+    queryFn: () => api
+      .get<GroupedSignalDetailResponse>(
+        `/notifications/tradingview/signals/detail/?${qs.toString()}`,
+      )
+      .then((r) => r.data),
+    enabled: !!params.key && !!params.by,
+    staleTime: 15_000,
+  });
+}
+
 export function useGroupedSignals(params: {
   by?: SignalGroupBy;
   days?: number;
