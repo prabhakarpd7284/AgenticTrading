@@ -12,8 +12,20 @@ import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { connect } from "@/lib/ws";
 import type { AgentEvent, AgentRun, Portfolio, StrategySchema } from "@/types";
-import { cn, fmtRel } from "@/lib/utils";
+import { cn, fmtRel, formatElapsed, safeStringify } from "@/lib/utils";
 import { useAuditFeed, useEvent } from "@/lib/v2";
+
+/** Connection status drives the inline banner. "connecting" covers both the
+ *  initial handshake and exponential-backoff reconnects (lib/ws auto-retries
+ *  up to 30s). "closed_auth" is terminal — server rejected the JWT and the
+ *  lib stops retrying. "live" means the socket is open right now. */
+type WsState = "connecting" | "live" | "reconnecting" | "closed_auth";
+
+/** Cap on retained events in the stream. Token-streaming workflows can fire
+ *  thousands of events over a long run; rendering all of them re-runs every
+ *  EventBubble + every memoised find/reduce on each frame. Older events
+ *  remain in the database (AgentStep) — this only trims the in-memory feed. */
+const MAX_RETAINED_EVENTS = 2000;
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
@@ -67,11 +79,6 @@ export function AgentConsolePage() {
 
   /* ---------- selected run + stream ---------- */
   const [events, setEvents] = React.useState<AgentEvent[]>([]);
-  // Connection status drives the inline banner. "connecting" covers both the
-  // initial handshake and exponential-backoff reconnects (lib/ws auto-retries
-  // up to 30s). "closed_auth" is a terminal state — the server rejected the
-  // JWT and the lib won't retry. "live" means the socket is open right now.
-  type WsState = "connecting" | "live" | "reconnecting" | "closed_auth";
   const [wsState, setWsState] = React.useState<WsState>("connecting");
   const feedRef = React.useRef<HTMLDivElement>(null);
   const wsRef = React.useRef<ReturnType<typeof connect>>();
@@ -85,7 +92,12 @@ export function AgentConsolePage() {
     setWsState("connecting");
     wsRef.current = connect(
       `/ws/agents/${selected.id}/`,
-      (msg) => setEvents((prev) => [...prev, msg as unknown as AgentEvent]),
+      (msg) => setEvents((prev) => {
+        const next = prev.length >= MAX_RETAINED_EVENTS
+          ? prev.slice(-(MAX_RETAINED_EVENTS - 1))
+          : prev;
+        return [...next, msg as unknown as AgentEvent];
+      }),
       {
         onOpen: () => setWsState("live"),
         onClose: (ev) => {
@@ -98,9 +110,11 @@ export function AgentConsolePage() {
     return () => wsRef.current?.close();
   }, [selected?.id]);
 
-  // autoscroll to newest event
+  // Autoscroll to newest event. Plain `auto` (not `smooth`) — a smooth-scroll
+  // animation queues per-event and visibly stutters when tokens stream at
+  // 30 Hz; the instant snap keeps the latest in view without animation thrash.
   React.useEffect(() => {
-    feedRef.current?.scrollTo({ top: feedRef.current.scrollHeight, behavior: "smooth" });
+    feedRef.current?.scrollTo({ top: feedRef.current.scrollHeight, behavior: "auto" });
   }, [events.length]);
 
   /* ---------- new run mutation ---------- */
@@ -266,15 +280,25 @@ function RunDetail({
   run: AgentRun;
   events: AgentEvent[];
   feedRef: React.RefObject<HTMLDivElement>;
-  wsState: "connecting" | "live" | "reconnecting" | "closed_auth";
+  wsState: WsState;
 }) {
-  const planEvt = events.find((e) => e.node === "planner" && e.type === "result");
-  const riskEvt = events.find((e) => e.node === "risk"    && e.type === "result");
-  const execEvt = events.find((e) => e.node === "execute" && e.type === "result");
+  // Memoise the per-render scans of `events`. Without these, every WS token
+  // append re-runs three O(n) finds, a fresh KPI reduce, and the CLI lookup
+  // — the bigger cost is the cascade re-rendering 200+ EventBubbles below.
+  const { planEvt, riskEvt, execEvt } = React.useMemo(() => {
+    let p: AgentEvent | undefined, r: AgentEvent | undefined, e: AgentEvent | undefined;
+    for (const ev of events) {
+      if (!p && ev.type === "result" && ev.node === "planner") p = ev;
+      if (!r && ev.type === "result" && ev.node === "risk")    r = ev;
+      if (!e && ev.type === "result" && ev.node === "execute") e = ev;
+      if (p && r && e) break;
+    }
+    return { planEvt: p, riskEvt: r, execEvt: e };
+  }, [events]);
 
   const lastTs = events.length ? events[events.length - 1].ts : undefined;
-  const kpis = computeKpis(events);
-  const cli = cliForStrategy(run.strategy_name);
+  const kpis = React.useMemo(() => computeKpis(events), [events]);
+  const cli = React.useMemo(() => cliForStrategy(run.strategy_name), [run.strategy_name]);
 
   return (
     <>
@@ -372,7 +396,12 @@ function RunDetail({
   );
 }
 
-function EventBubble({ ev, prev }: { ev: AgentEvent; prev?: AgentEvent }) {
+// Memoised so a 200-event stream doesn't re-render every bubble when one new
+// event arrives. Both `ev` and `prev` are stable refs from a useMemo-friendly
+// parent — append-only `events` means an existing bubble's props never change.
+const EventBubble = React.memo(function EventBubble({
+  ev, prev,
+}: { ev: AgentEvent; prev?: AgentEvent }) {
   const a = agentForNode(ev.node);
   const kind = inferStepKind(ev.node);
   const KindIcon = kind.Icon;
@@ -420,7 +449,7 @@ function EventBubble({ ev, prev }: { ev: AgentEvent; prev?: AgentEvent }) {
       </pre>
     </div>
   );
-}
+});
 
 /* ---------- KPI strip ---------- */
 function KpiStrip({ kpis }: { kpis: KpiSummary }) {
@@ -447,7 +476,7 @@ function KpiCell({ label, value }: { label: string; value: string }) {
 }
 
 /* ---------- WS status banner ---------- */
-function WsStatusBanner({ state }: { state: "connecting" | "live" | "reconnecting" | "closed_auth" }) {
+function WsStatusBanner({ state }: { state: WsState }) {
   if (state === "live" || state === "connecting") return null;
   if (state === "reconnecting") {
     return (
@@ -467,15 +496,15 @@ function WsStatusBanner({ state }: { state: "connecting" | "live" | "reconnectin
 }
 
 /* ---------- Skeleton while waiting for first event ---------- */
-function StreamSkeleton({ wsState }: { wsState: "connecting" | "live" | "reconnecting" | "closed_auth" }) {
-  const subline =
-    wsState === "live"
-      ? "Connected — waiting for the first event."
-      : wsState === "reconnecting"
-        ? "Reconnecting to the run stream…"
-        : wsState === "closed_auth"
-          ? "Stream auth failed. Refresh the page to retry."
-          : "Connecting to the run stream…";
+const STREAM_SKELETON_SUBLINE: Record<WsState, string> = {
+  live:         "Connected — waiting for the first event.",
+  connecting:   "Connecting to the run stream…",
+  reconnecting: "Reconnecting to the run stream…",
+  closed_auth:  "Stream auth failed. Refresh the page to retry.",
+};
+
+function StreamSkeleton({ wsState }: { wsState: WsState }) {
+  const subline = STREAM_SKELETON_SUBLINE[wsState];
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-2 text-body-sm text-fg-subtle">
@@ -553,38 +582,28 @@ function EventDetailPanel({
 
               {/* ── Cross-links ── */}
               <dl className="grid grid-cols-[max-content_1fr] gap-x-3 gap-y-1 text-caption font-mono">
-                <dt className="text-fg-subtle">actor</dt>
-                <dd className="text-fg">{ev.actor_kind}{ev.actor_user != null && ` · user ${ev.actor_user}`}</dd>
-                {ev.step_name && (
-                  <>
-                    <dt className="text-fg-subtle">step</dt>
-                    <dd className="text-fg">{ev.step_name}</dd>
-                  </>
-                )}
-                {ev.request_id && (
-                  <>
-                    <dt className="text-fg-subtle">request</dt>
-                    <dd className="text-fg break-all">{ev.request_id}</dd>
-                  </>
-                )}
-                {ev.trade_id && (
-                  <>
-                    <dt className="text-fg-subtle">trade</dt>
-                    <dd className="text-fg break-all">{ev.trade_id}</dd>
-                  </>
-                )}
-                {ev.order && (
-                  <>
-                    <dt className="text-fg-subtle">order</dt>
-                    <dd className="text-fg break-all">{ev.order}</dd>
-                  </>
-                )}
-                {ev.signal_id != null && (
-                  <>
-                    <dt className="text-fg-subtle">signal</dt>
-                    <dd className="text-fg">{ev.signal_id}</dd>
-                  </>
-                )}
+                {(
+                  [
+                    {
+                      label: "actor",
+                      value: `${ev.actor_kind}${ev.actor_user != null ? ` · user ${ev.actor_user}` : ""}`,
+                    },
+                    { label: "step",    value: ev.step_name },
+                    { label: "request", value: ev.request_id, breakAll: true },
+                    { label: "trade",   value: ev.trade_id,   breakAll: true },
+                    { label: "order",   value: ev.order,      breakAll: true },
+                    { label: "signal",  value: ev.signal_id != null ? String(ev.signal_id) : "" },
+                  ] as const
+                )
+                  .filter((row) => row.value)
+                  .map((row) => (
+                    <React.Fragment key={row.label}>
+                      <dt className="text-fg-subtle">{row.label}</dt>
+                      <dd className={cn("text-fg", "breakAll" in row && row.breakAll && "break-all")}>
+                        {row.value}
+                      </dd>
+                    </React.Fragment>
+                  ))}
               </dl>
 
               {/* ── Payload JSON ── */}
@@ -757,10 +776,6 @@ function RunDot({ status }: { status: AgentRun["status"] }) {
   return <span aria-hidden className={cn("h-2 w-2 rounded-full shrink-0", color)} />;
 }
 
-function safeStringify(v: unknown) {
-  try { return JSON.stringify(v, null, 2); } catch { return String(v); }
-}
-
 /* =================================================================== */
 /* Agent + StepKind classification                                      */
 /* =================================================================== */
@@ -865,14 +880,6 @@ export function computeKpis(events: AgentEvent[]): KpiSummary {
     llmCalls,
     elapsedMs,
   };
-}
-
-function formatElapsed(ms: number): string {
-  if (ms < 1000) return `${ms}ms`;
-  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
-  const m = Math.floor(ms / 60_000);
-  const s = Math.floor((ms % 60_000) / 1000);
-  return `${m}m ${s}s`;
 }
 
 /* =================================================================== */

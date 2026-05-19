@@ -1,3 +1,5 @@
+from functools import lru_cache
+
 from jsonschema import Draft7Validator
 from rest_framework import mixins, serializers, status, viewsets
 from rest_framework.response import Response
@@ -5,6 +7,16 @@ from rest_framework.response import Response
 from apps.agents_core.models import AgentRun
 from apps.agents_core.registry import strategy_registry
 from apps.agents_core.tasks.run import execute_run
+
+
+@lru_cache(maxsize=64)
+def _validator_for(strategy_name: str, strategy_version: str) -> Draft7Validator:
+    """Compiled JSONSchema validator per strategy. Compiling on every POST
+    burns ~1–5ms; strategies change only at boot (entry-point reload), so
+    the (name, version) pair is a stable cache key. Bounded at 64 — well
+    above the current 7-strategy ceiling."""
+    schema = strategy_registry.get(strategy_name).schema().params or {}
+    return Draft7Validator(schema)
 
 
 class AgentRunSerializer(serializers.ModelSerializer):
@@ -47,27 +59,25 @@ class AgentRunViewSet(mixins.CreateModelMixin,
 
         # Validate the config against the strategy's JSONSchema BEFORE
         # enqueueing the Celery task. Without this, a missing required
-        # param surfaces as a KeyError deep inside the LangGraph executor
-        # — the run shows up as status=failed with a one-word error
-        # ('engine'), forcing the operator to dig through logs. With this
-        # check, the API returns 400 listing exactly what's missing.
+        # param surfaces as a KeyError deep inside the LangGraph executor —
+        # status=failed with a one-word error like ('engine') and the
+        # operator has to dig through logs. Validator is cached per
+        # (name, version) so this is ~free after the first hit.
         config = ser.validated_data.get("config", {})
-        params_schema = strat.schema().params or {}
-        if params_schema:
-            errors = sorted(
-                Draft7Validator(params_schema).iter_errors(config),
-                key=lambda e: e.path,
-            )
-            if errors:
-                raise serializers.ValidationError({
-                    "config": [
-                        {
-                            "path": list(e.absolute_path),
-                            "message": e.message,
-                        }
-                        for e in errors
-                    ],
-                })
+        errors = sorted(
+            _validator_for(strat.name, strat.version).iter_errors(config),
+            key=lambda e: e.path,
+        )
+        if errors:
+            raise serializers.ValidationError({
+                "config": [
+                    {
+                        "path": list(e.absolute_path),
+                        "message": e.message,
+                    }
+                    for e in errors
+                ],
+            })
 
         run = AgentRun.objects.create(
             tenant=request.tenant,

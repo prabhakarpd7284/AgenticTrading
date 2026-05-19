@@ -39,20 +39,14 @@ export const SheetTrigger = DialogPrim.Trigger;
 export const SheetClose   = DialogPrim.Close;
 
 export function SheetContent({
-  className, children, side = "right", width = "560px", ...props
+  className, children, width = "560px", ...props
 }: React.ComponentProps<typeof DialogPrim.Content> & {
-  /** Which edge the sheet docks to. Only right is implemented today; the
-   *  prop exists so left/bottom variants can be added without an API churn. */
-  side?: "right";
   /** Sheet width — CSS length. Defaults to 560px (comfortable for JSON + cross-links). */
   width?: string;
 }) {
-  // `pointer-events-auto` is critical — Radix Dialog's Content gets
-  // pointer-events:none when modal={false} so clicks on the page beneath
-  // pass through; we re-enable on the panel itself so its own children
-  // receive their clicks.
-  const _side = side; // reserved for future left/bottom positioning
-  void _side;
+  // pointer-events-auto: Radix Dialog's Content gets pointer-events:none when
+  // modal={false} so clicks pass through to the page beneath; we re-enable on
+  // the panel itself so its own children receive their clicks.
   return (
     <DialogPrim.Portal>
       <DialogPrim.Content

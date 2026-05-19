@@ -62,3 +62,20 @@ export function clsPnl(n: number | string | null | undefined): string {
   if (v < 0) return "text-pnl-down";
   return "text-fg-muted";
 }
+
+/** Pretty-print arbitrary JSON-shaped data for inline display. Falls back to
+ *  String() if the value contains cycles (JSON.stringify throws on those). */
+export function safeStringify(v: unknown): string {
+  try { return JSON.stringify(v, null, 2); } catch { return String(v); }
+}
+
+/** Forward-looking duration ("how long did this take") with sub-second
+ *  precision: 423ms / 3.2s / 1m 4s. Distinct from fmtRel which floors to
+ *  seconds and reads as "X ago". */
+export function formatElapsed(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
+  const m = Math.floor(ms / 60_000);
+  const s = Math.floor((ms % 60_000) / 1000);
+  return `${m}m ${s}s`;
+}
