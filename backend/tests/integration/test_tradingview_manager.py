@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 import pytest
 from django.utils import timezone
 
-from apps.notifications.models import TradingViewWatchlist
+from apps.notifications.models import Watchlist
 from apps.strategies.models import Signal
 
 
@@ -19,7 +19,7 @@ pytestmark = pytest.mark.django_db
 class TestWatchlistCRUD:
     def test_create_normalises_symbols(self, auth_client):
         resp = auth_client.post(
-            "/api/v1/notifications/tradingview/watchlists/",
+            "/api/v1/watchlists/",
             {
                 "name": "NIFTY top picks",
                 "symbols": ["reliance", "  TCS ", "RELIANCE", "hdfcbank"],
@@ -33,14 +33,14 @@ class TestWatchlistCRUD:
         assert data["symbol_count"] == 3
 
     def test_name_unique_per_owner(self, auth_client):
-        url = "/api/v1/notifications/tradingview/watchlists/"
+        url = "/api/v1/watchlists/"
         r1 = auth_client.post(url, {"name": "dup", "symbols": []}, format="json")
         assert r1.status_code == 201
         r2 = auth_client.post(url, {"name": "dup", "symbols": []}, format="json")
         assert r2.status_code == 400
 
     def test_add_and_remove_symbols(self, auth_client, owner):
-        wl = TradingViewWatchlist.objects.create(
+        wl = Watchlist.objects.create(
             tenant=owner.memberships.first().tenant,
             owner=owner,
             name="bag",
@@ -48,7 +48,7 @@ class TestWatchlistCRUD:
         )
         # add
         resp = auth_client.post(
-            f"/api/v1/notifications/tradingview/watchlists/{wl.id}/add-symbols/",
+            f"/api/v1/watchlists/{wl.id}/add-symbols/",
             {"symbols": ["TCS", "infy"]},
             format="json",
         )
@@ -57,7 +57,7 @@ class TestWatchlistCRUD:
 
         # remove
         resp = auth_client.post(
-            f"/api/v1/notifications/tradingview/watchlists/{wl.id}/remove-symbols/",
+            f"/api/v1/watchlists/{wl.id}/remove-symbols/",
             {"symbols": ["reliance"]},
             format="json",
         )
@@ -66,7 +66,7 @@ class TestWatchlistCRUD:
 
     def test_url_pattern_does_not_collide_with_link_detail(self, auth_client):
         """`tradingview/<uuid>/` must NOT match `tradingview/watchlists/`."""
-        resp = auth_client.get("/api/v1/notifications/tradingview/watchlists/")
+        resp = auth_client.get("/api/v1/watchlists/")
         assert resp.status_code == 200
         # If routing collided, this would 404 with "no link with pk=watchlists".
 
@@ -153,7 +153,7 @@ class TestGroupedSignals:
             datetime.fromisoformat(row["key"])
 
     def test_filter_by_watchlist(self, auth_client, owner, seeded_signals):
-        wl = TradingViewWatchlist.objects.create(
+        wl = Watchlist.objects.create(
             tenant=owner.memberships.first().tenant,
             owner=owner,
             name="just RELIANCE",

@@ -12,7 +12,7 @@ from decimal import Decimal
 import pytest
 
 from apps.notifications.models import (
-    TradingViewLink, TradingViewWatchlist,
+    TradingViewLink, Watchlist,
 )
 from tests.factories import (
     MembershipFactory, TenantFactory, UserFactory,
@@ -28,10 +28,10 @@ class TestAutofireWatchlistGate:
     @pytest.fixture
     def setup(self, owner, paper_portfolio):
         t = owner.memberships.first().tenant
-        wl = TradingViewWatchlist.objects.create(
+        wl = Watchlist.objects.create(
             tenant=t, owner=owner,
             name="Allowed",
-            kind=TradingViewWatchlist.Kind.MANUAL,
+            kind=Watchlist.Kind.MANUAL,
             symbols=["RELIANCE", "HDFCBANK"],
         )
         link = TradingViewLink.objects.create(
@@ -114,9 +114,9 @@ class TestCrossOwnerBindGuard:
         other_t = TenantFactory()
         other_u = UserFactory()
         MembershipFactory(user=other_u, tenant=other_t, role="owner")
-        foreign = TradingViewWatchlist.objects.create(
+        foreign = Watchlist.objects.create(
             tenant=other_t, owner=other_u, name="not mine",
-            kind=TradingViewWatchlist.Kind.MANUAL, symbols=["RELIANCE"],
+            kind=Watchlist.Kind.MANUAL, symbols=["RELIANCE"],
         )
 
         resp = auth_client.patch(
@@ -135,21 +135,21 @@ class TestCrossOwnerBindGuard:
 class TestByLookup:
     def test_returns_watchlists_containing_symbol(self, auth_client, owner):
         t = owner.memberships.first().tenant
-        TradingViewWatchlist.objects.create(
+        Watchlist.objects.create(
             tenant=t, owner=owner, name="core", symbols=["RELIANCE", "TCS"],
-            kind=TradingViewWatchlist.Kind.MANUAL,
+            kind=Watchlist.Kind.MANUAL,
         )
-        TradingViewWatchlist.objects.create(
+        Watchlist.objects.create(
             tenant=t, owner=owner, name="momentum", symbols=["RELIANCE", "INFY"],
-            kind=TradingViewWatchlist.Kind.MANUAL,
+            kind=Watchlist.Kind.MANUAL,
         )
-        TradingViewWatchlist.objects.create(
+        Watchlist.objects.create(
             tenant=t, owner=owner, name="other", symbols=["HDFCBANK"],
-            kind=TradingViewWatchlist.Kind.MANUAL,
+            kind=Watchlist.Kind.MANUAL,
         )
 
         resp = auth_client.get(
-            "/api/v1/notifications/tradingview/watchlists/by-symbol/?symbol=reliance",
+            "/api/v1/watchlists/by-symbol/?symbol=reliance",
         )
         assert resp.status_code == 200
         # The api response interceptor strips pagination envelope client-side,
@@ -160,7 +160,7 @@ class TestByLookup:
 
     def test_no_symbol_returns_empty(self, auth_client):
         resp = auth_client.get(
-            "/api/v1/notifications/tradingview/watchlists/by-symbol/",
+            "/api/v1/watchlists/by-symbol/",
         )
         assert resp.status_code == 200
         assert resp.json() == []
@@ -170,13 +170,13 @@ class TestByLookup:
         other_t = TenantFactory()
         other_u = UserFactory()
         MembershipFactory(user=other_u, tenant=other_t, role="owner")
-        TradingViewWatchlist.objects.create(
+        Watchlist.objects.create(
             tenant=other_t, owner=other_u, name="leaked", symbols=["RELIANCE"],
-            kind=TradingViewWatchlist.Kind.MANUAL,
+            kind=Watchlist.Kind.MANUAL,
         )
 
         resp = auth_client.get(
-            "/api/v1/notifications/tradingview/watchlists/by-symbol/?symbol=RELIANCE",
+            "/api/v1/watchlists/by-symbol/?symbol=RELIANCE",
         )
         assert resp.status_code == 200
         assert resp.json() == []

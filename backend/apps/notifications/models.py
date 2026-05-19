@@ -77,7 +77,7 @@ class TradingViewLink(TenantModel):
         help_text="If non-empty, only alerts whose `action` is in this list auto-fire. E.g. ['BUY','SELL'].",
     )
     watchlist = models.ForeignKey(
-        "notifications.TradingViewWatchlist",
+        "notifications.Watchlist",
         null=True, blank=True,
         on_delete=models.SET_NULL,
         related_name="bound_links",
@@ -111,11 +111,16 @@ class TradingViewLink(TenantModel):
         self.save(update_fields=["webhook_secret", "last_error", "updated_at"])
 
 
-class TradingViewWatchlist(TenantModel):
+class Watchlist(TenantModel):
     """A named symbol set. Either operator-typed (MANUAL) or computed from an
     AlphaDesk source (every other Kind). Auto kinds cache their resolved
     symbols in the same `symbols` JSON field so every downstream consumer
     treats all watchlists uniformly — a periodic Celery task refreshes them.
+
+    Lives in `apps.notifications` for historical reasons (the TradingView
+    integration's autofire gate was the first consumer), but the model is
+    domain-agnostic — Setup page badges, the screener CLI universe arg,
+    Backtester universe pickers, etc. all read it.
     """
 
     class Kind(models.TextChoices):
@@ -126,10 +131,22 @@ class TradingViewWatchlist(TenantModel):
         TRADED_RECENTLY = "TRADED_RECENTLY", "Recently traded"
         SHORTLIST_TODAY = "SHORTLIST_TODAY", "Today's premarket shortlist"
 
+    # Canonical default config per kind. Single source of truth for the form
+    # initial values + the resolver's "config.get(key, default)" fallbacks.
+    # Frontend reads these via /api/v1/watchlists/kinds/.
+    KIND_DEFAULT_CONFIG: "dict[str, dict]" = {
+        "MANUAL":          {},
+        "SIGNAL_RANK":     {"window_days": 7,  "top_n": 20},
+        "SOURCE_HOT":      {"source": "TRADINGVIEW", "window_days": 7, "top_n": 20},
+        "RECENT_ACTIVE":   {"window_hours": 24},
+        "TRADED_RECENTLY": {"window_days": 30},
+        "SHORTLIST_TODAY": {},
+    }
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     owner = models.ForeignKey(
         "accounts.User", on_delete=models.CASCADE,
-        related_name="tradingview_watchlists",
+        related_name="watchlists",
     )
     name = models.CharField(max_length=80)
     description = models.TextField(blank=True, default="")

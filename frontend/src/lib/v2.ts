@@ -434,54 +434,64 @@ export type WatchlistKind =
   | "TRADED_RECENTLY"
   | "SHORTLIST_TODAY";
 
-/** UI metadata for each kind — labels, descriptions, default config.
- *  Kept in lib/ so it can drive both the picker and any kind-specific
- *  rendering on other pages (Setup badges, autofire selector, etc.). */
+/** UI-only metadata for each kind: labels and trader-facing blurbs. Default
+ *  config values are NOT here — they come from /api/v1/watchlists/kinds/
+ *  (see useWatchlistKinds) so backend resolvers and frontend forms can't
+ *  drift on numerics like window_days / top_n. */
 export const WATCHLIST_KIND_META: Record<WatchlistKind, {
   label: string;
   blurb: string;
-  defaultConfig: Record<string, unknown>;
   isAuto: boolean;
 }> = {
   MANUAL: {
     label: "Manual",
     blurb: "You type the symbols. The list never changes unless you edit it.",
-    defaultConfig: {},
     isAuto: false,
   },
   SIGNAL_RANK: {
     label: "Top-N by signal count",
     blurb: "Most-active symbols across every signal source in the window.",
-    defaultConfig: { window_days: 7, top_n: 20 },
     isAuto: true,
   },
   SOURCE_HOT: {
     label: "Top-N for one source",
     blurb: "Same as Top-N, but pinned to one source (e.g. TradingView only).",
-    defaultConfig: { source: "TRADINGVIEW", window_days: 7, top_n: 20 },
     isAuto: true,
   },
   RECENT_ACTIVE: {
     label: "Active in last N hours",
     blurb: "Every symbol that fired any signal recently.",
-    defaultConfig: { window_hours: 24 },
     isAuto: true,
   },
   TRADED_RECENTLY: {
     label: "Recently traded",
     blurb: "Symbols on real-money Trade rows in the last N days.",
-    defaultConfig: { window_days: 30 },
     isAuto: true,
   },
   SHORTLIST_TODAY: {
     label: "Today's premarket shortlist",
     blurb: "The premarket scanner's output for today (Cascade Stage 4).",
-    defaultConfig: {},
     isAuto: true,
   },
 };
 
-export interface TradingViewWatchlist {
+/** Canonical default config per kind — fetched from the backend so resolver
+ *  fallbacks and form initial values stay in sync. Long staleTime because
+ *  defaults only change on backend deploy. */
+export interface WatchlistKindMeta {
+  kind: WatchlistKind;
+  label: string;
+  defaults: Record<string, unknown>;
+}
+export function useWatchlistKinds() {
+  return useQuery({
+    queryKey: ["watchlist-kinds"],
+    queryFn: () => api.get<WatchlistKindMeta[]>("/watchlists/kinds/").then((r) => r.data),
+    staleTime: 5 * 60_000,
+  });
+}
+
+export interface Watchlist {
   id: string;
   name: string;
   description: string;
@@ -495,7 +505,7 @@ export interface TradingViewWatchlist {
   updated_at: string;
 }
 
-export interface TradingViewWatchlistUpsert {
+export interface WatchlistUpsert {
   name?: string;
   description?: string;
   kind?: WatchlistKind;
@@ -503,44 +513,44 @@ export interface TradingViewWatchlistUpsert {
   symbols?: string[];
 }
 
-export function useTradingViewWatchlists() {
+export function useWatchlists() {
   return useQuery({
-    queryKey: ["tradingview-watchlists"],
+    queryKey: ["watchlists"],
     // lib/api.ts strips DRF's {next, previous, results} envelope down to a
     // bare array — same shape contract as useTradingViewLinks.
     queryFn: () => api
-      .get<TradingViewWatchlist[]>("/notifications/tradingview/watchlists/")
+      .get<Watchlist[]>("/watchlists/")
       .then((r) => r.data),
     refetchInterval: REFETCH_MS,
   });
 }
 
-export function useCreateTradingViewWatchlist() {
+export function useCreateWatchlist() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: TradingViewWatchlistUpsert) =>
-      api.post<TradingViewWatchlist>("/notifications/tradingview/watchlists/", body)
+    mutationFn: (body: WatchlistUpsert) =>
+      api.post<Watchlist>("/watchlists/", body)
         .then((r) => r.data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["tradingview-watchlists"] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["watchlists"] }),
   });
 }
 
-export function useUpdateTradingViewWatchlist() {
+export function useUpdateWatchlist() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, ...body }: TradingViewWatchlistUpsert & { id: string }) =>
-      api.patch<TradingViewWatchlist>(`/notifications/tradingview/watchlists/${id}/`, body)
+    mutationFn: ({ id, ...body }: WatchlistUpsert & { id: string }) =>
+      api.patch<Watchlist>(`/watchlists/${id}/`, body)
         .then((r) => r.data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["tradingview-watchlists"] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["watchlists"] }),
   });
 }
 
-export function useDeleteTradingViewWatchlist() {
+export function useDeleteWatchlist() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) =>
-      api.delete(`/notifications/tradingview/watchlists/${id}/`).then((r) => r.data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["tradingview-watchlists"] }),
+      api.delete(`/watchlists/${id}/`).then((r) => r.data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["watchlists"] }),
   });
 }
 
@@ -548,11 +558,11 @@ export function useAddSymbolsToWatchlist() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, symbols }: { id: string; symbols: string[] }) =>
-      api.post<TradingViewWatchlist>(
-        `/notifications/tradingview/watchlists/${id}/add-symbols/`,
+      api.post<Watchlist>(
+        `/watchlists/${id}/add-symbols/`,
         { symbols },
       ).then((r) => r.data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["tradingview-watchlists"] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["watchlists"] }),
   });
 }
 
@@ -560,23 +570,23 @@ export function useRemoveSymbolsFromWatchlist() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, symbols }: { id: string; symbols: string[] }) =>
-      api.post<TradingViewWatchlist>(
-        `/notifications/tradingview/watchlists/${id}/remove-symbols/`,
+      api.post<Watchlist>(
+        `/watchlists/${id}/remove-symbols/`,
         { symbols },
       ).then((r) => r.data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["tradingview-watchlists"] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["watchlists"] }),
   });
 }
 
 /** On-demand re-resolve of an auto-kind watchlist. 400s for MANUAL kind. */
-export function useRefreshTradingViewWatchlist() {
+export function useRefreshWatchlist() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) =>
-      api.post<TradingViewWatchlist>(
-        `/notifications/tradingview/watchlists/${id}/refresh/`,
+      api.post<Watchlist>(
+        `/watchlists/${id}/refresh/`,
       ).then((r) => r.data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["tradingview-watchlists"] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["watchlists"] }),
   });
 }
 
@@ -585,10 +595,10 @@ export function useRefreshTradingViewWatchlist() {
  *  surface that wants a "what am I tracking this for" backlink. */
 export function useWatchlistsBySymbol(symbol: string | undefined) {
   return useQuery({
-    queryKey: ["tradingview-watchlists-by-symbol", symbol],
+    queryKey: ["watchlists-by-symbol", symbol],
     queryFn: () => api
-      .get<TradingViewWatchlist[]>(
-        `/notifications/tradingview/watchlists/by-symbol/?symbol=${encodeURIComponent(symbol || "")}`,
+      .get<Watchlist[]>(
+        `/watchlists/by-symbol/?symbol=${encodeURIComponent(symbol || "")}`,
       )
       .then((r) => r.data),
     enabled: !!symbol,

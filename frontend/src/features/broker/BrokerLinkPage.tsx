@@ -1,10 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
+import { Link as RouterLink } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
-  ArrowRight, CheckCircle2, ExternalLink, Eye, EyeOff, Lock, RotateCw,
+  ArrowRight, CheckCircle2, ExternalLink, Eye, EyeOff, Lock, Radio, RotateCw,
   ShieldAlert, ShieldCheck, Star, Trash2,
 } from "lucide-react";
+
+import { useTradingViewLinks } from "@/lib/v2";
 
 import { api } from "@/lib/api";
 import { cn, fmtInr } from "@/lib/utils";
@@ -23,7 +26,6 @@ import { Input } from "@/components/ui/Input";
 import { FreshnessIndicator } from "@/components/ui/FreshnessIndicator";
 
 import { BROKER_CATALOG, getBrokerSpec, type BrokerSpec } from "./brokerCatalog";
-import { TradingViewSection } from "./TradingViewSection";
 
 // ─── API types ────────────────────────────────────────────────────────
 
@@ -355,8 +357,11 @@ export function BrokerLinkPage() {
         </CardContent>
       </Card>
 
-      {/* ── TradingView signals ─────────────────────────────────────── */}
-      <TradingViewSection />
+      {/* ── TradingView shortcut ────────────────────────────────────── */}
+      {/* TradingView management lives at /tradingview now — render a thin
+          status card here so operators discover the link without us
+          duplicating the full settings UI on /brokers. */}
+      <TradingViewShortcut />
 
       {/* ── Connect dialog ──────────────────────────────────────────── */}
       <Dialog open={!!connectBroker} onOpenChange={(open) => !open && setConnectBroker(null)}>
@@ -1093,5 +1098,42 @@ function ConnectForm({
         </Button>
       </footer>
     </form>
+  );
+}
+
+/* ─── TradingView shortcut card ─────────────────────────────────────── */
+
+/** Small status tile shown on the broker page so operators can find
+ *  TradingView management without us duplicating the whole UI here. The
+ *  dedicated page (/tradingview) is the single home for webhook links,
+ *  watchlists, and grouped signals. */
+function TradingViewShortcut() {
+  const { data: links = [] } = useTradingViewLinks();
+  const lastReceived = links
+    .map((l) => l.last_received_at)
+    .filter(Boolean)
+    .sort()
+    .at(-1);
+
+  return (
+    <RouterLink to="/tradingview" className="block">
+      <Card interactive>
+        <CardHeader className="flex flex-row items-center gap-3">
+          <div className="rounded-md bg-brand/10 p-2 text-brand">
+            <Radio className="h-5 w-5" aria-hidden />
+          </div>
+          <div className="flex-1 min-w-0">
+            <CardTitle>TradingView</CardTitle>
+            <CardDescription>
+              {links.length === 0
+                ? "Turn TradingView alerts into AlphaDesk signals — webhook URLs, watchlists, and grouped signal views."
+                : `${links.length} webhook link${links.length === 1 ? "" : "s"}` +
+                  (lastReceived ? ` · last alert ${new Date(lastReceived).toLocaleString("en-IN", { hour12: false })}` : "")}
+            </CardDescription>
+          </div>
+          <ArrowRight className="h-4 w-4 text-fg-subtle" aria-hidden />
+        </CardHeader>
+      </Card>
+    </RouterLink>
   );
 }

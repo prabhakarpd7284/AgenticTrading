@@ -21,7 +21,7 @@ from decimal import Decimal
 import pytest
 from django.utils import timezone
 
-from apps.notifications.models import TradingViewWatchlist
+from apps.notifications.models import Watchlist
 from apps.notifications.services.watchlist_resolvers import (
     refresh_watchlist, resolve_symbols,
 )
@@ -54,9 +54,9 @@ class TestResolveSignalRank:
         for _ in range(3): _signal(t, symbol="TCS", source="SCREENER")
         _signal(t, symbol="ITC", source="TRADINGVIEW", hours_ago=24 * 30)   # outside 7d default
 
-        wl = TradingViewWatchlist(
+        wl = Watchlist(
             tenant=t, owner=owner, name="rank",
-            kind=TradingViewWatchlist.Kind.SIGNAL_RANK,
+            kind=Watchlist.Kind.SIGNAL_RANK,
             config={"window_days": 7, "top_n": 5},
         )
         wl.save()
@@ -69,9 +69,9 @@ class TestResolveSignalRank:
         for sym in ("A", "B", "C", "D", "E"):
             _signal(t, symbol=sym, source="TRADINGVIEW")
 
-        wl = TradingViewWatchlist.objects.create(
+        wl = Watchlist.objects.create(
             tenant=t, owner=owner, name="cap",
-            kind=TradingViewWatchlist.Kind.SIGNAL_RANK,
+            kind=Watchlist.Kind.SIGNAL_RANK,
             config={"top_n": 3},
         )
         assert len(resolve_symbols(wl)) == 3
@@ -83,9 +83,9 @@ class TestResolveSourceHot:
         for _ in range(5): _signal(t, symbol="RELIANCE", source="TRADINGVIEW")
         for _ in range(10): _signal(t, symbol="TCS", source="SCREENER")
 
-        wl = TradingViewWatchlist.objects.create(
+        wl = Watchlist.objects.create(
             tenant=t, owner=owner, name="tv hot",
-            kind=TradingViewWatchlist.Kind.SOURCE_HOT,
+            kind=Watchlist.Kind.SOURCE_HOT,
             config={"source": "TRADINGVIEW", "top_n": 5},
         )
         # SCREENER has more total but the filter pins it to TRADINGVIEW only.
@@ -95,9 +95,9 @@ class TestResolveSourceHot:
         t = owner.memberships.first().tenant
         for _ in range(2): _signal(t, symbol="RELIANCE", source="TRADINGVIEW")
 
-        wl = TradingViewWatchlist.objects.create(
+        wl = Watchlist.objects.create(
             tenant=t, owner=owner, name="bad src",
-            kind=TradingViewWatchlist.Kind.SOURCE_HOT,
+            kind=Watchlist.Kind.SOURCE_HOT,
             config={"source": "BOGUS"},
         )
         # Resolver-level fallback — at the API level we'd 400 instead.
@@ -110,9 +110,9 @@ class TestResolveRecentActive:
         _signal(t, symbol="RELIANCE", source="TRADINGVIEW", hours_ago=2)
         _signal(t, symbol="TCS",      source="TRADINGVIEW", hours_ago=48)    # outside 24h
 
-        wl = TradingViewWatchlist.objects.create(
+        wl = Watchlist.objects.create(
             tenant=t, owner=owner, name="active",
-            kind=TradingViewWatchlist.Kind.RECENT_ACTIVE,
+            kind=Watchlist.Kind.RECENT_ACTIVE,
             config={"window_hours": 24},
         )
         assert resolve_symbols(wl) == ["RELIANCE"]
@@ -136,9 +136,9 @@ class TestResolveTradedRecently:
                 status=status, trade_date=timezone.now().date(),
             )
 
-        wl = TradingViewWatchlist.objects.create(
+        wl = Watchlist.objects.create(
             tenant=t, owner=owner, name="recent",
-            kind=TradingViewWatchlist.Kind.TRADED_RECENTLY,
+            kind=Watchlist.Kind.TRADED_RECENTLY,
             config={"window_days": 30},
         )
         out = set(resolve_symbols(wl))
@@ -161,9 +161,9 @@ class TestResolveShortlistToday:
                 score=score, outcome=outcome,
             )
 
-        wl = TradingViewWatchlist.objects.create(
+        wl = Watchlist.objects.create(
             tenant=t, owner=owner, name="today",
-            kind=TradingViewWatchlist.Kind.SHORTLIST_TODAY,
+            kind=Watchlist.Kind.SHORTLIST_TODAY,
         )
         out = resolve_symbols(wl)
         # Sorted by score desc.
@@ -178,7 +178,7 @@ class TestAutoKindCreate:
         for _ in range(3): _signal(t, symbol="RELIANCE", source="TRADINGVIEW")
 
         resp = auth_client.post(
-            "/api/v1/notifications/tradingview/watchlists/",
+            "/api/v1/watchlists/",
             {
                 "name": "Top TV",
                 "kind": "SOURCE_HOT",
@@ -195,7 +195,7 @@ class TestAutoKindCreate:
 
     def test_source_hot_without_source_400s(self, auth_client):
         resp = auth_client.post(
-            "/api/v1/notifications/tradingview/watchlists/",
+            "/api/v1/watchlists/",
             {"name": "missing src", "kind": "SOURCE_HOT", "config": {}},
             format="json",
         )
@@ -204,7 +204,7 @@ class TestAutoKindCreate:
 
     def test_create_with_manual_kind_keeps_typed_symbols(self, auth_client):
         resp = auth_client.post(
-            "/api/v1/notifications/tradingview/watchlists/",
+            "/api/v1/watchlists/",
             {"name": "Manual", "kind": "MANUAL", "symbols": ["reliance", "TCS"]},
             format="json",
         )
@@ -216,9 +216,9 @@ class TestAutoKindCreate:
 class TestRefreshAction:
     def test_refresh_re_resolves(self, auth_client, owner):
         t = owner.memberships.first().tenant
-        wl = TradingViewWatchlist.objects.create(
+        wl = Watchlist.objects.create(
             tenant=t, owner=owner, name="x",
-            kind=TradingViewWatchlist.Kind.SIGNAL_RANK,
+            kind=Watchlist.Kind.SIGNAL_RANK,
             config={"window_days": 7},
         )
         # No signals yet → first resolve = [].
@@ -228,31 +228,31 @@ class TestRefreshAction:
 
         _signal(t, symbol="TCS", source="SCREENER")
         resp = auth_client.post(
-            f"/api/v1/notifications/tradingview/watchlists/{wl.id}/refresh/",
+            f"/api/v1/watchlists/{wl.id}/refresh/",
         )
         assert resp.status_code == 200
         assert resp.json()["symbols"] == ["TCS"]
 
     def test_refresh_on_manual_400s(self, auth_client, owner):
-        wl = TradingViewWatchlist.objects.create(
+        wl = Watchlist.objects.create(
             tenant=owner.memberships.first().tenant, owner=owner,
-            name="manual", kind=TradingViewWatchlist.Kind.MANUAL,
+            name="manual", kind=Watchlist.Kind.MANUAL,
             symbols=["RELIANCE"],
         )
         resp = auth_client.post(
-            f"/api/v1/notifications/tradingview/watchlists/{wl.id}/refresh/",
+            f"/api/v1/watchlists/{wl.id}/refresh/",
         )
         assert resp.status_code == 400
 
 
 class TestSymbolEditGuard:
     def test_add_symbols_blocked_on_auto_kind(self, auth_client, owner):
-        wl = TradingViewWatchlist.objects.create(
+        wl = Watchlist.objects.create(
             tenant=owner.memberships.first().tenant, owner=owner,
-            name="auto", kind=TradingViewWatchlist.Kind.RECENT_ACTIVE,
+            name="auto", kind=Watchlist.Kind.RECENT_ACTIVE,
         )
         resp = auth_client.post(
-            f"/api/v1/notifications/tradingview/watchlists/{wl.id}/add-symbols/",
+            f"/api/v1/watchlists/{wl.id}/add-symbols/",
             {"symbols": ["RELIANCE"]}, format="json",
         )
         assert resp.status_code == 400
@@ -263,14 +263,14 @@ class TestSymbolEditGuard:
 class TestRefreshTask:
     def test_refresh_task_skips_manual_and_updates_auto(self, owner):
         t = owner.memberships.first().tenant
-        manual = TradingViewWatchlist.objects.create(
+        manual = Watchlist.objects.create(
             tenant=t, owner=owner, name="m",
-            kind=TradingViewWatchlist.Kind.MANUAL,
+            kind=Watchlist.Kind.MANUAL,
             symbols=["UNTOUCHED"],
         )
-        auto = TradingViewWatchlist.objects.create(
+        auto = Watchlist.objects.create(
             tenant=t, owner=owner, name="a",
-            kind=TradingViewWatchlist.Kind.SIGNAL_RANK,
+            kind=Watchlist.Kind.SIGNAL_RANK,
         )
         _signal(t, symbol="RELIANCE", source="TRADINGVIEW")
 

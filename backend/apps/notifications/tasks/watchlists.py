@@ -1,7 +1,7 @@
 """Periodic refresh of auto-kind watchlists.
 
 Scheduled by celery beat (see config.settings.base.CELERY_BEAT_SCHEDULE).
-Walks every non-MANUAL TradingViewWatchlist and dispatches to its resolver,
+Walks every non-MANUAL Watchlist and dispatches to its resolver,
 writing the new symbol list + timestamp back. Per-row errors are logged
 and skipped so one bad row doesn't abort the whole sweep.
 
@@ -17,7 +17,7 @@ from __future__ import annotations
 import structlog
 from celery import shared_task
 
-from apps.notifications.models import TradingViewWatchlist
+from apps.notifications.models import Watchlist
 from apps.notifications.services.watchlist_resolvers import refresh_watchlist
 
 log = structlog.get_logger()
@@ -30,8 +30,8 @@ def refresh_auto_watchlists() -> dict:
     errors = 0
     skipped = 0
 
-    qs = TradingViewWatchlist.objects.exclude(
-        kind=TradingViewWatchlist.Kind.MANUAL,
+    qs = Watchlist.objects.exclude(
+        kind=Watchlist.Kind.MANUAL,
     ).select_related("tenant")
 
     for wl in qs.iterator(chunk_size=100):

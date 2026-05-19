@@ -37,13 +37,13 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/Tabs";
 
 import {
   type GroupedSignalRow, type SignalGroupBy,
-  type TradingViewWatchlist, type WatchlistKind,
+  type Watchlist, type WatchlistKind,
   WATCHLIST_KIND_META,
-  useAddSymbolsToWatchlist, useCreateTradingViewWatchlist,
-  useDeleteTradingViewWatchlist, useGroupedSignals,
-  useRefreshTradingViewWatchlist,
+  useAddSymbolsToWatchlist, useCreateWatchlist,
+  useDeleteWatchlist, useGroupedSignals,
+  useRefreshWatchlist,
   useRemoveSymbolsFromWatchlist, useTradingViewLinks,
-  useTradingViewWatchlists, useUpdateTradingViewWatchlist,
+  useWatchlistKinds, useWatchlists, useUpdateWatchlist,
 } from "@/lib/v2";
 import { cn, fmtRel } from "@/lib/utils";
 
@@ -52,7 +52,7 @@ import { TradingViewSection } from "@/features/broker/TradingViewSection";
 
 export function TradingViewPage() {
   const linksQ = useTradingViewLinks();
-  const watchlistsQ = useTradingViewWatchlists();
+  const watchlistsQ = useWatchlists();
   const groupedQ = useGroupedSignals({ by: "symbol", days: 7 });
 
   const totalSignals = (groupedQ.data?.rows || []).reduce((s, r) => s + r.count, 0);
@@ -112,7 +112,7 @@ export function TradingViewPage() {
 /* =================================================================== */
 
 function WatchlistsCard() {
-  const { data: watchlists = [], isLoading } = useTradingViewWatchlists();
+  const { data: watchlists = [], isLoading } = useWatchlists();
   const [newOpen, setNewOpen] = React.useState(false);
 
   return (
@@ -152,12 +152,12 @@ function WatchlistsCard() {
   );
 }
 
-function WatchlistRow({ watchlist }: { watchlist: TradingViewWatchlist }) {
-  const update = useUpdateTradingViewWatchlist();
-  const remove = useDeleteTradingViewWatchlist();
+function WatchlistRow({ watchlist }: { watchlist: Watchlist }) {
+  const update = useUpdateWatchlist();
+  const remove = useDeleteWatchlist();
   const add = useAddSymbolsToWatchlist();
   const rm = useRemoveSymbolsFromWatchlist();
-  const refresh = useRefreshTradingViewWatchlist();
+  const refresh = useRefreshWatchlist();
 
   const meta = WATCHLIST_KIND_META[watchlist.kind];
   const [editingName, setEditingName] = React.useState(false);
@@ -313,12 +313,20 @@ function NewWatchlistDialog({ open, onClose }: { open: boolean; onClose: () => v
   const [kind, setKind] = React.useState<WatchlistKind>("MANUAL");
   const [symbolsRaw, setSymbolsRaw] = React.useState("");
   const [config, setConfig] = React.useState<Record<string, unknown>>({});
-  const create = useCreateTradingViewWatchlist();
+  const create = useCreateWatchlist();
+  // Backend-canonical defaults — single source of truth for window_days,
+  // top_n, source, etc. The local meta keeps only UI strings.
+  const { data: kindsMeta } = useWatchlistKinds();
+  const defaultsByKind = React.useMemo(() => {
+    const m: Partial<Record<WatchlistKind, Record<string, unknown>>> = {};
+    for (const k of kindsMeta || []) m[k.kind] = k.defaults;
+    return m;
+  }, [kindsMeta]);
 
-  // Reset config to the picked kind's defaults whenever kind changes.
+  // Reset config to the picked kind's backend-canonical defaults on switch.
   React.useEffect(() => {
-    setConfig({ ...WATCHLIST_KIND_META[kind].defaultConfig });
-  }, [kind]);
+    setConfig({ ...(defaultsByKind[kind] || {}) });
+  }, [kind, defaultsByKind]);
 
   React.useEffect(() => {
     if (!open) {
@@ -522,7 +530,7 @@ function GroupedSignalsCard() {
   const [by, setBy] = React.useState<SignalGroupBy>("symbol");
   const [days, setDays] = React.useState(7);
   const [watchlistFilter, setWatchlistFilter] = React.useState<string>("");
-  const { data: watchlists = [] } = useTradingViewWatchlists();
+  const { data: watchlists = [] } = useWatchlists();
   const { data, isLoading, dataUpdatedAt } = useGroupedSignals({
     by, days, watchlist: watchlistFilter || undefined,
   });

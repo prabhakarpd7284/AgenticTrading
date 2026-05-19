@@ -37,7 +37,7 @@ import {
   type TradingViewLink, type TradingViewSignalRow,
   useCreateTradingViewLink, useDeleteTradingViewLink,
   useRotateTradingViewSecret, useTradingViewLinks, useTradingViewRecent,
-  useTradingViewWatchlists, useUpdateTradingViewLink,
+  useWatchlists, useUpdateTradingViewLink,
 } from "@/lib/v2";
 import { cn, fmtRel } from "@/lib/utils";
 
@@ -494,7 +494,7 @@ function ToggleRow({
 function WatchlistSelect({
   value, onChange,
 }: { value: string | null; onChange: (id: string | null) => void }) {
-  const { data: watchlists = [] } = useTradingViewWatchlists();
+  const { data: watchlists = [] } = useWatchlists();
   return (
     <div>
       <div className="text-body-sm text-fg mb-1">Restrict to watchlist (optional)</div>

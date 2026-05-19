@@ -4,7 +4,6 @@ from rest_framework.routers import DefaultRouter
 from apps.notifications.api.tradingview_views import (
     GroupedSignalsView,
     TradingViewLinkViewSet,
-    TradingViewWatchlistViewSet,
 )
 from apps.notifications.api.views import AlertViewSet
 
@@ -14,15 +13,6 @@ router = DefaultRouter()
 # slack/email destinations). Nothing in the FE was hitting the old root.
 router.register("alerts", AlertViewSet, basename="alert")
 router.register("tradingview", TradingViewLinkViewSet, basename="tradingview-link")
-# Watchlists are scoped *under* /tradingview/watchlists/ rather than at
-# /watchlists/ because they're tightly coupled to the TradingView feature
-# — same operator surface, same Manager page. Easier to deprecate together
-# than to split across two URL namespaces.
-router.register(
-    "tradingview/watchlists",
-    TradingViewWatchlistViewSet,
-    basename="tradingview-watchlist",
-)
 
 urlpatterns = [
     path("", include(router.urls)),

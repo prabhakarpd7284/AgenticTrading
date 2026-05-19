@@ -7,7 +7,13 @@ from apps.accounts.api.jwt import (
     TenantTokenObtainPairView,
     TenantTokenRefreshView,
 )
-from apps.notifications.api.tradingview_views import TradingViewWebhookView
+from apps.notifications.api.tradingview_views import (
+    TradingViewWebhookView, WatchlistKindsView, WatchlistViewSet,
+)
+from rest_framework.routers import DefaultRouter
+
+_watchlists = DefaultRouter()
+_watchlists.register("", WatchlistViewSet, basename="watchlist")
 
 api_v1 = [
     # JWT views that embed the user's active tenant_id in the token claims —
@@ -34,6 +40,12 @@ api_v1 = [
     path("journals/", include("apps.events.api.journal_urls")),
     path("events/", include("apps.events.api.urls")),
     path("notifications/", include("apps.notifications.api.urls")),
+    # Watchlists live at top level because the primitive is domain-agnostic
+    # (Setup page badges, autofire allowlists, screener universe, ...). The
+    # model still lives in apps.notifications for historical reasons; only
+    # the URL is hoisted.
+    path("watchlists/kinds/", WatchlistKindsView.as_view(), name="watchlist-kinds"),
+    path("watchlists/", include(_watchlists.urls)),
     # /ops/ — owner-only dev console: list management commands + stream
     # subprocess output over /ws/ops/ (see apps.system.consumers).
     path("ops/", include("apps.system.api.urls")),

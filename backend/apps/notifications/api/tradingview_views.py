@@ -1,20 +1,13 @@
-"""TradingView integration endpoints.
+"""TradingView + watchlist endpoints — historically grouped because the
+TradingView autofire gate was the first watchlist consumer, but watchlists
+are now general-purpose (Setup page badges, screener universe, etc.).
 
-Three distinct surfaces:
-
-  TradingViewLinkViewSet — auth'd CRUD for the operator's webhook
-  configurations. Mounted under /api/v1/notifications/tradingview/.
-
-  TradingViewWatchlistViewSet — auth'd CRUD for named symbol lists.
-  Mounted under /api/v1/notifications/tradingview/watchlists/.
-
-  TradingViewWebhookView — the public endpoint TradingView POSTs to.
-  Mounted at /api/v1/webhooks/tradingview/<secret>/ at the URL-conf top
-  level. No JWT; the secret in the URL path IS the auth.
-
-  GroupedSignalsView — auth'd read-only aggregator of incoming
-  TradingView signals, faceted by symbol / strategy / source / day for
-  the TradingView Manager page.
+Mount points:
+  TradingViewLinkViewSet         /api/v1/notifications/tradingview/
+  WatchlistViewSet               /api/v1/watchlists/                (top-level)
+  WatchlistKindsView             /api/v1/watchlists/kinds/          (defaults)
+  GroupedSignalsView             /api/v1/notifications/tradingview/signals/
+  TradingViewWebhookView         /api/v1/webhooks/tradingview/<secret>/  (public)
 """
 from __future__ import annotations
 
@@ -31,7 +24,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.notifications.models import (
-    TradingViewLink, TradingViewSignal, TradingViewWatchlist,
+    TradingViewLink, TradingViewSignal, Watchlist,
 )
 from apps.notifications.services.tradingview import (
     fire_workflow, parse_payload, record_alert,
@@ -194,12 +187,12 @@ def _decode_body(request) -> str:
 
 # ── Watchlists ───────────────────────────────────────────────────────────
 
-class TradingViewWatchlistSerializer(serializers.ModelSerializer):
+class WatchlistSerializer(serializers.ModelSerializer):
     symbol_count = serializers.SerializerMethodField()
     is_auto = serializers.BooleanField(read_only=True)
 
     class Meta:
-        model = TradingViewWatchlist
+        model = Watchlist
         fields = [
             "id", "name", "description",
             "kind", "config", "is_auto",
@@ -213,19 +206,19 @@ class TradingViewWatchlistSerializer(serializers.ModelSerializer):
             "created_at", "updated_at",
         ]
 
-    def get_symbol_count(self, w: TradingViewWatchlist) -> int:
+    def get_symbol_count(self, w: Watchlist) -> int:
         return len(w.symbols or [])
 
     def validate(self, attrs):
         # For auto kinds, symbols isn't operator-typed — it's overwritten
         # by the resolver. Ignore whatever was POSTed; the create path runs
         # the resolver synchronously to seed the row.
-        kind = attrs.get("kind", getattr(self.instance, "kind", TradingViewWatchlist.Kind.MANUAL))
-        if kind != TradingViewWatchlist.Kind.MANUAL:
+        kind = attrs.get("kind", getattr(self.instance, "kind", Watchlist.Kind.MANUAL))
+        if kind != Watchlist.Kind.MANUAL:
             attrs.pop("symbols", None)
         # SOURCE_HOT must declare a source — surface as a 400 instead of
         # the resolver silently falling back to SIGNAL_RANK.
-        if kind == TradingViewWatchlist.Kind.SOURCE_HOT:
+        if kind == Watchlist.Kind.SOURCE_HOT:
             cfg = attrs.get("config") or getattr(self.instance, "config", {}) or {}
             src = str(cfg.get("source") or "").upper().strip()
             valid = {choice for choice, _ in Signal.Source.choices}
@@ -236,7 +229,7 @@ class TradingViewWatchlistSerializer(serializers.ModelSerializer):
         return attrs
 
 
-class TradingViewWatchlistViewSet(
+class WatchlistViewSet(
     mixins.CreateModelMixin,
     mixins.ListModelMixin,
     mixins.RetrieveModelMixin,
@@ -244,10 +237,10 @@ class TradingViewWatchlistViewSet(
     mixins.DestroyModelMixin,
     viewsets.GenericViewSet,
 ):
-    serializer_class = TradingViewWatchlistSerializer
+    serializer_class = WatchlistSerializer
 
     def get_queryset(self):
-        return TradingViewWatchlist.objects.filter(
+        return Watchlist.objects.filter(
             tenant=self.request.tenant,
             owner=self.request.user,
         )
@@ -256,7 +249,7 @@ class TradingViewWatchlistViewSet(
         # Pre-flight uniqueness check — without this, the unique_together DB
         # constraint fires as IntegrityError → 500 instead of a friendly 400.
         name = serializer.validated_data.get("name", "").strip()
-        exists = TradingViewWatchlist.objects.filter(
+        exists = Watchlist.objects.filter(
             tenant=self.request.tenant, owner=self.request.user, name=name,
         ).exists()
         if exists:
@@ -400,7 +393,7 @@ class GroupedSignalsView(APIView):
 
         watchlist_id = request.query_params.get("watchlist")
         if watchlist_id:
-            wl = (TradingViewWatchlist.objects
+            wl = (Watchlist.objects
                   .filter(tenant=tenant, owner=request.user, pk=watchlist_id)
                   .first())
             if wl and wl.symbols:
@@ -459,3 +452,26 @@ def _group_signals(qs, by: str) -> list[dict]:
             ("latest_action", latest or ""),
         ]))
     return rows
+
+
+# ── Watchlist kinds metadata ────────────────────────────────────────────
+
+class WatchlistKindsView(APIView):
+    """Canonical kind metadata for the new-watchlist form.
+
+    Returns the kind value + Django's human-readable label + the resolver's
+    default config. The frontend reads UI strings (blurb) from its own
+    constant; only `defaults` is canonical here so backend + UI can't drift.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        return Response([
+            {
+                "kind": kind.value,
+                "label": kind.label,
+                "defaults": Watchlist.KIND_DEFAULT_CONFIG.get(kind.value, {}),
+            }
+            for kind in Watchlist.Kind
+        ])
