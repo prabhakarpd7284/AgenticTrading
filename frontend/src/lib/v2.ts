@@ -362,9 +362,12 @@ export interface TradingViewLinkUpsert {
 export function useTradingViewLinks() {
   return useQuery({
     queryKey: ["tradingview-links"],
+    // NOTE: lib/api.ts has a global response interceptor that strips the DRF
+    // pagination envelope ({next, previous, results}) down to a bare array
+    // when both `next` and `previous` are present. So `r.data` IS the array.
     queryFn: () => api
-      .get<{ results: TradingViewLink[] }>("/notifications/tradingview/")
-      .then((r) => r.data.results),
+      .get<TradingViewLink[]>("/notifications/tradingview/")
+      .then((r) => r.data),
     refetchInterval: REFETCH_MS,
   });
 }
