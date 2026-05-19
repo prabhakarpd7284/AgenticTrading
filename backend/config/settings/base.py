@@ -189,6 +189,26 @@ CELERY_BEAT_SCHEDULE = {
         "task": "apps.agents_core.tasks.housekeeping.expire_runs",
         "schedule": 300.0,
     },
+    # Broker snapshot refresh — fan-out task picks every ACTIVE BrokerLink
+    # and dispatches per-link refreshes. The task itself derives the next
+    # cadence (30s market hours / 5min off-hours), but beat fires at the
+    # tightest interval; off-hours runs cheaply detect no work to do.
+    "refresh-broker-positions": {
+        "task": "apps.market_data.tasks.broker_refresh.refresh_broker_positions",
+        "schedule": 30.0,
+    },
+    "prune-broker-snapshots": {
+        "task": "apps.market_data.tasks.broker_refresh.prune_old_snapshots",
+        "schedule": 3600.0 * 6,  # every 6h
+    },
+    # Auto-kind watchlists (SIGNAL_RANK, SOURCE_HOT, RECENT_ACTIVE, …)
+    # re-resolve every 5 min. Task is cheap — pure DB aggregates with no
+    # broker hits — so the cadence is mostly about operator-visible
+    # freshness. /refresh/ endpoint provides on-demand sync re-resolve.
+    "refresh-auto-watchlists": {
+        "task": "apps.notifications.tasks.watchlists.refresh_auto_watchlists",
+        "schedule": 300.0,
+    },
 }
 
 # CORS/CSRF ------------------------------------------------------------

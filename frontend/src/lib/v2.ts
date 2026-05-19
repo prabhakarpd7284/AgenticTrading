@@ -421,12 +421,71 @@ export function useDeleteTradingViewLink() {
 
 /* ── Watchlists ───────────────────────────────────────────────────────── */
 
+export type WatchlistKind =
+  | "MANUAL"
+  | "SIGNAL_RANK"
+  | "SOURCE_HOT"
+  | "RECENT_ACTIVE"
+  | "TRADED_RECENTLY"
+  | "SHORTLIST_TODAY";
+
+/** UI metadata for each kind — labels, descriptions, default config.
+ *  Kept in lib/ so it can drive both the picker and any kind-specific
+ *  rendering on other pages (Setup badges, autofire selector, etc.). */
+export const WATCHLIST_KIND_META: Record<WatchlistKind, {
+  label: string;
+  blurb: string;
+  defaultConfig: Record<string, unknown>;
+  isAuto: boolean;
+}> = {
+  MANUAL: {
+    label: "Manual",
+    blurb: "You type the symbols. The list never changes unless you edit it.",
+    defaultConfig: {},
+    isAuto: false,
+  },
+  SIGNAL_RANK: {
+    label: "Top-N by signal count",
+    blurb: "Most-active symbols across every signal source in the window.",
+    defaultConfig: { window_days: 7, top_n: 20 },
+    isAuto: true,
+  },
+  SOURCE_HOT: {
+    label: "Top-N for one source",
+    blurb: "Same as Top-N, but pinned to one source (e.g. TradingView only).",
+    defaultConfig: { source: "TRADINGVIEW", window_days: 7, top_n: 20 },
+    isAuto: true,
+  },
+  RECENT_ACTIVE: {
+    label: "Active in last N hours",
+    blurb: "Every symbol that fired any signal recently.",
+    defaultConfig: { window_hours: 24 },
+    isAuto: true,
+  },
+  TRADED_RECENTLY: {
+    label: "Recently traded",
+    blurb: "Symbols on real-money Trade rows in the last N days.",
+    defaultConfig: { window_days: 30 },
+    isAuto: true,
+  },
+  SHORTLIST_TODAY: {
+    label: "Today's premarket shortlist",
+    blurb: "The premarket scanner's output for today (Cascade Stage 4).",
+    defaultConfig: {},
+    isAuto: true,
+  },
+};
+
 export interface TradingViewWatchlist {
   id: string;
   name: string;
   description: string;
+  kind: WatchlistKind;
+  config: Record<string, unknown>;
+  is_auto: boolean;
   symbols: string[];
   symbol_count: number;
+  symbols_refreshed_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -434,6 +493,8 @@ export interface TradingViewWatchlist {
 export interface TradingViewWatchlistUpsert {
   name?: string;
   description?: string;
+  kind?: WatchlistKind;
+  config?: Record<string, unknown>;
   symbols?: string[];
 }
 
@@ -497,6 +558,18 @@ export function useRemoveSymbolsFromWatchlist() {
       api.post<TradingViewWatchlist>(
         `/notifications/tradingview/watchlists/${id}/remove-symbols/`,
         { symbols },
+      ).then((r) => r.data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["tradingview-watchlists"] }),
+  });
+}
+
+/** On-demand re-resolve of an auto-kind watchlist. 400s for MANUAL kind. */
+export function useRefreshTradingViewWatchlist() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      api.post<TradingViewWatchlist>(
+        `/notifications/tradingview/watchlists/${id}/refresh/`,
       ).then((r) => r.data),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["tradingview-watchlists"] }),
   });

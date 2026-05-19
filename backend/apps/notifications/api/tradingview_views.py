@@ -180,17 +180,44 @@ def _decode_body(request) -> str:
 
 class TradingViewWatchlistSerializer(serializers.ModelSerializer):
     symbol_count = serializers.SerializerMethodField()
+    is_auto = serializers.BooleanField(read_only=True)
 
     class Meta:
         model = TradingViewWatchlist
         fields = [
-            "id", "name", "description", "symbols", "symbol_count",
+            "id", "name", "description",
+            "kind", "config", "is_auto",
+            "symbols", "symbol_count",
+            "symbols_refreshed_at",
             "created_at", "updated_at",
         ]
-        read_only_fields = ["id", "symbol_count", "created_at", "updated_at"]
+        read_only_fields = [
+            "id", "symbol_count", "is_auto",
+            "symbols_refreshed_at",
+            "created_at", "updated_at",
+        ]
 
     def get_symbol_count(self, w: TradingViewWatchlist) -> int:
         return len(w.symbols or [])
+
+    def validate(self, attrs):
+        # For auto kinds, symbols isn't operator-typed — it's overwritten
+        # by the resolver. Ignore whatever was POSTed; the create path runs
+        # the resolver synchronously to seed the row.
+        kind = attrs.get("kind", getattr(self.instance, "kind", TradingViewWatchlist.Kind.MANUAL))
+        if kind != TradingViewWatchlist.Kind.MANUAL:
+            attrs.pop("symbols", None)
+        # SOURCE_HOT must declare a source — surface as a 400 instead of
+        # the resolver silently falling back to SIGNAL_RANK.
+        if kind == TradingViewWatchlist.Kind.SOURCE_HOT:
+            cfg = attrs.get("config") or getattr(self.instance, "config", {}) or {}
+            src = str(cfg.get("source") or "").upper().strip()
+            valid = {choice for choice, _ in Signal.Source.choices}
+            if src not in valid:
+                raise serializers.ValidationError({
+                    "config": f"SOURCE_HOT requires config.source ∈ {sorted(valid)}; got {src!r}.",
+                })
+        return attrs
 
 
 class TradingViewWatchlistViewSet(
@@ -220,13 +247,41 @@ class TradingViewWatchlistViewSet(
             raise serializers.ValidationError({
                 "name": f"A watchlist named {name!r} already exists.",
             })
-        serializer.save(tenant=self.request.tenant, owner=self.request.user)
+        wl = serializer.save(tenant=self.request.tenant, owner=self.request.user)
+        # Auto kinds seed inline so the row arrives populated — operator
+        # creates "Top-10 source-hot" and immediately sees symbols in the UI
+        # rather than waiting for the next beat cycle.
+        if wl.is_auto:
+            from apps.notifications.services.watchlist_resolvers import refresh_watchlist
+            try:
+                refresh_watchlist(wl)
+            except Exception:  # noqa: BLE001
+                log.exception("watchlist.initial_resolve_failed", id=str(wl.id))
+
+    @action(detail=True, methods=["post"], url_path="refresh")
+    def refresh(self, request, pk=None):
+        """On-demand re-resolve for an auto watchlist. MANUAL kinds 400 —
+        their symbols are operator-typed; refreshing would be a no-op."""
+        wl = self.get_object()
+        if not wl.is_auto:
+            raise serializers.ValidationError({
+                "kind": "MANUAL watchlists have no resolver to refresh.",
+            })
+        from apps.notifications.services.watchlist_resolvers import refresh_watchlist
+        refresh_watchlist(wl)
+        return Response(self.get_serializer(wl).data)
 
     @action(detail=True, methods=["post"], url_path="add-symbols")
     def add_symbols(self, request, pk=None):
-        """Bulk-add symbols to an existing watchlist. Body: {"symbols": [...]}.
-        Normalisation + dedup happens in model.save()."""
+        """Bulk-add symbols to a MANUAL watchlist. Body: {"symbols": [...]}.
+        Auto-kind rows 400 — their symbol list is resolver-owned and would
+        be overwritten on the next refresh anyway."""
         watchlist = self.get_object()
+        if watchlist.is_auto:
+            raise serializers.ValidationError({
+                "kind": "Auto-kind watchlists are populated by their resolver; "
+                        "edit `kind`/`config` instead.",
+            })
         incoming = request.data.get("symbols") or []
         if not isinstance(incoming, list):
             raise serializers.ValidationError({"symbols": "Must be a list."})
@@ -236,8 +291,13 @@ class TradingViewWatchlistViewSet(
 
     @action(detail=True, methods=["post"], url_path="remove-symbols")
     def remove_symbols(self, request, pk=None):
-        """Bulk-remove symbols from a watchlist. Body: {"symbols": [...]}."""
+        """Bulk-remove symbols from a MANUAL watchlist. Same guard as add."""
         watchlist = self.get_object()
+        if watchlist.is_auto:
+            raise serializers.ValidationError({
+                "kind": "Auto-kind watchlists are populated by their resolver; "
+                        "edit `kind`/`config` instead.",
+            })
         incoming = request.data.get("symbols") or []
         if not isinstance(incoming, list):
             raise serializers.ValidationError({"symbols": "Must be a list."})

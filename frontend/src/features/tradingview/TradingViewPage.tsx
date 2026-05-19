@@ -17,7 +17,9 @@
  */
 import * as React from "react";
 import { toast } from "sonner";
-import { Plus, Tag, Trash2, X, Zap } from "lucide-react";
+import {
+  Plus, RefreshCw, Sparkles, Tag, Trash2, X, Zap,
+} from "lucide-react";
 
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -35,9 +37,11 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/Tabs";
 
 import {
   type GroupedSignalRow, type SignalGroupBy,
-  type TradingViewWatchlist,
+  type TradingViewWatchlist, type WatchlistKind,
+  WATCHLIST_KIND_META,
   useAddSymbolsToWatchlist, useCreateTradingViewWatchlist,
   useDeleteTradingViewWatchlist, useGroupedSignals,
+  useRefreshTradingViewWatchlist,
   useRemoveSymbolsFromWatchlist, useTradingViewLinks,
   useTradingViewWatchlists, useUpdateTradingViewWatchlist,
 } from "@/lib/v2";
@@ -153,7 +157,9 @@ function WatchlistRow({ watchlist }: { watchlist: TradingViewWatchlist }) {
   const remove = useDeleteTradingViewWatchlist();
   const add = useAddSymbolsToWatchlist();
   const rm = useRemoveSymbolsFromWatchlist();
+  const refresh = useRefreshTradingViewWatchlist();
 
+  const meta = WATCHLIST_KIND_META[watchlist.kind];
   const [editingName, setEditingName] = React.useState(false);
   const [draftName, setDraftName] = React.useState(watchlist.name);
   const [newSymbol, setNewSymbol] = React.useState("");
@@ -184,9 +190,14 @@ function WatchlistRow({ watchlist }: { watchlist: TradingViewWatchlist }) {
     toast.success("Watchlist deleted");
   };
 
+  const onRefresh = async () => {
+    await refresh.mutateAsync(watchlist.id);
+    toast.success("Watchlist refreshed");
+  };
+
   return (
     <li className="rounded-md border border-border bg-surface-2 p-4 space-y-3">
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3 flex-wrap">
         {editingName ? (
           <input
             value={draftName}
@@ -205,41 +216,77 @@ function WatchlistRow({ watchlist }: { watchlist: TradingViewWatchlist }) {
             {watchlist.name}
           </button>
         )}
+        <Badge tone={watchlist.is_auto ? "brand" : "neutral"} title={meta.blurb}>
+          {watchlist.is_auto && <Sparkles className="h-3 w-3 mr-1" aria-hidden />}
+          {meta.label}
+        </Badge>
         <Badge tone="neutral">{watchlist.symbol_count} symbol{watchlist.symbol_count === 1 ? "" : "s"}</Badge>
-        <span className="text-caption text-fg-subtle ml-auto">
-          Updated {fmtRel(watchlist.updated_at)} ago
-        </span>
-        <Button
-          size="sm" variant="secondary"
-          onClick={onDelete}
-          loading={remove.isPending}
-          leading={<Trash2 className="h-3.5 w-3.5" />}
-        >
-          Delete
-        </Button>
+        {watchlist.is_auto && watchlist.symbols_refreshed_at && (
+          <span className="text-caption text-fg-subtle" title={watchlist.symbols_refreshed_at}>
+            Refreshed {fmtRel(watchlist.symbols_refreshed_at)} ago
+          </span>
+        )}
+        <div className="ml-auto flex items-center gap-2">
+          {watchlist.is_auto && (
+            <Button
+              size="sm" variant="secondary"
+              onClick={onRefresh}
+              loading={refresh.isPending}
+              leading={<RefreshCw className="h-3.5 w-3.5" />}
+            >
+              Refresh
+            </Button>
+          )}
+          <Button
+            size="sm" variant="secondary"
+            onClick={onDelete}
+            loading={remove.isPending}
+            leading={<Trash2 className="h-3.5 w-3.5" />}
+          >
+            Delete
+          </Button>
+        </div>
       </div>
 
-      {/* Symbol chips */}
+      {/* Auto kinds: config summary line + non-editable chip readout */}
+      {watchlist.is_auto && (
+        <div className="text-caption text-fg-subtle font-mono">
+          config {JSON.stringify(watchlist.config)}
+        </div>
+      )}
+
+      {/* Symbol chips — manual kinds let you edit, auto kinds are read-only */}
       <div className="flex flex-wrap gap-1.5">
-        {watchlist.symbols.map((sym) => (
-          <SymbolChip key={sym} symbol={sym} onRemove={() => onRemoveOne(sym)} />
-        ))}
-        <form onSubmit={onAddSymbol} className="inline-flex items-center gap-1">
-          <input
-            type="text"
-            value={newSymbol}
-            onChange={(e) => setNewSymbol(e.target.value.toUpperCase())}
-            placeholder="+ symbol"
-            className={cn(
-              "h-7 px-2 rounded-xs text-caption font-mono",
-              "bg-surface border border-border focus:border-accent focus:outline-none",
-              "w-24 placeholder:text-fg-subtle",
+        {watchlist.symbols.map((sym) =>
+          watchlist.is_auto ? (
+            <span
+              key={sym}
+              className="inline-flex items-center rounded-xs bg-surface border border-border px-2 py-0.5 text-caption font-mono text-fg"
+            >
+              {sym}
+            </span>
+          ) : (
+            <SymbolChip key={sym} symbol={sym} onRemove={() => onRemoveOne(sym)} />
+          ),
+        )}
+        {!watchlist.is_auto && (
+          <form onSubmit={onAddSymbol} className="inline-flex items-center gap-1">
+            <input
+              type="text"
+              value={newSymbol}
+              onChange={(e) => setNewSymbol(e.target.value.toUpperCase())}
+              placeholder="+ symbol"
+              className={cn(
+                "h-7 px-2 rounded-xs text-caption font-mono",
+                "bg-surface border border-border focus:border-accent focus:outline-none",
+                "w-24 placeholder:text-fg-subtle",
+              )}
+            />
+            {newSymbol && (
+              <Button type="submit" size="sm" loading={add.isPending}>Add</Button>
             )}
-          />
-          {newSymbol && (
-            <Button type="submit" size="sm" loading={add.isPending}>Add</Button>
-          )}
-        </form>
+          </form>
+        )}
       </div>
     </li>
   );
@@ -263,42 +310,55 @@ function SymbolChip({ symbol, onRemove }: { symbol: string; onRemove: () => void
 
 function NewWatchlistDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [name, setName] = React.useState("");
+  const [kind, setKind] = React.useState<WatchlistKind>("MANUAL");
   const [symbolsRaw, setSymbolsRaw] = React.useState("");
+  const [config, setConfig] = React.useState<Record<string, unknown>>({});
   const create = useCreateTradingViewWatchlist();
+
+  // Reset config to the picked kind's defaults whenever kind changes.
+  React.useEffect(() => {
+    setConfig({ ...WATCHLIST_KIND_META[kind].defaultConfig });
+  }, [kind]);
 
   React.useEffect(() => {
     if (!open) {
-      const t = setTimeout(() => { setName(""); setSymbolsRaw(""); }, 250);
+      const t = setTimeout(() => {
+        setName(""); setSymbolsRaw(""); setKind("MANUAL"); setConfig({});
+      }, 250);
       return () => clearTimeout(t);
     }
   }, [open]);
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const symbols = symbolsRaw
-      .split(/[,\s]+/)
-      .map((s) => s.trim())
-      .filter(Boolean);
+    const payload: Parameters<typeof create.mutateAsync>[0] = {
+      name: name.trim(),
+      kind,
+      config,
+    };
+    if (kind === "MANUAL") {
+      payload.symbols = symbolsRaw.split(/[,\s]+/).map((s) => s.trim()).filter(Boolean);
+    }
     try {
-      await create.mutateAsync({ name: name.trim(), symbols });
+      await create.mutateAsync(payload);
       toast.success("Watchlist created");
       onClose();
     } catch (err) {
-      // Server unique-name check returns 400 with {name: "..."}.
-      const msg = (err as any)?.response?.data?.name || "Failed to create watchlist";
-      toast.error(msg);
+      const detail = (err as any)?.response?.data;
+      const msg = detail?.name || detail?.config || detail?.detail || "Failed to create watchlist";
+      toast.error(typeof msg === "string" ? msg : JSON.stringify(msg));
     }
   };
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
-      <DialogContent className="w-[min(92vw,560px)]">
+      <DialogContent className="w-[min(92vw,640px)] max-h-[85vh] overflow-auto">
         <DialogTitle>New watchlist</DialogTitle>
         <DialogDescription>
-          Group symbols by theme — sector rotation, derivative basket, F&O top movers, etc.
+          Manual list, or one that auto-populates from an AlphaDesk source. Pick a kind below.
         </DialogDescription>
 
-        <form onSubmit={onSubmit} className="mt-4 space-y-3">
+        <form onSubmit={onSubmit} className="mt-4 space-y-4">
           <Input
             label="Name"
             placeholder="e.g. NIFTY 50 — top picks"
@@ -306,13 +366,22 @@ function NewWatchlistDialog({ open, onClose }: { open: boolean; onClose: () => v
             onChange={(e) => setName(e.target.value)}
             autoFocus
           />
-          <Input
-            label="Symbols"
-            hint="Comma or whitespace separated. Server uppercases + dedupes."
-            placeholder="RELIANCE, TCS, HDFCBANK"
-            value={symbolsRaw}
-            onChange={(e) => setSymbolsRaw(e.target.value)}
-          />
+
+          <KindPicker value={kind} onChange={setKind} />
+
+          {/* Kind-specific config inputs */}
+          {kind === "MANUAL" && (
+            <Input
+              label="Symbols"
+              hint="Comma or whitespace separated. Server uppercases + dedupes."
+              placeholder="RELIANCE, TCS, HDFCBANK"
+              value={symbolsRaw}
+              onChange={(e) => setSymbolsRaw(e.target.value)}
+            />
+          )}
+
+          <ConfigInputs kind={kind} config={config} onChange={setConfig} />
+
           <div className="flex items-center justify-end gap-2 pt-2">
             <Button type="button" variant="secondary" onClick={onClose}>Cancel</Button>
             <Button type="submit" loading={create.isPending} disabled={!name.trim()}>
@@ -322,6 +391,118 @@ function NewWatchlistDialog({ open, onClose }: { open: boolean; onClose: () => v
         </form>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function KindPicker({
+  value, onChange,
+}: { value: WatchlistKind; onChange: (k: WatchlistKind) => void }) {
+  const kinds = Object.entries(WATCHLIST_KIND_META) as [WatchlistKind, typeof WATCHLIST_KIND_META[WatchlistKind]][];
+  return (
+    <div>
+      <div className="text-body-sm text-fg mb-1.5">Kind</div>
+      <div className="grid grid-cols-1 gap-1.5">
+        {kinds.map(([k, meta]) => (
+          <label
+            key={k}
+            className={cn(
+              "flex items-start gap-3 rounded-sm border p-3 cursor-pointer",
+              value === k
+                ? "border-accent/60 bg-accent/5"
+                : "border-border hover:border-border-strong hover:bg-surface-2",
+            )}
+          >
+            <input
+              type="radio"
+              name="kind"
+              checked={value === k}
+              onChange={() => onChange(k)}
+              className="sr-only"
+            />
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2">
+                <span className="text-body-sm text-fg">{meta.label}</span>
+                {meta.isAuto && <Badge tone="brand">Auto</Badge>}
+              </div>
+              <div className="text-caption text-fg-subtle mt-0.5">{meta.blurb}</div>
+            </div>
+          </label>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** Per-kind config form fields. Keeps the dialog focused — each kind only
+ *  asks for what its resolver actually reads. */
+function ConfigInputs({
+  kind, config, onChange,
+}: {
+  kind: WatchlistKind;
+  config: Record<string, unknown>;
+  onChange: (c: Record<string, unknown>) => void;
+}) {
+  const set = (k: string, v: unknown) => onChange({ ...config, [k]: v });
+
+  if (kind === "MANUAL") return null;
+
+  return (
+    <div className="rounded-sm border border-border bg-surface-2 p-3 space-y-3">
+      {kind === "SOURCE_HOT" && (
+        <div>
+          <div className="text-body-sm text-fg mb-1">Source</div>
+          <select
+            value={String(config.source ?? "TRADINGVIEW")}
+            onChange={(e) => set("source", e.target.value)}
+            className="h-9 w-full rounded-xs bg-surface border border-border px-2 text-body-sm"
+          >
+            <option value="TRADINGVIEW">TradingView</option>
+            <option value="SCREENER">Screener</option>
+            <option value="OK_SCANNER">OK Scanner</option>
+            <option value="PREMARKET">Premarket basket</option>
+          </select>
+        </div>
+      )}
+
+      {(kind === "SIGNAL_RANK" || kind === "SOURCE_HOT" || kind === "TRADED_RECENTLY") && (
+        <Input
+          label="Window (days)"
+          type="number"
+          min={1}
+          max={90}
+          value={String(config.window_days ?? 7)}
+          onChange={(e) => set("window_days", Number(e.target.value) || 7)}
+        />
+      )}
+
+      {(kind === "SIGNAL_RANK" || kind === "SOURCE_HOT") && (
+        <Input
+          label="Top N"
+          type="number"
+          min={1}
+          max={200}
+          value={String(config.top_n ?? 20)}
+          onChange={(e) => set("top_n", Number(e.target.value) || 20)}
+        />
+      )}
+
+      {kind === "RECENT_ACTIVE" && (
+        <Input
+          label="Window (hours)"
+          type="number"
+          min={1}
+          max={24 * 30}
+          value={String(config.window_hours ?? 24)}
+          onChange={(e) => set("window_hours", Number(e.target.value) || 24)}
+        />
+      )}
+
+      {kind === "SHORTLIST_TODAY" && (
+        <p className="text-caption text-fg-subtle">
+          No knobs — pulls today's shortlist with outcomes WATCHING/TRIGGERED/TRADED.
+        </p>
+      )}
+    </div>
   );
 }
 

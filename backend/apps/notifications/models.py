@@ -99,14 +99,19 @@ class TradingViewLink(TenantModel):
 
 
 class TradingViewWatchlist(TenantModel):
-    """A named list of symbols the operator cares about.
+    """A named symbol set. Either operator-typed (MANUAL) or computed from an
+    AlphaDesk source (every other Kind). Auto kinds cache their resolved
+    symbols in the same `symbols` JSON field so every downstream consumer
+    treats all watchlists uniformly — a periodic Celery task refreshes them.
+    """
 
-    Standalone — not bound to a specific TradingViewLink. The UI uses it as a
-    soft filter ("show only signals for symbols in this watchlist") and a
-    reference when configuring auto-fire allowlists. Will grow into
-    rule-driven dynamic membership later (e.g. "all NIFTY 50 stocks where
-    RSI<30") but starts as an explicit symbol list to keep the contract
-    simple."""
+    class Kind(models.TextChoices):
+        MANUAL          = "MANUAL",          "Manual"
+        SIGNAL_RANK     = "SIGNAL_RANK",     "Top-N by signal count"
+        SOURCE_HOT      = "SOURCE_HOT",      "Top-N for one source"
+        RECENT_ACTIVE   = "RECENT_ACTIVE",   "Any signal in last N hours"
+        TRADED_RECENTLY = "TRADED_RECENTLY", "Recently traded"
+        SHORTLIST_TODAY = "SHORTLIST_TODAY", "Today's premarket shortlist"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     owner = models.ForeignKey(
@@ -115,13 +120,31 @@ class TradingViewWatchlist(TenantModel):
     )
     name = models.CharField(max_length=80)
     description = models.TextField(blank=True, default="")
+    kind = models.CharField(
+        max_length=24, choices=Kind.choices, default=Kind.MANUAL, db_index=True,
+    )
+    config = models.JSONField(
+        default=dict, blank=True,
+        help_text="Kind-specific knobs (window_days, top_n, source, …). Empty for MANUAL.",
+    )
     symbols = models.JSONField(
         default=list, blank=True,
-        help_text="Uppercase symbols. Server normalises on save.",
+        help_text=(
+            "Uppercase symbols. For MANUAL kind: source of truth — operator "
+            "edits. For auto kinds: cached resolver output, refreshed by the "
+            "watchlists.refresh task."
+        ),
+    )
+    symbols_refreshed_at = models.DateTimeField(
+        null=True, blank=True, db_index=True,
+        help_text="Last time an auto-resolver wrote `symbols`. Null for MANUAL.",
     )
 
     class Meta:
-        indexes = [models.Index(fields=["tenant", "owner", "-updated_at"])]
+        indexes = [
+            models.Index(fields=["tenant", "owner", "-updated_at"]),
+            models.Index(fields=["kind", "-symbols_refreshed_at"]),
+        ]
         constraints = [
             models.UniqueConstraint(
                 fields=["tenant", "owner", "name"],
@@ -131,11 +154,16 @@ class TradingViewWatchlist(TenantModel):
         ordering = ["-updated_at"]
 
     def __str__(self) -> str:
-        return f"{self.name} ({len(self.symbols)} symbols)"
+        return f"{self.name} [{self.kind}] ({len(self.symbols or [])} symbols)"
+
+    @property
+    def is_auto(self) -> bool:
+        return self.kind != self.Kind.MANUAL
 
     def save(self, *args, **kwargs):
-        # Normalise symbols — uppercased, trimmed, deduped while preserving
-        # insertion order so the operator's intent isn't reshuffled.
+        # Normalise symbols regardless of kind so a freshly-resolved auto-kind
+        # snapshot doesn't sneak in dupes/casing variants either. Insertion
+        # order preserved so resolver-defined ranking (top-N) stays meaningful.
         seen: set[str] = set()
         cleaned: list[str] = []
         for s in self.symbols or []:
