@@ -51,7 +51,7 @@ class TradingViewLinkSerializer(serializers.ModelSerializer):
         fields = [
             "id", "display_name", "is_active",
             "autofire_enabled", "default_strategy_name",
-            "portfolio", "allowed_actions",
+            "portfolio", "allowed_actions", "watchlist",
             "webhook_secret", "webhook_url",
             "last_received_at", "receive_count", "last_error",
             "created_at", "updated_at",
@@ -66,6 +66,22 @@ class TradingViewLinkSerializer(serializers.ModelSerializer):
         request = self.context.get("request")
         path = f"/api/v1/webhooks/tradingview/{link.webhook_secret}/"
         return request.build_absolute_uri(path) if request else path
+
+    def validate_watchlist(self, value):
+        if value is None:
+            return value
+        # Watchlist must belong to the same tenant + owner as the link.
+        # Without this guard, an operator could bind their link to another
+        # user's list by guessing the UUID and circumvent the autofire gate.
+        request = self.context.get("request")
+        if request is not None and (
+            value.tenant_id != request.tenant.id
+            or value.owner_id != request.user.id
+        ):
+            raise serializers.ValidationError(
+                "Watchlist must belong to the same owner as the link.",
+            )
+        return value
 
 
 class TradingViewSignalSerializer(serializers.ModelSerializer):
@@ -270,6 +286,27 @@ class TradingViewWatchlistViewSet(
         from apps.notifications.services.watchlist_resolvers import refresh_watchlist
         refresh_watchlist(wl)
         return Response(self.get_serializer(wl).data)
+
+    @action(detail=False, methods=["get"], url_path="by-symbol")
+    def by_symbol(self, request):
+        """Lookup endpoint for the Setup page (and anywhere else that needs
+        "which of my watchlists contain symbol X"). Query: ?symbol=RELIANCE.
+        Returns a bare list (no pagination envelope, since custom actions
+        bypass DRF pagination), owner-scoped.
+
+        Python-side filter rather than JSONField __contains so this works on
+        sqlite (test backend) — and at typical per-owner scale (tens of
+        watchlists, each <200 symbols) the cost is sub-millisecond. Will
+        switch to Postgres' jsonb operators if/when this becomes hot.
+        """
+        symbol = (request.query_params.get("symbol") or "").upper().strip()
+        if not symbol:
+            return Response([])
+        matches = [
+            wl for wl in self.get_queryset()
+            if symbol in (wl.symbols or [])
+        ]
+        return Response(self.get_serializer(matches, many=True).data)
 
     @action(detail=True, methods=["post"], url_path="add-symbols")
     def add_symbols(self, request, pk=None):

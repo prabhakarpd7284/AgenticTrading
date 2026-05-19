@@ -245,6 +245,17 @@ def fire_workflow(link: TradingViewLink, parsed: ParsedAlert) -> str | None:
                  link_id=str(link.id), action=parsed.action, allowed=allowed)
         return None
 
+    # Symbol allowlist via bound watchlist. The watchlist's `symbols` field
+    # is always populated (manual = operator-typed; auto = resolver-cached),
+    # so this check is a single set membership — no extra queries.
+    if link.watchlist_id is not None:
+        wl_symbols = set(link.watchlist.symbols or [])
+        if parsed.symbol not in wl_symbols:
+            log.info("tradingview.autofire_gated", reason="symbol_not_in_watchlist",
+                     link_id=str(link.id), symbol=parsed.symbol,
+                     watchlist_id=str(link.watchlist_id))
+            return None
+
     # Lazy import — avoids pulling celery + strategy_registry at module load,
     # which matters when the webhook view imports this services module.
     from apps.agents_core.models import AgentRun

@@ -23,8 +23,12 @@
 import * as React from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
-  ArrowLeft, ArrowDownRight, ArrowUpRight, Check, RefreshCcw, ShieldAlert, ShieldCheck, X,
+  ArrowLeft, ArrowDownRight, ArrowUpRight, Check, RefreshCcw, ShieldAlert, ShieldCheck, Tag, X,
 } from "lucide-react";
+
+import {
+  WATCHLIST_KIND_META, useWatchlistsBySymbol,
+} from "@/lib/v2";
 
 import {
   criterionTone,
@@ -152,6 +156,7 @@ function SetupHeader({
             run through the production 10-criterion @RiskGuard.  Nothing here
             executes — this is "would-this-clear?", not "send-it".
           </p>
+          <WatchlistBadges symbol={data.symbol} />
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <SideToggle side={side} setSide={setSide} />
@@ -182,6 +187,37 @@ function SetupHeader({
         </div>
       </div>
     </header>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Watchlist badges                                                    */
+/* ------------------------------------------------------------------ */
+
+/** "In: <list>, <list>" row that surfaces which of the operator's
+ *  TradingView watchlists contain this symbol — manual or auto-resolved.
+ *  Renders nothing when the symbol isn't in any watchlist (no empty row,
+ *  no clutter). Each badge links to /tradingview so the operator can jump
+ *  to the list itself. */
+function WatchlistBadges({ symbol }: { symbol: string }) {
+  const { data: lists = [], isLoading } = useWatchlistsBySymbol(symbol);
+  if (isLoading || lists.length === 0) return null;
+  return (
+    <div className="mt-2 flex items-center gap-1.5 flex-wrap">
+      <Tag className="h-3 w-3 text-fg-subtle" aria-hidden />
+      <span className="text-caption text-fg-subtle">In:</span>
+      {lists.map((wl) => {
+        const meta = WATCHLIST_KIND_META[wl.kind];
+        return (
+          <Link key={wl.id} to="/tradingview" title={meta.blurb}>
+            <Badge tone={wl.is_auto ? "brand" : "neutral"}>
+              {wl.name}
+              {wl.is_auto && <span className="ml-1 text-caption opacity-75">· auto</span>}
+            </Badge>
+          </Link>
+        );
+      })}
+    </div>
   );
 }
 

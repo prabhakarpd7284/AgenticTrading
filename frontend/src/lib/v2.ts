@@ -331,6 +331,10 @@ export interface TradingViewLink {
   default_strategy_name: string;
   portfolio: string | null;
   allowed_actions: string[];
+  /** Optional symbol allowlist gate — autofire only fires when the alert's
+   *  symbol appears in this watchlist's resolved symbols. Orthogonal to
+   *  allowed_actions (which gates BUY/SELL). */
+  watchlist: string | null;
   webhook_secret: string;
   webhook_url: string;
   last_received_at: string | null;
@@ -357,6 +361,7 @@ export interface TradingViewLinkUpsert {
   default_strategy_name?: string;
   portfolio?: string | null;
   allowed_actions?: string[];
+  watchlist?: string | null;
 }
 
 export function useTradingViewLinks() {
@@ -572,6 +577,22 @@ export function useRefreshTradingViewWatchlist() {
         `/notifications/tradingview/watchlists/${id}/refresh/`,
       ).then((r) => r.data),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["tradingview-watchlists"] }),
+  });
+}
+
+/** Which of the operator's watchlists contain a given symbol. Used by the
+ *  Setup page to render "In: <list>, <list>" badges, and by any future
+ *  surface that wants a "what am I tracking this for" backlink. */
+export function useWatchlistsBySymbol(symbol: string | undefined) {
+  return useQuery({
+    queryKey: ["tradingview-watchlists-by-symbol", symbol],
+    queryFn: () => api
+      .get<TradingViewWatchlist[]>(
+        `/notifications/tradingview/watchlists/by-symbol/?symbol=${encodeURIComponent(symbol || "")}`,
+      )
+      .then((r) => r.data),
+    enabled: !!symbol,
+    staleTime: 30_000,
   });
 }
 

@@ -37,7 +37,7 @@ import {
   type TradingViewLink, type TradingViewSignalRow,
   useCreateTradingViewLink, useDeleteTradingViewLink,
   useRotateTradingViewSecret, useTradingViewLinks, useTradingViewRecent,
-  useUpdateTradingViewLink,
+  useTradingViewWatchlists, useUpdateTradingViewLink,
 } from "@/lib/v2";
 import { cn, fmtRel } from "@/lib/utils";
 
@@ -401,6 +401,10 @@ function EditSheet({
                     })}
                     onBlur={() => patch({ allowed_actions: draft.allowed_actions })}
                   />
+                  <WatchlistSelect
+                    value={draft.watchlist}
+                    onChange={(id) => patch({ watchlist: id })}
+                  />
                 </>
               )}
             </div>
@@ -477,5 +481,39 @@ function ToggleRow({
         {hint && <div className="text-caption text-fg-subtle mt-0.5">{hint}</div>}
       </div>
     </label>
+  );
+}
+
+/** Watchlist binding for autofire. Empty selection = no symbol gate; pick
+ *  a watchlist to restrict autofire to symbols in that list (auto-resolved
+ *  or operator-typed). Orthogonal to the action allowlist (BUY/SELL).
+ *
+ *  Lives next to the strategy + action inputs so the operator sees the
+ *  full gate picture in one place: "fire `directional`, but only for BUYs
+ *  on symbols in my Signal-Rank top-20". */
+function WatchlistSelect({
+  value, onChange,
+}: { value: string | null; onChange: (id: string | null) => void }) {
+  const { data: watchlists = [] } = useTradingViewWatchlists();
+  return (
+    <div>
+      <div className="text-body-sm text-fg mb-1">Restrict to watchlist (optional)</div>
+      <select
+        value={value || ""}
+        onChange={(e) => onChange(e.target.value || null)}
+        className="h-9 w-full rounded-xs bg-surface border border-border px-2 text-body-sm"
+      >
+        <option value="">No symbol gate (autofire any symbol)</option>
+        {watchlists.map((w) => (
+          <option key={w.id} value={w.id}>
+            {w.name} · {w.symbol_count} symbol{w.symbol_count === 1 ? "" : "s"}
+            {w.is_auto ? " (auto)" : ""}
+          </option>
+        ))}
+      </select>
+      <p className="text-caption text-fg-subtle mt-1">
+        Alerts for symbols outside the watchlist are still persisted, but no AgentRun fires.
+      </p>
+    </div>
   );
 }

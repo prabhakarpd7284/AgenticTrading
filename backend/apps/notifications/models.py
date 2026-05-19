@@ -76,6 +76,19 @@ class TradingViewLink(TenantModel):
         default=list, blank=True,
         help_text="If non-empty, only alerts whose `action` is in this list auto-fire. E.g. ['BUY','SELL'].",
     )
+    watchlist = models.ForeignKey(
+        "notifications.TradingViewWatchlist",
+        null=True, blank=True,
+        on_delete=models.SET_NULL,
+        related_name="bound_links",
+        help_text=(
+            "Optional symbol-allowlist gate for autofire. When set, only "
+            "alerts whose symbol appears in the watchlist's resolved set "
+            "spawn an AgentRun (orthogonal to allowed_actions which gates "
+            "the BUY/SELL side). Persistence + Signal-ledger writes still "
+            "happen — only autofire is gated."
+        ),
+    )
 
     # ── Activity stats ──
     last_received_at = models.DateTimeField(null=True, blank=True, db_index=True)
