@@ -98,6 +98,55 @@ class TradingViewLink(TenantModel):
         self.save(update_fields=["webhook_secret", "last_error", "updated_at"])
 
 
+class TradingViewWatchlist(TenantModel):
+    """A named list of symbols the operator cares about.
+
+    Standalone — not bound to a specific TradingViewLink. The UI uses it as a
+    soft filter ("show only signals for symbols in this watchlist") and a
+    reference when configuring auto-fire allowlists. Will grow into
+    rule-driven dynamic membership later (e.g. "all NIFTY 50 stocks where
+    RSI<30") but starts as an explicit symbol list to keep the contract
+    simple."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    owner = models.ForeignKey(
+        "accounts.User", on_delete=models.CASCADE,
+        related_name="tradingview_watchlists",
+    )
+    name = models.CharField(max_length=80)
+    description = models.TextField(blank=True, default="")
+    symbols = models.JSONField(
+        default=list, blank=True,
+        help_text="Uppercase symbols. Server normalises on save.",
+    )
+
+    class Meta:
+        indexes = [models.Index(fields=["tenant", "owner", "-updated_at"])]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tenant", "owner", "name"],
+                name="uniq_watchlist_name_per_owner",
+            ),
+        ]
+        ordering = ["-updated_at"]
+
+    def __str__(self) -> str:
+        return f"{self.name} ({len(self.symbols)} symbols)"
+
+    def save(self, *args, **kwargs):
+        # Normalise symbols — uppercased, trimmed, deduped while preserving
+        # insertion order so the operator's intent isn't reshuffled.
+        seen: set[str] = set()
+        cleaned: list[str] = []
+        for s in self.symbols or []:
+            sym = str(s).upper().strip()
+            if sym and sym not in seen:
+                seen.add(sym)
+                cleaned.append(sym)
+        self.symbols = cleaned
+        super().save(*args, **kwargs)
+
+
 class TradingViewSignal(TenantModel):
     """One row per webhook payload received.
 

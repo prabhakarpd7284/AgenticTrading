@@ -418,3 +418,130 @@ export function useDeleteTradingViewLink() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["tradingview-links"] }),
   });
 }
+
+/* ── Watchlists ───────────────────────────────────────────────────────── */
+
+export interface TradingViewWatchlist {
+  id: string;
+  name: string;
+  description: string;
+  symbols: string[];
+  symbol_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TradingViewWatchlistUpsert {
+  name?: string;
+  description?: string;
+  symbols?: string[];
+}
+
+export function useTradingViewWatchlists() {
+  return useQuery({
+    queryKey: ["tradingview-watchlists"],
+    // lib/api.ts strips DRF's {next, previous, results} envelope down to a
+    // bare array — same shape contract as useTradingViewLinks.
+    queryFn: () => api
+      .get<TradingViewWatchlist[]>("/notifications/tradingview/watchlists/")
+      .then((r) => r.data),
+    refetchInterval: REFETCH_MS,
+  });
+}
+
+export function useCreateTradingViewWatchlist() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: TradingViewWatchlistUpsert) =>
+      api.post<TradingViewWatchlist>("/notifications/tradingview/watchlists/", body)
+        .then((r) => r.data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["tradingview-watchlists"] }),
+  });
+}
+
+export function useUpdateTradingViewWatchlist() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...body }: TradingViewWatchlistUpsert & { id: string }) =>
+      api.patch<TradingViewWatchlist>(`/notifications/tradingview/watchlists/${id}/`, body)
+        .then((r) => r.data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["tradingview-watchlists"] }),
+  });
+}
+
+export function useDeleteTradingViewWatchlist() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      api.delete(`/notifications/tradingview/watchlists/${id}/`).then((r) => r.data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["tradingview-watchlists"] }),
+  });
+}
+
+export function useAddSymbolsToWatchlist() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, symbols }: { id: string; symbols: string[] }) =>
+      api.post<TradingViewWatchlist>(
+        `/notifications/tradingview/watchlists/${id}/add-symbols/`,
+        { symbols },
+      ).then((r) => r.data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["tradingview-watchlists"] }),
+  });
+}
+
+export function useRemoveSymbolsFromWatchlist() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, symbols }: { id: string; symbols: string[] }) =>
+      api.post<TradingViewWatchlist>(
+        `/notifications/tradingview/watchlists/${id}/remove-symbols/`,
+        { symbols },
+      ).then((r) => r.data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["tradingview-watchlists"] }),
+  });
+}
+
+/* ── Grouped signals (TradingView Manager view) ───────────────────────── */
+
+export type SignalGroupBy = "symbol" | "strategy" | "source" | "day";
+
+export interface GroupedSignalRow {
+  key: string;
+  count: number;
+  buys: number;
+  sells: number;
+  latest_at: string | null;
+  latest_action: string;
+}
+
+export interface GroupedSignalsResponse {
+  by: SignalGroupBy;
+  rows: GroupedSignalRow[];
+  window_days: number;
+}
+
+export function useGroupedSignals(params: {
+  by?: SignalGroupBy;
+  days?: number;
+  source?: string;
+  symbol?: string;
+  watchlist?: string;
+} = {}) {
+  const qs = new URLSearchParams();
+  if (params.by)        qs.set("by", params.by);
+  if (params.days)      qs.set("days", String(params.days));
+  if (params.source)    qs.set("source", params.source);
+  if (params.symbol)    qs.set("symbol", params.symbol);
+  if (params.watchlist) qs.set("watchlist", params.watchlist);
+  const query = qs.toString();
+  return useQuery({
+    queryKey: ["tradingview-grouped", params],
+    queryFn: () => api
+      .get<GroupedSignalsResponse>(
+        `/notifications/tradingview/signals/${query ? "?" + query : ""}`,
+      )
+      .then((r) => r.data),
+    refetchInterval: REFETCH_MS,
+  });
+}

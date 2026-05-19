@@ -13,6 +13,7 @@ import { AgentConsolePage } from "@/features/agents/AgentConsolePage";
 import { StrategyBuilderPage } from "@/features/strategies/StrategyBuilderPage";
 import { BacktesterPage } from "@/features/backtester/BacktesterPage";
 import { BrokerLinkPage } from "@/features/broker/BrokerLinkPage";
+import { TradingViewPage } from "@/features/tradingview/TradingViewPage";
 import { SwingScannerPage } from "@/features/swing-scanner/SwingScannerPage";
 import { BasketPage } from "@/features/basket/BasketPage";
 import PyramidPage from "@/features/pyramid/PyramidPage";
@@ -51,6 +52,9 @@ export const router = createBrowserRouter([
       { path: "backtester", element: <BacktesterPage /> },
       { path: "pyramid", element: <PyramidPage /> },
       { path: "brokers", element: <BrokerLinkPage /> },
+      // TradingView Manager — dedicated page for webhook links, named
+      // watchlists, and grouped incoming signals.
+      { path: "tradingview", element: <TradingViewPage /> },
       // Developer ops console — stream any manage.py command (owner-gated).
       { path: "ops", element: <OpsPage /> },
     ],
