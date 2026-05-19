@@ -45,9 +45,10 @@ class Signal(TenantModel):
     """
 
     class Source(models.TextChoices):
-        SCREENER   = "SCREENER"
-        OK_SCANNER = "OK_SCANNER"
-        PREMARKET  = "PREMARKET"
+        SCREENER    = "SCREENER"
+        OK_SCANNER  = "OK_SCANNER"
+        PREMARKET   = "PREMARKET"
+        TRADINGVIEW = "TRADINGVIEW"
 
     class Outcome(models.TextChoices):
         PENDING   = "PENDING"

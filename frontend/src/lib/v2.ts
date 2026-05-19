@@ -318,3 +318,100 @@ export function useResumeAi() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["system-status"] }),
   });
 }
+
+/* ================================================================== */
+/* TradingView webhook integration                                     */
+/* ================================================================== */
+
+export interface TradingViewLink {
+  id: string;
+  display_name: string;
+  is_active: boolean;
+  autofire_enabled: boolean;
+  default_strategy_name: string;
+  portfolio: string | null;
+  allowed_actions: string[];
+  webhook_secret: string;
+  webhook_url: string;
+  last_received_at: string | null;
+  receive_count: number;
+  last_error: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TradingViewSignalRow {
+  id: number;
+  received_at: string;
+  parsed: Record<string, unknown>;
+  parse_error: string;
+  raw_payload: string;
+  signal: number | null;
+  workflow_run: string | null;
+}
+
+export interface TradingViewLinkUpsert {
+  display_name?: string;
+  is_active?: boolean;
+  autofire_enabled?: boolean;
+  default_strategy_name?: string;
+  portfolio?: string | null;
+  allowed_actions?: string[];
+}
+
+export function useTradingViewLinks() {
+  return useQuery({
+    queryKey: ["tradingview-links"],
+    queryFn: () => api
+      .get<{ results: TradingViewLink[] }>("/notifications/tradingview/")
+      .then((r) => r.data.results),
+    refetchInterval: REFETCH_MS,
+  });
+}
+
+export function useTradingViewRecent(id: string | undefined) {
+  return useQuery({
+    queryKey: ["tradingview-recent", id],
+    queryFn: () => api
+      .get<TradingViewSignalRow[]>(`/notifications/tradingview/${id}/recent/`)
+      .then((r) => r.data),
+    enabled: !!id,
+    refetchInterval: REFETCH_MS,
+  });
+}
+
+export function useCreateTradingViewLink() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: TradingViewLinkUpsert) =>
+      api.post<TradingViewLink>("/notifications/tradingview/", body).then((r) => r.data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["tradingview-links"] }),
+  });
+}
+
+export function useUpdateTradingViewLink() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...body }: TradingViewLinkUpsert & { id: string }) =>
+      api.patch<TradingViewLink>(`/notifications/tradingview/${id}/`, body).then((r) => r.data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["tradingview-links"] }),
+  });
+}
+
+export function useRotateTradingViewSecret() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      api.post<TradingViewLink>(`/notifications/tradingview/${id}/rotate-secret/`).then((r) => r.data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["tradingview-links"] }),
+  });
+}
+
+export function useDeleteTradingViewLink() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      api.delete(`/notifications/tradingview/${id}/`).then((r) => r.data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["tradingview-links"] }),
+  });
+}

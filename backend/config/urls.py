@@ -7,6 +7,7 @@ from apps.accounts.api.jwt import (
     TenantTokenObtainPairView,
     TenantTokenRefreshView,
 )
+from apps.notifications.api.tradingview_views import TradingViewWebhookView
 
 api_v1 = [
     # JWT views that embed the user's active tenant_id in the token claims —
@@ -42,6 +43,14 @@ api_v1 = [
     # risk). The view functions still live in apps.trading.api.legacy_compat_views
     # for one more cycle while we refactor them into per-resource viewsets.
     path("", include("apps.trading.api.extras_urls")),
+    # Public webhook receivers (no JWT — auth is the unguessable URL secret).
+    # Kept under /api/v1/webhooks/ at the top so they don't inherit the
+    # TenantScoped permission that every authenticated endpoint requires.
+    path(
+        "webhooks/tradingview/<str:secret>/",
+        TradingViewWebhookView.as_view(),
+        name="tradingview-webhook",
+    ),
 ]
 
 urlpatterns = [
