@@ -27,7 +27,7 @@
 import * as React from "react";
 import {
   AlertTriangle, BarChart3, Calendar, ChevronDown, ChevronUp,
-  FlaskConical, Lightbulb, RefreshCcw, Shield, Target,
+  FlaskConical, Lightbulb, LineChart, RefreshCcw, Shield, Target,
   TrendingDown, TrendingUp,
 } from "lucide-react";
 
@@ -41,6 +41,7 @@ import {
   type UnderlyingRoll, type YtdMonthBar, type YtdSummary,
 } from "@/lib/monthly";
 import { useQueryClient } from "@tanstack/react-query";
+import { api } from "@/lib/api";
 import { clsPnl, cn, fmtInr, fmtNum, fmtPct } from "@/lib/utils";
 import {
   Card, CardContent, CardDescription, CardHeader, CardTitle,
@@ -52,21 +53,125 @@ import { OpButton } from "@/features/ops/OpButton";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/Tabs";
 import { FreshnessIndicator } from "@/components/ui/FreshnessIndicator";
+import { TradeChartModal } from "./TradeChartModal";
 
 /* ================================================================== */
 /* Page                                                                 */
 /* ================================================================== */
 
+/**
+ * Refresh-control context — every card on the monthly page reads the
+ * same `dataUpdatedAt` + `onRefresh` from here and renders a small
+ * freshness + refresh control in its top-right corner. Single source of
+ * truth means clicking refresh on ANY card re-fetches the whole report.
+ */
+interface MonthlyRefreshCtx {
+  dataUpdatedAt: number;
+  isFetching: boolean;
+  onRefresh: () => void;
+  // Sticky context used by every empty state to render a "populate me"
+  // OpButton that triggers the right upstream CLI for the viewed month.
+  monthStart: string;
+  monthEnd: string;
+  onOpFinished: () => void;
+}
+const MonthlyRefreshContext = React.createContext<MonthlyRefreshCtx | null>(null);
+function useMonthlyCtx(): MonthlyRefreshCtx {
+  const ctx = React.useContext(MonthlyRefreshContext);
+  if (!ctx) throw new Error("useMonthlyCtx must be inside MonthlyRefreshContext.Provider");
+  return ctx;
+}
+
+/**
+ * Action-oriented empty state. When a section has no data, we tell the
+ * operator WHICH upstream CLI populates it and let them trigger it inline
+ * (no terminal, no recipe-hunting). Both buttons auto-invalidate the
+ * monthly view on success so the section fills in.
+ */
+function PopulateEmpty({
+  title, description,
+  primaryLabel, primaryCommand, primaryArgs,
+  secondaryLabel, secondaryCommand, secondaryArgs,
+}: {
+  title: string;
+  description: string;
+  primaryLabel: string;
+  primaryCommand: string;
+  primaryArgs?: string;
+  secondaryLabel?: string;
+  secondaryCommand?: string;
+  secondaryArgs?: string;
+}) {
+  const ctx = useMonthlyCtx();
+  const defArgs = primaryArgs
+    ?? `--backtest --from ${ctx.monthStart} --to ${ctx.monthEnd} --persist-signals`;
+  return (
+    <EmptyState
+      title={title}
+      description={description}
+      action={
+        <div className="flex items-center gap-2 flex-wrap justify-center">
+          <OpButton
+            command={primaryCommand}
+            defaultArgs={defArgs}
+            label={primaryLabel}
+            description={`Triggers ${primaryCommand} ${defArgs} — populates this section.`}
+            onSuccess={ctx.onOpFinished}
+          />
+          {secondaryCommand && (
+            <OpButton
+              command={secondaryCommand}
+              defaultArgs={secondaryArgs ?? ""}
+              label={secondaryLabel ?? secondaryCommand}
+              description={`Triggers ${secondaryCommand} ${secondaryArgs ?? ""}.`}
+              onSuccess={ctx.onOpFinished}
+            />
+          )}
+        </div>
+      }
+    />
+  );
+}
+
+function SectionTools({ className }: { className?: string }) {
+  const ctx = React.useContext(MonthlyRefreshContext);
+  if (!ctx) return null;
+  return (
+    <div className={cn("flex items-center gap-1.5 shrink-0", className)}>
+      <FreshnessIndicator
+        timestamp={ctx.dataUpdatedAt}
+        freshMs={5 * 60_000}
+        staleMs={60 * 60_000}
+        variant="muted"
+        label=""
+      />
+      <Button
+        variant="ghost" size="icon"
+        onClick={ctx.onRefresh}
+        disabled={ctx.isFetching}
+        aria-label="Refresh this section"
+        title="Refresh — re-runs the whole monthly view"
+      >
+        <RefreshCcw className={cn("h-3.5 w-3.5", ctx.isFetching && "animate-spin")} />
+      </Button>
+    </div>
+  );
+}
+
 export function MonthlyPage() {
-  const monthFromUrl = new URLSearchParams(window.location.search).get("month");
   const queryClient = useQueryClient();
 
   const [source, setSource] = React.useState(getMonthlySource);
 
-  const { data, isLoading, isError, error, refetch, isFetching, dataUpdatedAt } =
-    useMonthlyView();
+  const [selectedMonth, setSelectedMonth] = React.useState<string | null>(
+    () => new URLSearchParams(window.location.search).get("month"),
+  );
 
-  const [selectedMonth, setSelectedMonth] = React.useState<string | null>(monthFromUrl);
+  // The focused month drives which month the backend computes the feedback
+  // sections for — the YTD strip + month list always come back full, so the
+  // bar chart stays a complete navigator regardless of what's focused.
+  const { data, isLoading, isError, error, refetch, isFetching, dataUpdatedAt } =
+    useMonthlyView(selectedMonth);
 
   // Sync selected month to URL
   const handleSelectMonth = React.useCallback((m: string) => {
@@ -83,56 +188,115 @@ export function MonthlyPage() {
     queryClient.invalidateQueries({ queryKey: ["monthly-view"] });
   }, [source, queryClient]);
 
+  // Force-refresh: server caches the monthly report for 120s, so plain
+  // refetch() inside that window returns the same payload. Hit the endpoint
+  // with ?force=1 to bust the server cache, then invalidate React Query.
+  const handleForceRefresh = React.useCallback(async () => {
+    if (source !== "live") {
+      await refetch();
+      return;
+    }
+    try {
+      // Bust the server cache for the *focused* month — the cache key is
+      // per-month, so a force without ?month= would only refresh the default.
+      const q = selectedMonth ? `&month=${encodeURIComponent(selectedMonth)}` : "";
+      await api.get(`portfolios/monthly/?force=1${q}`);
+    } catch {
+      // Server might 5xx; we still invalidate so the user sees an error state.
+    }
+    queryClient.invalidateQueries({ queryKey: ["monthly-view"] });
+  }, [source, refetch, queryClient, selectedMonth]);
+
+  // Stable callback for op-buttons — has to live above the conditional
+  // returns below, otherwise the hook count changes between renders
+  // (loading → ready) and React throws "Rendered more hooks than ...".
+  const ctxOpFinished = React.useCallback(
+    () => queryClient.invalidateQueries({ queryKey: ["monthly-view"] }),
+    [queryClient],
+  );
+
+  // Derive everything needed for the context BEFORE the conditional return,
+  // otherwise the hook count changes between loading and ready states.
+  const monthKey = selectedMonth ?? data?.current_month ?? "";
+  const month = React.useMemo(
+    () => (data ? data.months.find((m) => m.month === monthKey) ?? data.months[0] : null),
+    [data, monthKey],
+  );
+
+  // Derive --from / --to for the currently-viewed month — used by both
+  // the Header op-buttons and the empty-state op-buttons.
+  const { ctxMonthStart, ctxMonthEnd } = React.useMemo(() => {
+    if (!monthKey) return { ctxMonthStart: "", ctxMonthEnd: "" };
+    const [year, mon] = monthKey.split("-").map(Number);
+    const lastDay = new Date(Date.UTC(year, mon, 0)).getUTCDate();
+    const mm = String(mon).padStart(2, "0");
+    return {
+      ctxMonthStart: `${year}-${mm}-01`,
+      ctxMonthEnd: `${year}-${mm}-${String(lastDay).padStart(2, "0")}`,
+    };
+  }, [monthKey]);
+
+  const ctxValue = React.useMemo<MonthlyRefreshCtx>(
+    () => ({
+      dataUpdatedAt, isFetching, onRefresh: handleForceRefresh,
+      monthStart: ctxMonthStart, monthEnd: ctxMonthEnd, onOpFinished: ctxOpFinished,
+    }),
+    [dataUpdatedAt, isFetching, handleForceRefresh, ctxMonthStart, ctxMonthEnd, ctxOpFinished],
+  );
+
   if (isLoading) return <MonthlyLoading />;
   if (isError) return <MonthlyError error={error as Error} onRetry={() => refetch()} />;
-  if (!data) return null;
-
-  const monthKey = selectedMonth ?? data.current_month;
-  const month = data.months.find((m) => m.month === monthKey) ?? data.months[0];
+  if (!data || !month) return null;
 
   return (
-    <div className="px-6 py-6 space-y-6 max-w-[1200px] mx-auto">
-      <Header
-        data={data}
-        onRefresh={() => refetch()}
-        isFetching={isFetching}
-        dataUpdatedAt={dataUpdatedAt}
-        source={source}
-        onToggleSource={handleToggleSource}
-        monthKey={monthKey}
-        onOpFinished={() => queryClient.invalidateQueries({ queryKey: ["monthly-view"] })}
-      />
+    <MonthlyRefreshContext.Provider value={ctxValue}>
+      <div className="px-6 py-6 space-y-6 max-w-[1200px] mx-auto">
+        <Header
+          data={data}
+          onRefresh={handleForceRefresh}
+          isFetching={isFetching}
+          dataUpdatedAt={dataUpdatedAt}
+          source={source}
+          onToggleSource={handleToggleSource}
+          monthKey={monthKey}
+          onOpFinished={() => queryClient.invalidateQueries({ queryKey: ["monthly-view"] })}
+        />
 
-      <YtdStrip
-        ytd={data.ytd}
-        selected={monthKey}
-        onSelect={handleSelectMonth}
-      />
+        <PipelineStatusStrip data={data} month={month} />
 
-      <MonthCard
-        month={month}
-        isCurrent={month.month === data.current_month}
-      />
+        <TradeFreshnessBanner data={data} />
 
-      {/* Row: Equity curve + Benchmark side-by-side */}
-      <div className="grid grid-cols-1 lg:grid-cols-[2fr_1fr] gap-6">
-        <EquityCurveCard curve={data.equity_curve} />
-        <BenchmarkCard benchmark={data.benchmark} />
+        <YtdStrip
+          ytd={data.ytd}
+          selected={monthKey}
+          onSelect={handleSelectMonth}
+        />
+
+        <MonthCard
+          month={month}
+          isCurrent={month.month === data.current_month}
+        />
+
+        {/* Row: Equity curve + Benchmark side-by-side */}
+        <div className="grid grid-cols-1 lg:grid-cols-[2fr_1fr] gap-6">
+          <EquityCurveCard curve={data.equity_curve} />
+          <BenchmarkCard benchmark={data.benchmark} />
+        </div>
+
+        {/* Analytics: hour heatmap + day-of-week + sector */}
+        <AnalyticsCard analytics={data.analytics} />
+
+        <CaptureMatrixCard matrix={data.capture_matrix} />
+
+        <SignalAuditCard audit={data.signal_audit} />
+
+        {data.rejections.length > 0 && (
+          <RejectionsCard rejections={data.rejections} />
+        )}
+
+        <LessonsCard lessons={data.lessons} />
       </div>
-
-      {/* Analytics: hour heatmap + day-of-week + sector */}
-      <AnalyticsCard analytics={data.analytics} />
-
-      <CaptureMatrixCard matrix={data.capture_matrix} />
-
-      <SignalAuditCard audit={data.signal_audit} />
-
-      {data.rejections.length > 0 && (
-        <RejectionsCard rejections={data.rejections} />
-      )}
-
-      <LessonsCard lessons={data.lessons} />
-    </div>
+    </MonthlyRefreshContext.Provider>
   );
 }
 
@@ -211,13 +375,46 @@ function Header({
           staleMs={60 * 60_000}
         />
 
+        {/* Replay the live screener over the viewed month — populates
+            apps.strategies.Signal rows for every strategy fired. The
+            capture matrix + signal audit + rejections sections all depend
+            on this. Run first, then "Refresh signals" to compute outcomes. */}
+        <OpButton
+          command="run_screener"
+          defaultArgs={`--backtest --from ${monthStart} --to ${monthEnd} --persist-signals`}
+          label="Run screener"
+          description={`Replay 8 intraday strategies over ${monthStart} → ${monthEnd} and persist every signal that fired. Populates the capture matrix / signal audit / rejections sections.`}
+          onSuccess={onOpFinished}
+        />
+
         {/* Re-run the signal-outcome enrichment (capture rates, win/loss labels)
             then re-fetch the monthly view so the new numbers appear inline. */}
         <OpButton
           command="enrich_signals"
           defaultArgs="--all"
           label="Refresh signals"
-          description="Backfill EOD outcomes for every SignalLog row — drives the capture matrix + signal audit on this page."
+          description="Backfill EOD outcomes (max favorable / adverse move, traded/expired/rejected outcome) for every apps.strategies.Signal row — drives the capture matrix + signal audit on this page."
+          onSuccess={onOpFinished}
+        />
+
+        {/* Derive paper trades for the viewed month by replaying the intraday
+            agent over real candles. Populates the trade-driven sections —
+            month P&L, equity curve, analytics, benchmark. */}
+        <OpButton
+          command="derive_trades"
+          defaultArgs={`--from ${monthStart} --to ${monthEnd}`}
+          label="Derive intraday"
+          description={`Replay the intraday agent over ${monthStart} → ${monthEnd} — creates paper trades (FILLED → CLOSED with P&L) from real intraday structure. Feeds the month P&L / equity curve / analytics. Skips days that already have trades.`}
+          onSuccess={onOpFinished}
+        />
+
+        {/* Derive swing (Oliver Kell) trades for the month — the other trade
+            source feeding the cash bucket. Reuses the /backtester engine. */}
+        <OpButton
+          command="derive_swing_trades"
+          defaultArgs={`--from ${monthStart} --to ${monthEnd}`}
+          label="Derive swing"
+          description={`Run the Oliver Kell swing backtest over ${monthStart} → ${monthEnd} and book each closed swing trade (cash, multi-day) into the Monthly report. Idempotent — replaces prior swing rows for the window.`}
           onSuccess={onOpFinished}
         />
 
@@ -225,7 +422,7 @@ function Header({
         <OpButton
           command="run_ok_backtest"
           defaultArgs={`--from ${monthStart} --to ${monthEnd}`}
-          label="Backtest this month"
+          label="Backtest swing"
           description={`Run the Oliver-Kell cycle backtest over ${monthStart} → ${monthEnd}.`}
           onSuccess={onOpFinished}
         />
@@ -241,6 +438,130 @@ function Header({
         </Button>
       </div>
     </header>
+  );
+}
+
+/* ================================================================== */
+/* Trade-freshness banner                                                */
+/* ------------------------------------------------------------------- */
+/* Signals flow automatically from the scan pipeline, but trades only    */
+/* appear once the intraday agent (live or replay) runs. When signals    */
+/* are newer than the last derived trade, the P&L-driven sections look   */
+/* stale — so we say so explicitly and offer a one-click backfill that   */
+/* replays the agent over the viewed month (same OpButton pattern as the */
+/* "Run screener" signal backfill).                                      */
+/* ================================================================== */
+
+function TradeFreshnessBanner({ data }: { data: MonthlyPayload }) {
+  const ctx = useMonthlyCtx();
+  const fresh = data.data_freshness;
+  if (!fresh || !fresh.trades_stale) return null;
+
+  return (
+    <div className="flex items-start gap-3 rounded-sm border border-warning/40 bg-warning/10 px-4 py-3">
+      <AlertTriangle className="h-4 w-4 text-warning shrink-0 mt-0.5" aria-hidden />
+      <div className="min-w-0 flex-1">
+        <p className="text-body-sm text-fg">
+          Signals are current through{" "}
+          <span className="font-mono">{fresh.latest_signal_date ?? "—"}</span>, but trades have only
+          been derived through{" "}
+          <span className="font-mono">{fresh.latest_trade_date ?? "never"}</span>. The P&amp;L, equity
+          curve, and analytics below reflect derived trades only.
+        </p>
+        <p className="text-caption text-fg-muted mt-0.5">
+          Replays the intraday agent (and run “Derive swing” in the header for Oliver Kell trades)
+          over the viewed month to create paper trades from real structure.
+        </p>
+      </div>
+      <OpButton
+        command="derive_trades"
+        defaultArgs={`--from ${ctx.monthStart} --to ${ctx.monthEnd}`}
+        label="Derive intraday"
+        description={`Replay the intraday agent over ${ctx.monthStart} → ${ctx.monthEnd} — creates paper trades (FILLED → CLOSED with P&L) from real intraday structure. Feeds the P&L / equity curve / analytics / benchmark sections.`}
+        onSuccess={ctx.onOpFinished}
+      />
+    </div>
+  );
+}
+
+/* ================================================================== */
+/* Pipeline status strip                                                 */
+/* ------------------------------------------------------------------- */
+/* Shows the health of each upstream data source feeding this page —    */
+/* trades, signals, broker snapshots. Any tile that says "0 / stale"    */
+/* tells the operator which CLI they need to run to populate that part  */
+/* of the report.                                                       */
+/* ================================================================== */
+
+function PipelineStatusStrip({
+  data, month,
+}: {
+  data: MonthlyPayload;
+  month: MonthGroup;
+}) {
+  const sigTotal = data.signal_audit.total_signals;
+  const tradeCount = month.trade_count;
+  const captureSymbols = data.capture_matrix.length;
+  const rejectionsCount = data.rejections.length;
+
+  return (
+    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <PipelineTile
+        label="Trades in scope"
+        value={tradeCount.toString()}
+        status={tradeCount > 0 ? "ok" : "empty"}
+        emptyHint="No trades for this month yet"
+        source="apps.trading.Trade"
+      />
+      <PipelineTile
+        label="Signals recorded"
+        value={sigTotal.toString()}
+        status={sigTotal > 0 ? "ok" : "empty"}
+        emptyHint="Run the screener to populate"
+        source="apps.strategies.Signal"
+      />
+      <PipelineTile
+        label="Stocks tracked"
+        value={captureSymbols.toString()}
+        status={captureSymbols > 0 ? "ok" : "empty"}
+        emptyHint="Needs enriched signals"
+        source="Signal × Trade join"
+      />
+      <PipelineTile
+        label="Risk rejections"
+        value={rejectionsCount.toString()}
+        status={rejectionsCount > 0 ? "ok" : "muted"}
+        emptyHint="Nothing blocked this month"
+        source="apps.events.Event"
+      />
+    </div>
+  );
+}
+
+function PipelineTile({
+  label, value, status, emptyHint, source,
+}: {
+  label: string;
+  value: string;
+  status: "ok" | "empty" | "muted";
+  emptyHint: string;
+  source: string;
+}) {
+  const tone = status === "ok" ? "text-fg" : status === "empty" ? "text-warning" : "text-fg-muted";
+  const dot = status === "ok" ? "bg-success" : status === "empty" ? "bg-warning" : "bg-fg-subtle";
+  return (
+    <Card>
+      <CardContent className="py-3">
+        <div className="flex items-center gap-1.5 text-caption uppercase tracking-wider text-fg-subtle">
+          <span className={cn("h-1.5 w-1.5 rounded-full", dot)} />
+          {label}
+        </div>
+        <div className={cn("text-h2 mt-1 tabular-nums", tone)}>{value}</div>
+        <div className="text-caption text-fg-subtle mt-1">
+          {status === "ok" ? source : emptyHint}
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -268,11 +589,12 @@ function YtdStrip({
             Year-to-date
           </CardTitle>
           <CardDescription>
-            Last 12 months · click a bar to inspect any month below
+            This financial year (Apr onward) · click a bar to inspect any month below
           </CardDescription>
         </div>
         <div className="flex items-center gap-2 text-caption uppercase tracking-wider text-fg-subtle">
           Capital base {fmtInr(ytd.capital_base, { compact: true })}
+          <SectionTools />
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -327,7 +649,7 @@ function BarChart({
   return (
     <div
       role="group"
-      aria-label="12 month P&L"
+      aria-label="Financial-year P&L by month"
       className="flex items-end gap-2 h-28 border-t border-dashed border-border/60 pt-2"
     >
       {months.map((m) => {
@@ -396,8 +718,11 @@ function MonthCard({ month, isCurrent }: { month: MonthGroup; isCurrent: boolean
           </CardDescription>
         </div>
         <div className="flex flex-col items-end gap-1 shrink-0">
-          <div className={cn("text-h2 font-mono tabular", totalPnlCls)}>
-            {formatSignedInr(month.total_pnl)}
+          <div className="flex items-center gap-2">
+            <div className={cn("text-h2 font-mono tabular", totalPnlCls)}>
+              {formatSignedInr(month.total_pnl)}
+            </div>
+            <SectionTools />
           </div>
           <div className="flex items-center gap-2 text-caption text-fg-subtle">
             <span>Realised {formatSignedInr(month.realized_pnl)}</span>
@@ -461,7 +786,10 @@ function CountPill({ n }: { n: number }) {
 /* ================================================================== */
 
 function UnderlyingTable({ rolls }: { rolls: UnderlyingRoll[] }) {
-  const sorted = [...rolls].sort((a, b) => b.running_pnl - a.running_pnl);
+  const sorted = React.useMemo(
+    () => [...rolls].sort((a, b) => b.running_pnl - a.running_pnl),
+    [rolls],
+  );
   return (
     <div className="divide-y divide-border/60">
       <Header4Col />
@@ -564,11 +892,17 @@ function Num({
 }
 
 function Totals({ rolls }: { rolls: UnderlyingRoll[] }) {
-  const cap = rolls.reduce((s, r) => s + r.capital_deployed, 0);
-  const expo = rolls.reduce((s, r) => s + r.exposure, 0);
-  const tgt = rolls.reduce((s, r) => s + r.target_total, 0);
-  const risk = rolls.reduce((s, r) => s + r.risk_total, 0);
-  const pnl = rolls.reduce((s, r) => s + r.running_pnl, 0);
+  const { cap, expo, tgt, risk, pnl } = React.useMemo(() => {
+    let cap = 0, expo = 0, tgt = 0, risk = 0, pnl = 0;
+    for (const r of rolls) {
+      cap += r.capital_deployed;
+      expo += r.exposure;
+      tgt += r.target_total;
+      risk += r.risk_total;
+      pnl += r.running_pnl;
+    }
+    return { cap, expo, tgt, risk, pnl };
+  }, [rolls]);
   return (
     <div className="grid grid-cols-[minmax(160px,1.4fr)_repeat(5,1fr)_32px] gap-3 py-3 border-t border-border bg-surface-2/50 text-body-sm">
       <span className="uppercase tracking-wider text-caption text-fg-subtle self-center">Totals</span>
@@ -589,58 +923,110 @@ function Totals({ rolls }: { rolls: UnderlyingRoll[] }) {
 /* Leg detail — drawer inside an underlying row                          */
 /* ================================================================== */
 
+/* Outcome → badge tone. */
+const OUTCOME_TONE: Record<string, "success" | "danger" | "neutral"> = {
+  TARGET_HIT: "success", SL_HIT: "danger", EOD: "neutral", MANUAL: "neutral", TRAIL: "neutral",
+};
+
+/* Shared 6-column template. Literal strings (not interpolated) so Tailwind's
+   JIT can see them. */
+const LEG_GRID = "grid-cols-[1.5fr_0.9fr_0.9fr_1.2fr_0.9fr_auto]";
+const LEG_GRID_MD = "md:grid-cols-[1.5fr_0.9fr_0.9fr_1.2fr_0.9fr_auto]";
+
 function LegList({ legs }: { legs: PositionLeg[] }) {
+  const sorted = React.useMemo(
+    () => [...legs].sort((a, b) => Math.abs(b.pnl) - Math.abs(a.pnl)),
+    [legs],
+  );
+  // The chart modal lives here (not per-row) so ←/→ can page through the
+  // whole table by index.
+  const [openIdx, setOpenIdx] = React.useState<number | null>(null);
+
   return (
     <div className="px-3 pb-4 pt-1 bg-surface-2/30 rounded-b-sm">
-      <ul className="divide-y divide-border/60">
-        {legs.map((l) => <LegRow key={l.id} l={l} />)}
-      </ul>
+      <div className={cn(
+        "hidden md:grid gap-3 px-2 py-2 text-caption uppercase tracking-wider text-fg-subtle border-b border-border/60",
+        LEG_GRID,
+      )}>
+        <span>Trade</span>
+        <span className="text-right">Entry · Qty</span>
+        <span className="text-right">Exit</span>
+        <span>Outcome</span>
+        <span className="text-right">P&amp;L</span>
+        <span className="text-right">Chart</span>
+      </div>
+      <div className="divide-y divide-border/60">
+        {sorted.map((l, i) => (
+          <LegRow key={l.id} l={l} onView={() => setOpenIdx(i)} />
+        ))}
+      </div>
+      <TradeChartModal legs={sorted} index={openIdx} onIndexChange={setOpenIdx} />
     </div>
   );
 }
 
-function LegRow({ l }: { l: PositionLeg }) {
-  const pnlCls = clsPnl(l.pnl);
+function LegRow({ l, onView }: { l: PositionLeg; onView: () => void }) {
   const closed = l.status === "CLOSED";
+  const outcomeTone = OUTCOME_TONE[l.close_reason ?? ""] ?? "neutral";
+
   return (
-    <li className="grid grid-cols-12 gap-3 py-3 items-start text-body-sm">
-      <div className="col-span-12 md:col-span-4 min-w-0">
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="font-mono text-fg">{l.symbol}</span>
-          <Badge tone={l.side === "BUY" ? "success" : "danger"}>{l.side}</Badge>
+    <>
+      <div className={cn(
+        "grid grid-cols-2 md:gap-3 gap-y-2 gap-x-3 px-2 py-2.5 items-center text-body-sm",
+        LEG_GRID_MD,
+      )}>
+        {/* Trade — symbol, side, source, rationale */}
+        <div className="col-span-2 md:col-span-1 min-w-0 flex flex-col gap-0.5">
+          <div className="flex items-center gap-2">
+            <span className="font-mono text-fg">{l.symbol}</span>
+            <Badge tone={l.side === "BUY" ? "success" : "danger"}>{l.side}</Badge>
+            {l.source && (
+              <span className="text-caption text-fg-subtle capitalize">{l.source}</span>
+            )}
+          </div>
+          {l.notes && (
+            <span className="text-caption text-fg-muted truncate" title={l.notes}>{l.notes}</span>
+          )}
+        </div>
+
+        {/* Entry · Qty */}
+        <div className="text-right font-mono tabular">
+          <div className="text-fg">{fmtNum(l.entry_price, 2)}</div>
+          <div className="text-caption text-fg-subtle">{l.quantity} qty</div>
+        </div>
+
+        {/* Exit · date */}
+        <div className="text-right font-mono tabular">
+          <div className="text-fg">{l.exit_price != null ? fmtNum(l.exit_price, 2) : "—"}</div>
+          <div className="text-caption text-fg-subtle">{(l.exit_date ?? l.entry_date).slice(5)}</div>
+        </div>
+
+        {/* Outcome */}
+        <div className="flex items-center gap-1.5 flex-wrap">
           <Badge tone={closed ? "neutral" : "info"}>{l.status}</Badge>
+          {l.close_reason && (
+            <Badge tone={outcomeTone}>{l.close_reason.replace("_", " ")}</Badge>
+          )}
         </div>
-        {l.notes && (
-          <p className="text-caption text-fg-muted mt-1">{l.notes}</p>
-        )}
-      </div>
-      <div className="col-span-6 md:col-span-2 font-mono tabular text-right">
-        <div className="text-caption text-fg-subtle">Qty · Entry</div>
-        <div className="text-fg">{l.quantity} @ {fmtNum(l.entry_price, 2)}</div>
-      </div>
-      <div className="col-span-6 md:col-span-2 font-mono tabular text-right">
-        <div className="text-caption text-fg-subtle">Target · Stop</div>
-        <div className="text-fg">
-          <span className="text-pnl-up">{l.target_price != null ? fmtNum(l.target_price, 2) : "—"}</span>
-          {" / "}
-          <span className="text-pnl-down">{l.stop_price != null ? fmtNum(l.stop_price, 2) : "—"}</span>
+
+        {/* P&L */}
+        <div className={cn("text-right font-mono tabular font-semibold", clsPnl(l.pnl))}>
+          {formatSignedInr(l.pnl)}
         </div>
-      </div>
-      <div className="col-span-6 md:col-span-2 font-mono tabular text-right">
-        <div className="text-caption text-fg-subtle">{closed ? "Exit" : "Opened"}</div>
-        <div className="text-fg">
-          {closed
-            ? `${l.exit_price != null ? fmtNum(l.exit_price, 2) : "—"} · ${l.exit_date?.slice(5) ?? ""}`
-            : l.entry_date.slice(5)}
+
+        {/* Actions */}
+        <div className="flex justify-end">
+          <Button
+            variant="ghost" size="sm"
+            onClick={onView}
+            title="View this trade on a chart"
+          >
+            <LineChart className="h-3.5 w-3.5 md:mr-1.5" aria-hidden />
+            <span className="hidden md:inline">View chart</span>
+          </Button>
         </div>
       </div>
-      <div className={cn("col-span-6 md:col-span-2 font-mono tabular text-right font-semibold", pnlCls)}>
-        <div className="text-caption text-fg-subtle font-normal">
-          {closed ? "Realised" : "Running"}
-        </div>
-        {formatSignedInr(l.pnl)}
-      </div>
-    </li>
+    </>
   );
 }
 
@@ -678,7 +1064,7 @@ function EquityCurveCard({ curve }: { curve: EquityCurve }) {
             Day-by-day cumulative P&amp;L with drawdown
           </CardDescription>
         </div>
-        <div className="flex gap-4 text-caption text-right">
+        <div className="flex gap-4 text-caption text-right items-center">
           <div>
             <div className="text-fg-subtle">Peak</div>
             <div className="text-pnl-up font-mono">{fmtInr(curve.peak_equity)}</div>
@@ -693,6 +1079,7 @@ function EquityCurveCard({ curve }: { curve: EquityCurve }) {
               {fmtInr(curve.final_equity)}
             </div>
           </div>
+          <SectionTools />
         </div>
       </CardHeader>
       <CardContent>
@@ -761,14 +1148,17 @@ function BenchmarkCard({ benchmark: b }: { benchmark: BenchmarkComparison }) {
   const hasNifty = b.nifty_start > 0;
   return (
     <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <BarChart3 className="h-4 w-4 text-fg-muted" aria-hidden />
-          vs NIFTY50
-        </CardTitle>
-        <CardDescription>
-          {b.trading_days} trading days
-        </CardDescription>
+      <CardHeader className="flex-row items-start justify-between gap-4">
+        <div>
+          <CardTitle className="flex items-center gap-2">
+            <BarChart3 className="h-4 w-4 text-fg-muted" aria-hidden />
+            vs NIFTY50
+          </CardTitle>
+          <CardDescription>
+            {b.trading_days} trading days
+          </CardDescription>
+        </div>
+        <SectionTools />
       </CardHeader>
       <CardContent className="space-y-4">
         {/* Big alpha number */}
@@ -846,9 +1236,12 @@ function AnalyticsCard({ analytics: a }: { analytics: Analytics }) {
 
   return (
     <Card>
-      <CardHeader>
-        <CardTitle>Analytics</CardTitle>
-        <CardDescription>Performance by time of day, day of week, and sector</CardDescription>
+      <CardHeader className="flex-row items-start justify-between gap-4">
+        <div>
+          <CardTitle>Analytics</CardTitle>
+          <CardDescription>Performance by time of day, day of week, and sector</CardDescription>
+        </div>
+        <SectionTools />
       </CardHeader>
       <CardContent>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -920,8 +1313,13 @@ function AnalyticsCard({ analytics: a }: { analytics: Analytics }) {
               Sector P&amp;L
             </div>
             <div className="space-y-1">
-              {a.by_sector.map((s) => {
-                const maxPnl = Math.max(...a.by_sector.map((x) => Math.abs(x.pnl)), 1);
+              {(() => {
+                let maxPnl = 1;
+                for (const x of a.by_sector) {
+                  const v = Math.abs(x.pnl);
+                  if (v > maxPnl) maxPnl = v;
+                }
+                return a.by_sector.map((s) => {
                 const w = (Math.abs(s.pnl) / maxPnl) * 100;
                 return (
                   <div key={s.sector} className="flex items-center gap-2">
@@ -945,7 +1343,8 @@ function AnalyticsCard({ analytics: a }: { analytics: Analytics }) {
                     </span>
                   </div>
                 );
-              })}
+              });
+              })()}
             </div>
           </div>
         </div>
@@ -960,13 +1359,16 @@ function AnalyticsCard({ analytics: a }: { analytics: Analytics }) {
 
 function CaptureMatrixCard({ matrix }: { matrix: StockCapture[] }) {
   const [sortBy, setSortBy] = React.useState<"potential" | "captured" | "rate">("potential");
-  const sorted = [...matrix].sort((a, b) => {
-    let d = 0;
-    if (sortBy === "captured") d = b.captured_pnl - a.captured_pnl;
-    else if (sortBy === "rate") d = b.capture_rate_pct - a.capture_rate_pct;
-    else d = b.potential_pnl - a.potential_pnl;
-    return d !== 0 ? d : a.symbol.localeCompare(b.symbol);
-  });
+  const sorted = React.useMemo(
+    () => [...matrix].sort((a, b) => {
+      let d = 0;
+      if (sortBy === "captured") d = b.captured_pnl - a.captured_pnl;
+      else if (sortBy === "rate") d = b.capture_rate_pct - a.capture_rate_pct;
+      else d = b.potential_pnl - a.potential_pnl;
+      return d !== 0 ? d : a.symbol.localeCompare(b.symbol);
+    }),
+    [matrix, sortBy],
+  );
 
   return (
     <Card>
@@ -980,7 +1382,7 @@ function CaptureMatrixCard({ matrix }: { matrix: StockCapture[] }) {
             Per-stock: how much did the market offer vs how much did AlphaDesk capture?
           </CardDescription>
         </div>
-        <div className="flex gap-1">
+        <div className="flex gap-1 items-center">
           {(["potential", "captured", "rate"] as const).map((key) => (
             <button
               key={key}
@@ -996,13 +1398,19 @@ function CaptureMatrixCard({ matrix }: { matrix: StockCapture[] }) {
               {key === "potential" ? "Potential" : key === "captured" ? "Captured" : "Rate"}
             </button>
           ))}
+          <SectionTools className="ml-1.5" />
         </div>
       </CardHeader>
       <CardContent>
         {sorted.length === 0 ? (
-          <EmptyState
+          <PopulateEmpty
             title="No capture data yet"
-            description="Signals need to be enriched with EOD price data to compute capture rates."
+            description="The capture matrix needs (1) signals fired during the month and (2) those signals enriched with EOD prices. Click below to backfill."
+            primaryLabel="Run screener for this month"
+            primaryCommand="run_screener"
+            secondaryLabel="Refresh signal outcomes"
+            secondaryCommand="enrich_signals"
+            secondaryArgs="--all"
           />
         ) : (
           <>
@@ -1083,10 +1491,18 @@ function CaptureRow({ s }: { s: StockCapture }) {
 
 function SignalAuditCard({ audit }: { audit: SignalAudit }) {
   const total = audit.total_signals;
-  const outcomes = Object.entries(audit.by_outcome).sort(([, a], [, b]) => b - a);
-  const sources = Object.entries(audit.by_source).sort(([, a], [, b]) => b - a);
-  const strategies = Object.entries(audit.by_strategy)
-    .sort(([, a], [, b]) => b.count - a.count);
+  const outcomes = React.useMemo(
+    () => Object.entries(audit.by_outcome).sort(([, a], [, b]) => b - a),
+    [audit.by_outcome],
+  );
+  const sources = React.useMemo(
+    () => Object.entries(audit.by_source).sort(([, a], [, b]) => b - a),
+    [audit.by_source],
+  );
+  const strategies = React.useMemo(
+    () => Object.entries(audit.by_strategy).sort(([, a], [, b]) => b.count - a.count),
+    [audit.by_strategy],
+  );
 
   const OUTCOME_COLORS: Record<string, string> = {
     TRADED: "bg-pnl-up",
@@ -1098,7 +1514,8 @@ function SignalAuditCard({ audit }: { audit: SignalAudit }) {
 
   return (
     <Card>
-      <CardHeader>
+      <CardHeader className="flex-row items-start justify-between gap-4">
+        <div>
         <CardTitle className="flex items-center gap-2">
           <BarChart3 className="h-4 w-4 text-fg-muted" aria-hidden />
           Signal Audit
@@ -1107,12 +1524,19 @@ function SignalAuditCard({ audit }: { audit: SignalAudit }) {
           {total} signals detected — {audit.profitable_if_taken} profitable if taken,{" "}
           {audit.loss_avoided} losses avoided
         </CardDescription>
+        </div>
+        <SectionTools />
       </CardHeader>
       <CardContent className="space-y-5">
         {total === 0 ? (
-          <EmptyState
+          <PopulateEmpty
             title="No signals recorded"
-            description="Run the screener or scanner to generate signal data for this month."
+            description="Replay the live screener over this month to populate apps.strategies.Signal rows for every strategy that fired."
+            primaryLabel="Run screener for this month"
+            primaryCommand="run_screener"
+            secondaryLabel="Run the swing scanner"
+            secondaryCommand="run_ok_scanner"
+            secondaryArgs="--actionable-only"
           />
         ) : (
         <>
@@ -1195,7 +1619,8 @@ function RejectionsCard({ rejections }: { rejections: RejectionReview[] }) {
 
   return (
     <Card>
-      <CardHeader>
+      <CardHeader className="flex-row items-start justify-between gap-4">
+        <div>
         <CardTitle className="flex items-center gap-2">
           <Shield className="h-4 w-4 text-fg-muted" aria-hidden />
           Risk Rejections
@@ -1203,6 +1628,8 @@ function RejectionsCard({ rejections }: { rejections: RejectionReview[] }) {
         <CardDescription>
           {total} blocked by @RiskGuard — {profitable} would have been profitable in hindsight
         </CardDescription>
+        </div>
+        <SectionTools />
       </CardHeader>
       <CardContent>
         <div className="divide-y divide-border/60">
@@ -1246,7 +1673,8 @@ function LessonsCard({ lessons }: { lessons: string[] }) {
 
   return (
     <Card>
-      <CardHeader>
+      <CardHeader className="flex-row items-start justify-between gap-4">
+        <div>
         <CardTitle className="flex items-center gap-2">
           <Lightbulb className="h-4 w-4 text-fg-muted" aria-hidden />
           Lessons
@@ -1254,6 +1682,8 @@ function LessonsCard({ lessons }: { lessons: string[] }) {
         <CardDescription>
           Insights from this month's trading activity
         </CardDescription>
+        </div>
+        <SectionTools />
       </CardHeader>
       <CardContent>
         <ul className="space-y-3">

@@ -29,6 +29,7 @@ from django.db.models import Count, Q, Sum
 from django.utils import timezone
 
 CACHE_TTL = 120  # seconds
+MAX_MONTHS = 12  # hard cap on months returned (a full financial year)
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -51,6 +52,8 @@ class PositionLeg:
     status: str
     lot_size: Optional[int] = None
     notes: str = ""
+    close_reason: str = ""      # SL_HIT | TARGET_HIT | EOD | …
+    source: str = ""            # "intraday" | "swing" | "" — derived from reasoning
 
 
 @dataclass
@@ -319,6 +322,17 @@ def _dec(v) -> float:
     return float(v)
 
 
+def _fy_start(current_month: str) -> str:
+    """Indian financial-year start month ('YYYY-04') for a given YYYY-MM.
+
+    The FY runs Apr→Mar, so months Jan–Mar belong to the financial year that
+    began the previous April.
+    """
+    y, m = int(current_month[:4]), int(current_month[5:7])
+    fy_year = y if m >= 4 else y - 1
+    return f"{fy_year}-04"
+
+
 def _month_range(month_str: str) -> tuple[date, date]:
     """Return (first_day, last_day) for a YYYY-MM string."""
     y, m = int(month_str[:4]), int(month_str[5:7])
@@ -372,17 +386,24 @@ def build_monthly_report(
     now = timezone.now()
     current_month = now.strftime("%Y-%m")
 
-    # ── 1. Build month groups from Position data ──
-    months_data = _build_month_groups(tenant, portfolio, month, current_month)
+    # ── 1. Build the full month list — ALWAYS every active month, never
+    #       scoped to a single one. The YTD strip + bar chart are a
+    #       *navigator*; they must show every month regardless of which one
+    #       is focused, so the user can click their way to any of them. ──
+    months_data = _build_month_groups(tenant, portfolio, None, current_month)
 
     # ── 2. Build YTD summary ──
     ytd = _build_ytd(months_data, portfolio)
 
-    # ── 3-5. Feedback sections ──
-    # When viewing a specific month, scope to that month.
-    # When viewing all (default), use the most recent month that has data.
+    # ── 3-5. Feedback sections — scoped to the *focused* month.
+    #   • an explicit ?month= always wins
+    #   • else the current month if it saw any activity (signals/trades)
+    #   • else the most recent month with activity
+    active_months = {m.month for m in months_data}
     if month:
         target_month = month
+    elif current_month in active_months:
+        target_month = current_month
     elif months_data:
         target_month = months_data[0].month  # most recent with data
     else:
@@ -419,10 +440,36 @@ def build_monthly_report(
         "equity_curve": asdict(equity_curve),
         "analytics": asdict(analytics),
         "benchmark": asdict(benchmark),
+        "data_freshness": _data_freshness(tenant),
     }
 
     cache.set(cache_key, result, CACHE_TTL)
     return result
+
+
+def _data_freshness(tenant) -> dict:
+    """Latest signal vs latest *executed* trade date — drives the Monthly page's
+    staleness banner. Signals flow from the scan pipeline; trades only appear
+    once the intraday agent (live or replay) runs, so these can diverge."""
+    from apps.strategies.models import Signal
+    from apps.trading.models import Trade
+
+    sig = (
+        Signal.objects.filter(tenant=tenant)
+        .order_by("-signal_date").values_list("signal_date", flat=True).first()
+    )
+    trade = (
+        Trade.objects.filter(
+            tenant=tenant,
+            status__in=[Trade.Status.FILLED, Trade.Status.PARTIAL, Trade.Status.CLOSED],
+        )
+        .order_by("-trade_date").values_list("trade_date", flat=True).first()
+    )
+    return {
+        "latest_signal_date": sig.isoformat() if sig else None,
+        "latest_trade_date": trade.isoformat() if trade else None,
+        "trades_stale": bool(sig and (not trade or sig > trade)),
+    }
 
 
 def _month_group_to_dict(mg: MonthGroup) -> dict:
@@ -473,8 +520,21 @@ def _build_month_groups(tenant, portfolio, month, current_month) -> list[MonthGr
     if not month_buckets:
         month_buckets = _v2_month_groups(tenant, month)
 
+    # Surface months that saw screening activity (signals fired or trades
+    # rejected) but no *completed* trades — e.g. a month where every idea was
+    # blocked by @RiskGuard. Without this they vanish from the month list +
+    # YTD strip and can't be navigated to, even though their signal-audit /
+    # rejection / capture data is rich. They render as a zero-trade group.
+    for m_key in _active_months(tenant, month):
+        month_buckets.setdefault(m_key, [])
+
+    # Year-to-date = the current Indian financial year (Apr→Mar). Only surface
+    # months from April of the current FY onward, most-recent first — months
+    # from the prior FY (e.g. Feb/Mar) are out of the YTD window.
+    fy_start = _fy_start(current_month)
+    fy_keys = [k for k in month_buckets if k >= fy_start]
     months = []
-    for m_key in sorted(month_buckets.keys(), reverse=True)[:12]:
+    for m_key in sorted(fy_keys, reverse=True)[:MAX_MONTHS]:
         positions_in_month = month_buckets[m_key]
         mg = _positions_to_month_group(m_key, positions_in_month)
         months.append(mg)
@@ -519,6 +579,29 @@ def _v2_month_groups(tenant, month) -> dict:
         m_key = t.trade_date.strftime("%Y-%m")
         buckets[m_key].append(t)
     return buckets
+
+
+def _active_months(tenant, month) -> set[str]:
+    """YYYY-MM keys that saw any signal or trade activity (any status).
+
+    Drives surfacing of months that have screening/rejection activity but no
+    completed trades, so the navigator can still reach them.
+    """
+    from apps.strategies.models import Signal
+    from apps.trading.models import Trade
+
+    keys: set[str] = set()
+    sig_qs = Signal.objects.filter(tenant=tenant)
+    trade_qs = Trade.objects.filter(tenant=tenant)
+    if month:
+        first, last = _month_range(month)
+        sig_qs = sig_qs.filter(signal_date__gte=first, signal_date__lte=last)
+        trade_qs = trade_qs.filter(trade_date__gte=first, trade_date__lte=last)
+    for d in sig_qs.dates("signal_date", "month"):
+        keys.add(d.strftime("%Y-%m"))
+    for d in trade_qs.dates("trade_date", "month"):
+        keys.add(d.strftime("%Y-%m"))
+    return keys
 
 
 def _positions_to_month_group(month_key: str, positions) -> MonthGroup:
@@ -613,20 +696,26 @@ def _trade_to_leg(t) -> PositionLeg:
     """
     closed = t.status in ("FILLED", "PAPER", "CANCELLED", "CLOSED", "PARTIAL")
     pnl = _dec(t.realized_pnl)
+    reasoning = t.reasoning or ""
+    source = "swing" if reasoning.startswith("[Swing") else (
+        "intraday" if reasoning.startswith("[") else ""
+    )
     return PositionLeg(
         id=str(t.id),
         symbol=t.symbol,
         side=t.side,
         quantity=t.quantity,
         entry_price=_dec(t.entry_price),
-        exit_price=_dec(t.fill_price) if t.fill_price else None,
+        exit_price=_dec(t.exit_price) if t.exit_price else (_dec(t.fill_price) if t.fill_price else None),
         entry_date=t.trade_date.strftime("%Y-%m-%d"),
         exit_date=t.trade_date.strftime("%Y-%m-%d") if closed else None,
         target_price=_dec(t.target),
         stop_price=_dec(t.stop_loss),
         pnl=round(pnl, 2),
         status="CLOSED" if closed else "OPEN",
-        notes=(t.reasoning[:100] if t.reasoning else ""),
+        notes=(reasoning[:100]),
+        close_reason=t.close_reason or "",
+        source=source,
     )
 
 
@@ -713,7 +802,7 @@ def _build_ytd(months: list[MonthGroup], portfolio) -> YtdSummary:
             month_label=_month_short(m.month),
             pnl=m.total_pnl,
         )
-        for m in reversed(months[:12])
+        for m in reversed(months[:MAX_MONTHS])
     ]
 
     return YtdSummary(

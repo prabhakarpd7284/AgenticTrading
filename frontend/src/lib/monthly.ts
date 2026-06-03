@@ -56,6 +56,8 @@ export interface PositionLeg {
   status: PositionStatus;
   lot_size?: number;          // F&O only
   notes?: string;
+  close_reason?: string;      // SL_HIT | TARGET_HIT | EOD | …
+  source?: string;            // "intraday" | "swing" | ""
 }
 
 /** Per-underlying roll-up inside a month + asset-class bucket. */
@@ -203,6 +205,12 @@ export interface BenchmarkComparison {
   nifty_end: number;
 }
 
+export interface DataFreshness {
+  latest_signal_date: string | null;
+  latest_trade_date: string | null;
+  trades_stale: boolean;      // signals are newer than the last derived trade
+}
+
 export interface MonthlyPayload {
   paper_mode: boolean;
   current_month: string;      // "2026-04"
@@ -218,6 +226,7 @@ export interface MonthlyPayload {
   equity_curve: EquityCurve;
   analytics: Analytics;
   benchmark: BenchmarkComparison;
+  data_freshness?: DataFreshness;
 }
 
 /* ================================================================== */
@@ -584,7 +593,11 @@ const PRIOR_MONTHS: MonthGroup[] = [
 /* --------------- assemble the payload ----------------------------- */
 
 function buildMockPayload(): MonthlyPayload {
-  const months = [APR_2026, ...PRIOR_MONTHS];
+  // Mirror the live backend: only months in the current financial year
+  // (Apr→Mar) are shown. The mock's "today" is Apr 2026, so the FY starts
+  // Apr 2026 and prior-FY months (Mar 2026 and earlier) drop out.
+  const FY_START = "2026-04";
+  const months = [APR_2026, ...PRIOR_MONTHS].filter((m) => m.month >= FY_START);
 
   const ytd: YtdSummary = {
     capital_base: 500_000,
@@ -761,15 +774,25 @@ export function setMonthlySource(s: "mock" | "live") {
   localStorage.setItem(LS_KEY, s);
 }
 
-export function useMonthlyView() {
+/**
+ * @param month  Focused month "YYYY-MM" (from the YTD bar-chart / URL). When
+ *   omitted the backend picks the current month (falling back to the most
+ *   recent month with activity). Passing it re-scopes the feedback sections
+ *   (capture matrix / signal audit / rejections / equity / analytics) to that
+ *   month — the YTD strip + month list stay full regardless.
+ */
+export function useMonthlyView(month?: string | null) {
   return useQuery<MonthlyPayload>({
-    queryKey: ["monthly-view", _source],
+    queryKey: ["monthly-view", _source, month ?? "current"],
     queryFn: async () => {
       if (_source === "mock") {
         await new Promise((r) => setTimeout(r, 120));
         return buildMockPayload();
       }
-      const { data } = await api.get<MonthlyPayload>(LIVE_ENDPOINT);
+      const url = month
+        ? `${LIVE_ENDPOINT}?month=${encodeURIComponent(month)}`
+        : LIVE_ENDPOINT;
+      const { data } = await api.get<MonthlyPayload>(url);
       return data;
     },
     staleTime: 60_000,

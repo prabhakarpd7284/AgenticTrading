@@ -171,11 +171,17 @@ CHANNEL_LAYERS = {
 }
 
 # Celery ---------------------------------------------------------------
+from celery.schedules import crontab  # noqa: E402
+
 CELERY_BROKER_URL = env("CELERY_BROKER_URL", default=REDIS_URL)
 CELERY_RESULT_BACKEND = env("CELERY_RESULT_BACKEND", default=REDIS_URL)
 CELERY_TASK_ACKS_LATE = True
 CELERY_TASK_REJECT_ON_WORKER_LOST = True
 CELERY_WORKER_PREFETCH_MULTIPLIER = 1
+# Daily-pipeline beat entries use crontab() with IST clock times — set the
+# Celery timezone so 09:15 means 09:15 IST, not UTC. Interval-based entries
+# (the float schedules below) are timezone-agnostic, so this is safe.
+CELERY_TIMEZONE = "Asia/Kolkata"
 CELERY_BEAT_SCHEDULE = {
     "process-order-outbox": {
         "task": "apps.trading.tasks.outbox.process_outbox",
@@ -208,6 +214,39 @@ CELERY_BEAT_SCHEDULE = {
     "refresh-auto-watchlists": {
         "task": "apps.notifications.tasks.watchlists.refresh_auto_watchlists",
         "schedule": 300.0,
+    },
+    # ── Daily trading pipeline ────────────────────────────────────────
+    # Three crontab tasks (IST) make AlphaDesk produce data on its own
+    # every trading day. Each task self-skips on weekends / NSE holidays
+    # via apps.market_data.services.market_calendar.is_trading_day, so
+    # firing Mon–Fri is enough.
+    #
+    # Premarket Oliver Kell swing scan — 08:20 IST.
+    "daily-swing-scan": {
+        "task": "apps.strategies.tasks.daily_pipeline.run_swing_scan",
+        "schedule": crontab(hour=8, minute=20, day_of_week="mon-fri"),
+    },
+    # Premarket morning basket — mood + signal scan — 08:45 IST.
+    "daily-premarket-basket": {
+        "task": "apps.strategies.tasks.daily_pipeline.run_premarket_basket",
+        "schedule": crontab(hour=8, minute=45, day_of_week="mon-fri"),
+    },
+    # Intraday live screener — starts at market open, runs to 15:30 IST.
+    "daily-screener-session": {
+        "task": "apps.strategies.tasks.daily_pipeline.run_screener_session",
+        "schedule": crontab(hour=9, minute=15, day_of_week="mon-fri"),
+    },
+    # EOD signal enrichment — 16:00 IST, after candles settle.
+    "daily-eod-enrichment": {
+        "task": "apps.strategies.tasks.daily_pipeline.run_eod_enrichment",
+        "schedule": crontab(hour=16, minute=0, day_of_week="mon-fri"),
+    },
+    # EOD trade derivation — 16:30 IST, replays the just-closed session into
+    # paper trades. No-op unless the operator opts in (auto_execute_enabled),
+    # so the pipeline stays scan-only by default.
+    "daily-derive-trades": {
+        "task": "apps.strategies.tasks.daily_pipeline.derive_intraday_trades",
+        "schedule": crontab(hour=16, minute=30, day_of_week="mon-fri"),
     },
 }
 
@@ -257,4 +296,12 @@ ALPHADESK = {
     "STRATEGY_REGISTRY_AUTOLOAD": True,
     "BROKER_REGISTRY_AUTOLOAD": True,
     "RAG_REGISTRY_AUTOLOAD": True,
+    # Explicit strategy registrations applied AFTER entry-point auto-load.
+    # Use this when a new plugin has been added to backend/plugins/ but
+    # `uv pip install -e .` hasn't been re-run in the dev venv yet — the
+    # entry-point isn't picked up by importlib.metadata until reinstall.
+    # Format: "import.path:ClassName"  (one or many)
+    "STRATEGY_REGISTRY_EXTRA": [
+        "plugins.strategy_vertical_spread.strategy:VerticalSpreadStrategy",
+    ],
 }

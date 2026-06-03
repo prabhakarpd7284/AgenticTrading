@@ -38,6 +38,23 @@ def is_kill_switch_on(tenant_id: Any = None) -> bool:
     return bool(_truthy(get_flag("kill_switch", tenant_id, default=False)))
 
 
+# Auto-derive intraday trades: OFF by default so the beat pipeline stays
+# scan-only (its documented invariant) until an operator opts in from the UI.
+AUTO_EXECUTE_KEY = "auto_execute_enabled"
+
+
+def is_auto_execute_enabled(tenant_id: Any = None) -> bool:
+    """True if the operator has opted into automatic daily trade derivation."""
+    return bool(_truthy(get_flag(AUTO_EXECUTE_KEY, tenant_id, default=False)))
+
+
+def set_flag(key: str, value: Any, tenant_id: Any) -> None:
+    """Upsert a SystemControl flag for a tenant. ``value`` is stored as JSON."""
+    SystemControl.objects.update_or_create(
+        tenant_id=tenant_id, key=key, defaults={"value": value},
+    )
+
+
 def _truthy(value: Any) -> bool:
     if isinstance(value, dict):
         return bool(value.get("paused") or value.get("enabled") or value.get("value"))

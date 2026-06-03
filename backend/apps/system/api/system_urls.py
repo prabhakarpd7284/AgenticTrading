@@ -7,6 +7,9 @@ once the legacy bridge is fully retired.
 """
 from django.urls import path
 
+from apps.system.api.pipeline_views import (
+    PipelineConfigView, PipelineStatusView, PipelineTriggerView,
+)
 from apps.trading.api import legacy_compat_views as _compat
 
 urlpatterns = [
@@ -14,4 +17,8 @@ urlpatterns = [
     path("",         _compat.system,     name="system-status"),
     path("pause/",   _compat.pause_ai,   name="system-pause"),
     path("resume/",  _compat.resume_ai,  name="system-resume"),
+    # Daily-pipeline debugger — status + manual trigger.
+    path("pipeline/",                 PipelineStatusView.as_view(),  name="pipeline-status"),
+    path("pipeline/config/",          PipelineConfigView.as_view(),  name="pipeline-config"),
+    path("pipeline/<str:task>/run/",  PipelineTriggerView.as_view(), name="pipeline-trigger"),
 ]

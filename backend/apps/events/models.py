@@ -57,6 +57,7 @@ class Event(TenantModel):
         TRADE_SL_HIT    = "trade.sl_hit"
         TRADE_TGT_HIT   = "trade.target_hit"
         TRADE_TRAILED   = "trade.trailed"
+        TRADE_FEEDBACK  = "trade.feedback"   # trader 👍/👎 + note on a derived trade
 
         # Straddle / options
         STRADDLE_OPENED     = "straddle.opened"

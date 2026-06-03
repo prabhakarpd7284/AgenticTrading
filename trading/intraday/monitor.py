@@ -249,7 +249,6 @@ class IntradayMonitor:
 
             # Journal the rejection as a v2 Trade row.
             try:
-                from datetime import date as _date
                 if _tenant and _portfolio:
                     Trade.objects.create(
                         tenant=_tenant,
@@ -266,7 +265,7 @@ class IntradayMonitor:
                         risk_approved=False,
                         risk_reason=reason[:255],
                         origin=Trade.Origin.WORKFLOW,
-                        trade_date=_date.today(),
+                        trade_date=self._trade_date(),
                     )
             except Exception as e:
                 logger.warning(f"Failed to journal rejected trade for {signal.symbol}: {e}")
@@ -297,7 +296,6 @@ class IntradayMonitor:
         # 3. Journal the trade as a v2 Trade row.
         status = Trade.Status.FILLED if exec_result.get("success") else Trade.Status.APPROVED
         try:
-            from datetime import date as _date
             if _tenant and _portfolio:
                 Trade.objects.create(
                     tenant=_tenant,
@@ -314,7 +312,7 @@ class IntradayMonitor:
                     risk_approved=True,
                     risk_reason="Approved by risk engine",
                     origin=Trade.Origin.WORKFLOW,
-                    trade_date=_date.today(),
+                    trade_date=self._trade_date(),
                 )
         except Exception as e:
             logger.error(f"  Journal failed: {e}")
@@ -368,6 +366,21 @@ class IntradayMonitor:
             "execution": exec_result,
             "signal": signal,
         }
+
+    def _trade_date(self) -> date:
+        """The date a derived Trade row should be stamped with.
+
+        Live runs set ``state.trading_date`` to today, so this is a no-op
+        there. The replay engine sets it to a historical date so backfilled
+        trades land on the day they actually occurred (not today).
+        """
+        td = self.state.trading_date
+        if td:
+            try:
+                return date.fromisoformat(td[:10])
+            except ValueError:
+                pass
+        return date.today()
 
     def _calc_position_size(self, signal: IntradaySignal) -> int:
         """

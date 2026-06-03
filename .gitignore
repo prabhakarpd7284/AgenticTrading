@@ -47,3 +47,10 @@ infra/*
 .DS_Store
 .vscode/
 .idea/
+
+# Runtime / log artifacts (not source)
+backend/celerybeat-schedule.db
+celerybeat-schedule*
+*.log
+backend/fyersApi.log
+backend/fyersRequests.log

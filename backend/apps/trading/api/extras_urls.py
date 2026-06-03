@@ -10,12 +10,16 @@ URL.
 from django.urls import path
 
 from apps.trading.api import legacy_compat_views as views
+from apps.trading.api.trade_detail_views import TradeChartView, TradeFeedbackView
 
 urlpatterns = [
     # /api/v1/positions/  — computed equity + options position overview.
     path("positions/",          views.positions, name="trading-positions"),
     # /api/v1/trades/      — Trade rows (was /legacy/trades/).
     path("trades/",             views.trades,    name="trading-trades"),
+    # Per-trade chart + feedback (Monthly trade table "View chart" action).
+    path("trades/<uuid:trade_id>/chart/",    TradeChartView.as_view(),    name="trade-chart"),
+    path("trades/<uuid:trade_id>/feedback/", TradeFeedbackView.as_view(), name="trade-feedback"),
     # /api/v1/options-positions/  — OptionsPosition rows + nested legs.
     path("options-positions/",  views.straddles, name="trading-options-positions"),
     # /api/v1/risk/        — capital utilisation + daily-loss caps.
