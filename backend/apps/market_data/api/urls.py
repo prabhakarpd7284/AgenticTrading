@@ -1,4 +1,6 @@
 from django.urls import path
+from apps.market_data.api.expiries_view import ExpiriesView
+from apps.market_data.api.options_chain_view import OptionsChainView
 from apps.market_data.api.views import (
     BasketView,
     CandleView,
@@ -23,4 +25,8 @@ urlpatterns = [
     path("ok-backtest/",    OKBacktestView.as_view(),     name="ok-backtest"),
     path("basket/",         BasketView.as_view(),         name="basket-status"),
     path("pyramid/",        PyramidView.as_view(),        name="pyramid"),
+    # Options chain — broker-neutral, falls back to paper-synth when no link.
+    path("options-chain/",  OptionsChainView.as_view(),   name="options-chain"),
+    # Options expiries — enumerates weekly/monthly series for an underlying.
+    path("expiries/",       ExpiriesView.as_view(),       name="options-expiries"),
 ]

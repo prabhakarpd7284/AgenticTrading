@@ -45,6 +45,11 @@ class Command(BaseCommand):
         parser.add_argument("--backtest", action="store_true", help="Run backtest instead of live")
         parser.add_argument("--from", dest="from_date", help="Backtest start date (YYYY-MM-DD)")
         parser.add_argument("--to", dest="to_date", help="Backtest end date (YYYY-MM-DD)")
+        parser.add_argument(
+            "--persist-signals", action="store_true",
+            help="Backtest only: write every fired signal to apps.strategies.Signal "
+                 "(populates the monthly capture matrix / signal audit / rejections).",
+        )
 
         # Symbols
         parser.add_argument("--symbols", help="Comma-separated symbols")
@@ -130,7 +135,10 @@ class Command(BaseCommand):
         self.stdout.write(f"\nBacktest (v2 engine): {len(symbols)} symbols, {from_date} → {to_date}\n")
         self.stdout.write(f"Strategies: {len(strategies)}\n")
 
-        stats = run_screener_backtest(symbols, from_date, to_date, strategies)
+        stats = run_screener_backtest(
+            symbols, from_date, to_date, strategies,
+            persist_signals=options.get("persist_signals", False),
+        )
         fmt = ReportFormatter("Screener Backtest", PnLMode.POINTS)
         self.stdout.write(f"\n{fmt.cli_summary(stats, {'from_date': from_date, 'to_date': to_date})}\n")
 
@@ -139,39 +147,26 @@ class Command(BaseCommand):
             from plugins.strategy_screener.telegram import TelegramAlertService
             telegram = TelegramAlertService()
             if telegram.is_configured:
-                # Build Telegram-friendly summary
+                pf = "∞" if stats.profit_factor == float("inf") else f"{stats.profit_factor:.2f}"
                 lines = [
                     f"📊 *Backtest Results*",
                     f"_{from_date} → {to_date} | {len(symbols)} symbols_\n",
-                    f"Signals: {result.total_signals}",
-                    f"Trades: {len(result.trades)}",
-                    f"Win Rate: *{result.win_rate:.0%}* ({result.winning_trades}W / {result.losing_trades}L)",
-                    f"Total P&L: *{result.total_pnl:+.1f} pts*",
-                    f"Profit Factor: *{result.profit_factor:.2f}*",
-                    f"Avg R:R: {result.avg_rr_achieved:.2f}",
-                    f"Max DD: {result.max_drawdown:.1f} pts\n",
+                    f"Signals: {stats.total_signals}",
+                    f"Trades: {stats.total_trades}",
+                    f"Win Rate: *{stats.win_rate:.0%}* ({stats.winners}W / {stats.losers}L)",
+                    f"Total P&L: *{stats.total_pnl:+.1f} pts*",
+                    f"Profit Factor: *{pf}*",
+                    f"Avg R:R: {stats.avg_rr:.2f}",
+                    f"Max DD: {stats.max_drawdown:.1f} pts\n",
                 ]
-                if result.per_strategy:
+                if stats.per_phase:
                     lines.append("*Per Strategy:*")
-                    for name, stats in result.per_strategy.items():
-                        emoji = "✅" if stats['pnl'] > 0 else "❌"
+                    for name, ps in stats.per_phase.items():
+                        emoji = "✅" if ps.pnl > 0 else "❌"
                         lines.append(
-                            f"{emoji} {name}: {stats['trades']}T "
-                            f"{stats['win_rate']:.0%}W "
-                            f"`{stats['pnl']:+.1f}` pts"
-                        )
-
-                # Top trades
-                if result.trades:
-                    lines.append("\n*Top Trades:*")
-                    sorted_trades = sorted(result.trades, key=lambda t: t.pnl, reverse=True)
-                    for t in sorted_trades[:5]:
-                        arrow = "🟢" if t.pnl > 0 else "🔴"
-                        lines.append(
-                            f"{arrow} {t.signal.symbol} {t.signal.strategy}\n"
-                            f"   {t.signal.side} `{t.signal.entry:.2f}` → "
-                            f"`{t.exit_price:.2f}` ({t.exit_reason}) "
-                            f"*{t.pnl:+.1f}*"
+                            f"{emoji} {name}: {ps.trades}T "
+                            f"{ps.win_rate:.0%}W "
+                            f"`{ps.pnl:+.1f}` pts"
                         )
 
                 msg = "\n".join(lines)

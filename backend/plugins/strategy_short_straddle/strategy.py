@@ -40,14 +40,14 @@ class ShortStraddleStrategy:
         from langgraph.graph import StateGraph, END
 
         async def fetch_market(state: dict) -> dict:
-            seq = _next(state)
+            seq = _next(state, ctx.publisher)
             state["vix"] = 14.5  # placeholder
             ctx.publisher.emit(AgentEvent(seq=seq, node="fetch_market_data", type="info",
                                           payload={"vix": state["vix"]}))
             return state
 
         async def analyze(state: dict) -> dict:
-            seq = _next(state)
+            seq = _next(state, ctx.publisher)
             state["analysis"] = {
                 "pnl": 0, "delta": 0.05, "phase": "theta_decay",
                 "scenarios": {"up_1pct": 0, "down_1pct": 0},
@@ -57,14 +57,14 @@ class ShortStraddleStrategy:
             return state
 
         async def generate(state: dict) -> dict:
-            seq = _next(state)
+            seq = _next(state, ctx.publisher)
             state["action"] = {"action": "HOLD", "reason": "Delta flat, IV crushing."}
             ctx.publisher.emit(AgentEvent(seq=seq, node="generate_action", type="result",
                                           payload=state["action"]))
             return state
 
         async def validate(state: dict) -> dict:
-            seq = _next(state)
+            seq = _next(state, ctx.publisher)
             d = ctx.risk.validate({"portfolio_id": ctx.portfolio_id,
                                     "symbol": "STRADDLE", "side": state["action"]["action"],
                                     "qty": 1})
@@ -75,14 +75,14 @@ class ShortStraddleStrategy:
             return state
 
         async def execute(state: dict) -> dict:
-            seq = _next(state)
+            seq = _next(state, ctx.publisher)
             state["executed"] = True
             ctx.publisher.emit(AgentEvent(seq=seq, node="execute_action", type="result",
                                           payload={"executed": True}))
             return state
 
         async def journal_step(state: dict) -> dict:
-            seq = _next(state)
+            seq = _next(state, ctx.publisher)
             ctx.journal.record({
                 "kind": "adjustment",
                 "title": f"Straddle {state['action']['action']}",
@@ -115,7 +115,13 @@ class ShortStraddleStrategy:
         return g.compile()
 
 
-def _next(state: dict) -> int:
+def _next(state: dict, publisher=None) -> int:
+    # Prefer the run-level publisher's monotonic counter so plugin seqs
+    # never collide with the run's bookend events on the (run, seq) unique
+    # constraint. See plugins/strategy_vertical_spread/strategy.py for the
+    # postmortem on this bug — same one-line fix applied here defensively.
+    if publisher is not None and hasattr(publisher, "next_seq"):
+        return publisher.next_seq()
     state["_seq"] = state.get("_seq", 0) + 1
     return state["_seq"]
 

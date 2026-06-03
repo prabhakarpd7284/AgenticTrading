@@ -47,6 +47,11 @@ dependencies = [
     "smartapi-python>=1.5.5",
     "websocket-client>=1.5",   # smartapi-python's optional dep, but its
                                # SmartConnect import requires it at runtime.
+    # Multi-broker support — plugins/broker_zerodha + plugins/broker_fyers.
+    # Pinned loosely; both SDKs are read-only here (positions, holdings,
+    # funds) so minor-version drift is low-risk.
+    "kiteconnect>=3.9",
+    "fyers-apiv3>=3.1",
     "python-dotenv>=1.0",
     "mplfinance>=0.12.10b0",
     "matplotlib>=3.7",
@@ -74,9 +79,11 @@ dev = [
 [project.entry-points."alphadesk.strategies"]
 directional = "plugins.strategy_directional.strategy:DirectionalStrategy"
 short_straddle = "plugins.strategy_short_straddle.strategy:ShortStraddleStrategy"
+vertical_spread = "plugins.strategy_vertical_spread.strategy:VerticalSpreadStrategy"
 pyramid = "plugins.strategy_pyramid:PyramidStrategy"
 intraday_screener = "plugins.strategy_screener:ScreenerStrategy"
 swing_scanner = "plugins.strategy_swing:SwingScannerStrategy"
+swing_scanner_v2 = "plugins.strategy_swing.v2.plugin:SwingScannerV2Strategy"
 premarket_basket = "plugins.strategy_basket:PremarketBasketStrategy"
 backtest = "plugins.strategy_backtest:BacktestStrategy"
 
@@ -88,6 +95,7 @@ news = "apps.rag.retrievers.news:NewsRetriever"
 [project.entry-points."alphadesk.brokers"]
 angel_one = "plugins.broker_angel.adapter:AngelOneAdapter"
 zerodha = "plugins.broker_zerodha.adapter:ZerodhaAdapter"
+fyers = "plugins.broker_fyers.adapter:FyersAdapter"
 paper = "apps.market_data.adapters.paper:PaperBrokerAdapter"
 
 [tool.setuptools.packages.find]

@@ -43,3 +43,50 @@ class TraderNote(TenantModel):
 
     def __str__(self) -> str:
         return f"Note: {self.symbol} ({len(self.note)} chars)"
+
+
+class PipelineRun(models.Model):
+    """One execution record for a daily-pipeline Celery task.
+
+    The daily pipeline (swing scan / screener session / EOD enrichment)
+    runs unattended via Celery beat. This table is its audit log — every
+    run, beat-triggered or manual, writes a row so the /pipeline debugger
+    page can show what ran, when, how it ended, and what it produced.
+
+    Not tenant-scoped: the pipeline is a process-wide system operation
+    (the screener resolves a default tenant for signal persistence), so
+    this is a plain Model like ``market_data.Symbol`` / ``Candle``.
+    """
+
+    class Task(models.TextChoices):
+        SWING_SCAN = "swing_scan", "Swing scan"
+        SCREENER_SESSION = "screener_session", "Screener session"
+        EOD_ENRICHMENT = "eod_enrichment", "EOD enrichment"
+
+    class Status(models.TextChoices):
+        RUNNING = "running"
+        SUCCESS = "success"
+        FAILED = "failed"
+
+    class Trigger(models.TextChoices):
+        BEAT = "beat"        # fired by the Celery beat schedule
+        MANUAL = "manual"    # fired from the /pipeline debugger UI
+
+    id = models.BigAutoField(primary_key=True)
+    task = models.CharField(max_length=32, choices=Task.choices, db_index=True)
+    status = models.CharField(max_length=12, choices=Status.choices,
+                               default=Status.RUNNING)
+    trigger = models.CharField(max_length=12, choices=Trigger.choices,
+                                default=Trigger.BEAT)
+    started_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    summary = models.JSONField(default=dict, blank=True,
+                                help_text="Task result payload (counts, stats).")
+    error = models.TextField(blank=True, default="")
+
+    class Meta:
+        ordering = ["-started_at"]
+        indexes = [models.Index(fields=["task", "-started_at"])]
+
+    def __str__(self) -> str:
+        return f"{self.task} [{self.status}] @ {self.started_at:%Y-%m-%d %H:%M}"

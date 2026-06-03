@@ -2,8 +2,8 @@ import * as React from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import {
   Activity, BarChart3, Bot, Briefcase, Calendar, Gauge, Layers, Link2, LineChart,
-  ListChecks, LogOut, Moon, Radio, Search, Settings, ShoppingBag, Sun, Terminal,
-  TrendingUp, Triangle,
+  ListChecks, LogOut, Moon, Radio, Search, Settings, ShoppingBag, Sigma, Sun,
+  Terminal, TrendingUp, Triangle, Workflow,
 } from "lucide-react";
 import { useAuthStore } from "@/stores/auth";
 import { cn } from "@/lib/utils";
@@ -21,6 +21,7 @@ const nav = [
   { to: "/basket",     label: "Basket",       icon: ShoppingBag, hint: "g x" },
   { to: "/dashboard",  label: "Desk",         icon: Activity,   hint: "g d" },
   { to: "/positions",  label: "Positions",    icon: Briefcase, hint: "g p" },
+  { to: "/options",    label: "Options Desk", icon: Sigma,     hint: "g e" },
   { to: "/monthly",    label: "Monthly",      icon: Calendar,  hint: "g m" },
   { to: "/agents",     label: "Agent Console",icon: Bot,       hint: "g a" },
   { to: "/strategies", label: "Strategies",   icon: LineChart, hint: "g s" },
@@ -29,6 +30,7 @@ const nav = [
   { to: "/brokers",    label: "Broker Link",  icon: Link2,     hint: "g k" },
   { to: "/tradingview",label: "TradingView",  icon: Radio,     hint: "g v" },
   { to: "/ops",        label: "Ops Console",  icon: Terminal,  hint: "g o" },
+  { to: "/pipeline",   label: "Daily Pipeline", icon: Workflow, hint: "g i" },
 ];
 
 type LiveStatus = "connecting" | "live" | "offline";

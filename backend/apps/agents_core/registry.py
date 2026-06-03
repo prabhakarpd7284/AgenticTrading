@@ -52,7 +52,18 @@ class PluginRegistry(Generic[T]):
         for ep in eps:
             try:
                 obj = ep.load()
-                instance = obj() if callable(obj) else obj
+                # Some adapters require constructor arguments (e.g. credentials
+                # for multi-account broker adapters). Those are resolved lazily
+                # by the per-domain factory, not by this registry — skip them
+                # silently here rather than logging a load_failed error.
+                if callable(obj):
+                    try:
+                        instance = obj()
+                    except TypeError:
+                        self.register(ep.name, obj)  # class itself
+                        continue
+                else:
+                    instance = obj
                 self.register(ep.name, instance)
             except Exception:  # noqa: BLE001
                 log.exception("plugin.load_failed", group=self._group, name=ep.name)

@@ -320,6 +320,272 @@ export function useResumeAi() {
 }
 
 /* ================================================================== */
+/* Options chain + agent run trigger                                    */
+/* ================================================================== */
+
+export interface OptionQuote {
+  token: string;
+  symbol: string;
+  strike: number;
+  opt: "CE" | "PE";
+  ltp: number;
+  bid: number;
+  ask: number;
+  bid_qty: number;
+  ask_qty: number;
+  volume: number;
+  oi: number;
+  oi_change: number;
+  iv: number;
+  delta: number;
+  gamma: number;
+  theta: number;
+  vega: number;
+  mid: number;
+  spread_bps: number;
+}
+
+export interface OptionsChainRow {
+  strike: number;
+  ce: OptionQuote | null;
+  pe: OptionQuote | null;
+}
+
+export interface AttemptedSource {
+  name: string;            // "angel_one" | "fyers" | "zerodha" | "paper"
+  ok: boolean;
+  error?: string;
+}
+
+export interface OptionsChainSnapshot {
+  underlying: string;
+  spot: number;
+  expiry: string;
+  fetched_at: string | null;
+  source: string;
+  vix: number | null;
+  pcr_oi: number | null;
+  pcr_volume: number | null;
+  atm_strike: number | null;
+  rows: OptionsChainRow[];
+  /** Audit trail of which adapters were tried, in order. The last `ok=true`
+   *  entry is the actual data source. */
+  attempted_sources: AttemptedSource[];
+  /** True when no live broker chain was available and the response is
+   *  synthesised by the PaperBrokerAdapter. Drives the "Connect a broker"
+   *  call-to-action on the Options Desk. */
+  is_fallback?: boolean;
+}
+
+export interface ExpiryRow {
+  expiry: string;          // canonical DDMMMYYYY, e.g. "28MAY2026"
+  dte: number;             // days to expiry, 0 on expiry day
+  is_weekly: boolean;
+  is_monthly: boolean;
+  weekday: string;         // "Tuesday" / "Thursday" / etc
+}
+
+export interface ExpiriesPayload {
+  underlying: string;
+  count: number;
+  expiries: ExpiryRow[];
+}
+
+export function useExpiries(underlying: string, limit = 20, enabled = true) {
+  return useQuery({
+    queryKey: ["expiries", underlying, limit],
+    queryFn: () =>
+      api.get<ExpiriesPayload>(`/market-data/expiries/?underlying=${encodeURIComponent(underlying)}&limit=${limit}`)
+        .then((r) => r.data),
+    enabled,
+    staleTime: 5 * 60_000,   // master refreshes daily; cache for 5min
+  });
+}
+
+export function useOptionsChain(params?: {
+  underlying?: string;
+  expiry?: string;
+  strikes_window?: number;
+  source?: "broker" | "paper";
+  enabled?: boolean;
+}) {
+  const q = new URLSearchParams();
+  q.set("underlying", params?.underlying ?? "NIFTY");
+  if (params?.expiry) q.set("expiry", params.expiry);
+  if (params?.strikes_window) q.set("strikes_window", String(params.strikes_window));
+  if (params?.source) q.set("source", params.source);
+  return useQuery({
+    queryKey: ["options-chain", q.toString()],
+    queryFn: () =>
+      api.get<OptionsChainSnapshot>(`/market-data/options-chain/?${q.toString()}`)
+        .then((r) => r.data),
+    enabled: params?.enabled ?? true,
+    refetchInterval: 30_000,
+    staleTime: 15_000,
+  });
+}
+
+export interface AgentRunCreatePayload {
+  strategy_name: string;
+  portfolio: string;
+  config: Record<string, unknown>;
+}
+
+export interface AgentRunRow {
+  id: string;
+  strategy_name: string;
+  strategy_version: string;
+  status: string;
+  config: Record<string, unknown>;
+  result: Record<string, unknown> | null;
+  error: string;
+  created_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+}
+
+export function useStartAgentRun() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: AgentRunCreatePayload) =>
+      api.post<AgentRunRow>("/agents/runs/", payload).then((r) => r.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["agent-runs"] });
+      qc.invalidateQueries({ queryKey: ["audit"] });
+    },
+  });
+}
+
+/** Mirror of apps.trading.models.Portfolio. No `is_default` flag exists
+ *  in the schema — pick the first portfolio (the default created at
+ *  onboarding) or one matching the requested `mode`. */
+export interface PortfolioRow {
+  id: string;
+  name: string;
+  capital: number;
+  used_capital: number;
+  realized_pnl: number;
+  day_pnl: number;
+  mode: "paper" | "live";
+  broker_link: string | null;
+}
+
+export function usePortfolios() {
+  return useQuery({
+    queryKey: ["portfolios"],
+    /* Axios response interceptor (lib/api.ts) already unwraps DRF's
+     * paginated envelope `{results: [...]}` into a plain array, so the
+     * shape here is always `PortfolioRow[]`. */
+    queryFn: () =>
+      api.get<PortfolioRow[]>("/portfolios/").then((r) =>
+        Array.isArray(r.data) ? r.data : [],
+      ),
+    staleTime: 60_000,
+  });
+}
+
+/** Pick the portfolio to use for a new trade. Strategy:
+ *   1. prefer paper-mode portfolio (default for new traders)
+ *   2. fall back to the first portfolio
+ *   3. return null if none exist
+ */
+export function pickDefaultPortfolio(
+  portfolios: PortfolioRow[] | undefined,
+  prefer: "paper" | "live" = "paper",
+): PortfolioRow | null {
+  if (!portfolios || portfolios.length === 0) return null;
+  return portfolios.find((p) => p.mode === prefer) ?? portfolios[0];
+}
+
+export interface BrokerLinkRow {
+  id: string;
+  broker_name: string;     // "angel_one" | "zerodha" | "fyers"
+  display_name: string;
+  is_default: boolean;
+  status: "active" | "expired" | "disabled" | "errored";
+  last_refreshed_at: string | null;
+  last_error: string;
+  credential_meta?: Record<string, unknown>;
+}
+
+export function useBrokerLinks() {
+  return useQuery({
+    queryKey: ["broker-links"],
+    queryFn: () =>
+      api.get<BrokerLinkRow[]>("/brokers/").then((r) =>
+        Array.isArray(r.data) ? r.data : [],
+      ),
+    staleTime: 60_000,
+  });
+}
+
+/** Parse a DRF error payload into a human-readable string + per-field map.
+ *
+ * Handles every shape we see from `/agents/runs/` POST:
+ *   - `"detail"` (string)
+ *   - `{"field": ["msg", ...]}` (validation errors)
+ *   - `{"config": [{"path": [...], "message": "..."}]}` (JSONSchema validator)
+ *   - bare string body
+ *   - axios network/timeout errors (no response)
+ *
+ * Returns `{message, fields}` where `message` is always non-empty and
+ * `fields` maps `dotted.path` → `array of human-readable strings`.
+ */
+export function parseDrfError(
+  err: unknown,
+): { message: string; fields: Record<string, string[]> } {
+  // Network / timeout — axios put the error on err.message
+  const ax = err as { response?: { data?: unknown; status?: number }; message?: string; code?: string };
+  if (ax.code === "ERR_NETWORK") {
+    return { message: "Network error — backend unreachable", fields: {} };
+  }
+  if (ax.code === "ECONNABORTED") {
+    return { message: "Request timed out", fields: {} };
+  }
+  const body = ax.response?.data;
+  if (body == null) {
+    return { message: ax.message ?? "Unknown error", fields: {} };
+  }
+  if (typeof body === "string") {
+    return { message: body, fields: {} };
+  }
+  if (typeof body !== "object") {
+    return { message: String(body), fields: {} };
+  }
+  const obj = body as Record<string, unknown>;
+  // Plain DRF `{"detail": "..."}` envelope
+  if (typeof obj.detail === "string") {
+    return { message: obj.detail, fields: {} };
+  }
+  // JSONSchema-validator envelope: {"config": [{path:[], message:""}, ...]}
+  const fields: Record<string, string[]> = {};
+  const messages: string[] = [];
+  for (const [k, v] of Object.entries(obj)) {
+    if (Array.isArray(v)) {
+      for (const item of v) {
+        if (typeof item === "string") {
+          fields[k] = [...(fields[k] ?? []), item];
+          messages.push(`${k}: ${item}`);
+        } else if (item && typeof item === "object") {
+          const ent = item as { path?: unknown[]; message?: string };
+          const path = [k, ...(ent.path ?? [])].filter(Boolean).join(".");
+          const msg = ent.message ?? JSON.stringify(item);
+          fields[path] = [...(fields[path] ?? []), msg];
+          messages.push(`${path}: ${msg}`);
+        }
+      }
+    } else if (typeof v === "string") {
+      fields[k] = [v];
+      messages.push(`${k}: ${v}`);
+    }
+  }
+  return {
+    message: messages.length ? messages.join(" · ") : "Request rejected",
+    fields,
+  };
+}
+
+/* ================================================================== */
 /* TradingView webhook integration                                     */
 /* ================================================================== */
 

@@ -21,6 +21,42 @@ load_dotenv()
 # ──────────────────────────────────────────────
 # Symbol master
 # ──────────────────────────────────────────────
+# ──────────────────────────────────────────────
+# Cross-process throttle plumbing
+# ──────────────────────────────────────────────
+# Lazily-resolved Redis client used by BrokerClient._cross_process_throttle.
+# Cached per-process so we don't re-pay the connection setup on every
+# SmartAPI call. ``None`` means we tried and Redis isn't reachable — the
+# throttle then falls back to in-process only (correct in a single-worker
+# dev setup, degraded but not broken in prod if Redis is down).
+_THROTTLE_REDIS_CLIENT: Any = None
+_THROTTLE_REDIS_PROBED: bool = False
+
+
+def _get_redis_for_throttle():
+    """Return a redis.Redis client for the universal throttle, or None.
+
+    Uses REDIS_URL (same as Celery / Channels), so no separate config.
+    Imported lazily so test environments without redis-py installed
+    aren't forced to install it just to import this module.
+    """
+    global _THROTTLE_REDIS_CLIENT, _THROTTLE_REDIS_PROBED
+    if _THROTTLE_REDIS_PROBED:
+        return _THROTTLE_REDIS_CLIENT
+    _THROTTLE_REDIS_PROBED = True
+    try:
+        import redis  # type: ignore
+        url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+        client = redis.Redis.from_url(url, socket_timeout=2)
+        # Cheap liveness probe so we fail-fast on a misconfig.
+        client.ping()
+        _THROTTLE_REDIS_CLIENT = client
+    except Exception as e:
+        logger.warning("smartapi.throttle.redis_unavailable: %s", e)
+        _THROTTLE_REDIS_CLIENT = None
+    return _THROTTLE_REDIS_CLIENT
+
+
 def load_symbol_master(file_path: str) -> list:
     """
     Load Angel One OpenAPI scrip master JSON.
@@ -131,8 +167,39 @@ class BrokerClient:
         # Login lock
         self._login_lock = threading.Lock()
 
+    # Lua: atomically read the recorded last-call timestamp (ms), compute
+    # how long we still need to wait, and overwrite the slot with our
+    # claim. KEYS[1] = redis key, ARGV[1] = min gap in ms, ARGV[2] = now ms.
+    # Returns the number of ms to sleep before the call is allowed (0 if
+    # the slot is free immediately).
+    _LUA_THROTTLE = """
+        local last = tonumber(redis.call('GET', KEYS[1]) or '0')
+        local gap = tonumber(ARGV[1])
+        local now = tonumber(ARGV[2])
+        local next_slot = last + gap
+        local wait_ms
+        if next_slot <= now then
+            wait_ms = 0
+            redis.call('SET', KEYS[1], now, 'PX', 60000)
+        else
+            wait_ms = next_slot - now
+            redis.call('SET', KEYS[1], next_slot, 'PX', 60000)
+        end
+        return wait_ms
+    """
+    _REDIS_THROTTLE_KEY = "alphadesk:smartapi:throttle:last_call_ms"
+
     def _throttle(self):
-        """Enforce minimum interval between API calls (thread-safe)."""
+        """Enforce min interval between SmartAPI calls — process-wide
+        AND cross-process when Redis is available.
+
+        The in-process lock keeps the local fast-path correct (Daphne /
+        celery worker / management command all in one process). Redis
+        adds cross-process coordination so multiple Celery workers, plus
+        the Daphne process, plus the legacy CLI scripts all share the
+        same queue. Falls back gracefully to local-only when Redis is
+        unreachable.
+        """
         with self._rate_lock:
             now = time.monotonic()
             elapsed = now - self._last_call_time
@@ -140,6 +207,33 @@ class BrokerClient:
                 time.sleep(self._min_interval - elapsed)
             self._last_call_time = time.monotonic()
             self._call_count += 1
+        self._cross_process_throttle()
+
+    def _cross_process_throttle(self) -> None:
+        """Sleep until our turn in the Redis-coordinated slot queue."""
+        try:
+            r = _get_redis_for_throttle()
+        except Exception:
+            return  # Redis unavailable — local throttle was the best we could do.
+        if r is None:
+            return
+        try:
+            wait_ms = r.eval(
+                self._LUA_THROTTLE, 1,
+                self._REDIS_THROTTLE_KEY,
+                int(self._min_interval * 1000),
+                int(time.time() * 1000),
+            )
+            wait_ms = int(wait_ms or 0)
+        except Exception:
+            return
+        if wait_ms > 0:
+            time.sleep(wait_ms / 1000.0)
+
+    # Public alias — the v2 multi-tenant AngelOneAdapter uses this to
+    # share the 0.4s gap with every other SmartAPI call in the process,
+    # so multiple linked accounts can't race past Angel's rate limit.
+    throttle = _throttle
 
     def login(self) -> bool:
         """Authenticate with Angel One (thread-safe, idempotent)."""

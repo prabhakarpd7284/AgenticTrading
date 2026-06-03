@@ -204,13 +204,21 @@ def run_screener_backtest(
     to_date: str,
     strategies=None,
     slippage_pct: float = 0.05,
+    persist_signals: bool = False,
 ) -> BacktestStats:
     """Drop-in replacement for trading.screener.backtest.run_backtest().
 
     Uses the old screener engine for signal generation (tick replay
     through ScreenerEngine), but the new BacktestEngine for trade
     simulation (exits, P&L, stats).
+
+    ``persist_signals=True`` writes every fired signal to
+    ``apps.strategies.Signal`` so the monthly capture-matrix / signal-audit
+    sections can reflect the backtest. Off by default — backtests for ad-hoc
+    parameter sweeps shouldn't pollute the canonical ledger.
     """
+    import logging
+    log = logging.getLogger(__name__)
     from plugins.strategy_screener.backtest import run_backtest as _old_replay
     from plugins.strategy_screener.backtest import BacktestResult as OldResult
 
@@ -218,6 +226,20 @@ def run_screener_backtest(
     # (the screener's tick-by-tick replay + strategy evaluation is
     # tightly coupled and not worth reimplementing)
     old_result = _old_replay(symbols, from_date, to_date, strategies, slippage_pct)
+
+    if persist_signals:
+        persisted = errored = 0
+        for trade in old_result.trades:
+            try:
+                trade.signal.persist("SCREENER")
+                persisted += 1
+            except Exception as e:
+                errored += 1
+                log.warning(f"signal persist failed: {e}")
+        log.info(
+            f"screener backtest: persisted {persisted}/{len(old_result.trades)} signals to "
+            f"apps.strategies.Signal (errors={errored})"
+        )
 
     # Step 2: Convert old BacktestTrade results to unified BacktestStats
     # The old result already simulated trades with its own exit logic,

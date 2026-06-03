@@ -9,6 +9,10 @@ export default defineConfig({
     alias: { "@": path.resolve(__dirname, "src") },
   },
   server: {
+    // Bind both IPv4 and IPv6 so http://127.0.0.1:5173 works (browser OAuth
+    // redirects from broker portals use the literal 127.0.0.1 — IPv6-only
+    // binding returns ERR_CONNECTION_REFUSED for them).
+    host: "0.0.0.0",
     port: 5173,
     proxy: {
       // Phase 6 folded the legacy bridge into the v2 process on :8000 —

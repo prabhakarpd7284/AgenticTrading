@@ -41,14 +41,14 @@ class DirectionalStrategy:
         from langgraph.graph import StateGraph, END
 
         async def fetch(state: dict) -> dict:
-            seq = _next(state)
+            seq = _next(state, ctx.publisher)
             ctx.publisher.emit(AgentEvent(seq=seq, node="fetch_data", type="info",
                                           payload={"universe": state["config"].get("universe")}))
             state["ltp"] = ctx.market_data.ltp("NIFTY")
             return state
 
         async def retrieve(state: dict) -> dict:
-            seq = _next(state)
+            seq = _next(state, ctx.publisher)
             docs = ctx.rag.retrieve(RetrievalQuery(text="recent drawdowns"), k=5)
             state["context"] = [d.model_dump() for d in docs]
             ctx.publisher.emit(AgentEvent(seq=seq, node="retrieve_context", type="state",
@@ -56,7 +56,7 @@ class DirectionalStrategy:
             return state
 
         async def planner(state: dict) -> dict:
-            seq = _next(state)
+            seq = _next(state, ctx.publisher)
             # Placeholder: call the LLM here. Shipping without a network call in dev.
             state["plan"] = {
                 "symbol": "HDFCBANK", "side": "BUY", "qty": 10,
@@ -68,7 +68,7 @@ class DirectionalStrategy:
             return state
 
         async def risk(state: dict) -> dict:
-            seq = _next(state)
+            seq = _next(state, ctx.publisher)
             d = ctx.risk.validate({"portfolio_id": ctx.portfolio_id, **state["plan"]})
             state["risk"] = d.model_dump()
             ctx.publisher.emit(AgentEvent(seq=seq, node="risk",
@@ -77,7 +77,7 @@ class DirectionalStrategy:
             return state
 
         async def journal_step(state: dict) -> dict:
-            seq = _next(state)
+            seq = _next(state, ctx.publisher)
             ctx.journal.record({
                 "kind": "plan",
                 "title": "Directional plan",
@@ -105,7 +105,11 @@ class DirectionalStrategy:
         return g.compile()
 
 
-def _next(state: dict) -> int:
+def _next(state: dict, publisher=None) -> int:
+    # Prefer the publisher's authoritative counter so plugin seqs don't
+    # collide with the run's init/error events (which also use publisher.next_seq).
+    if publisher is not None and hasattr(publisher, "next_seq"):
+        return publisher.next_seq()
     state["_seq"] = state.get("_seq", 0) + 1
     return state["_seq"]
 

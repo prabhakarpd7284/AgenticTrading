@@ -120,6 +120,48 @@ class DefaultMarketData:
             log.warning("candles broker fallback failed for %s: %s", symbol, exc)
             return []
 
-    def options_chain(self, underlying: str, expiry: str) -> dict:
-        # Placeholder — real impl queries broker / NSE
-        return {"underlying": underlying, "expiry": expiry, "strikes": []}
+    def options_chain(self, underlying: str, expiry: str | None = None,
+                       strikes_window: int = 20):
+        """Return an OptionsChainSnapshot for the underlying.
+
+        Selection of the data source mirrors the OptionsChainView API:
+          1. Use the tenant's default active BrokerLink if one exists.
+          2. Fall back to PaperBrokerAdapter so strategies always get *some*
+             chain (synthesised via BSM + put-skew) rather than crashing on
+             a missing broker.
+
+        Strategies that consume this via `ctx.market_data.options_chain(...)`
+        get the same shape regardless of source — only the `.source` field
+        and the realism of the prices differ.
+        """
+        from apps.market_data.adapters.factory import build_adapter
+        from apps.market_data.adapters.paper import PaperBrokerAdapter
+        from apps.market_data.models import BrokerLink
+
+        link = (
+            BrokerLink.objects
+            .filter(tenant_id=self.tenant_id, status="active")
+            .order_by("-is_default", "-last_refreshed_at", "-created_at")
+            .first()
+        )
+        snapshot = None
+        if link is not None:
+            adapter = build_adapter(link)
+            if adapter is not None:
+                try:
+                    snapshot = adapter.options_chain(
+                        underlying, expiry=expiry, strikes_window=strikes_window,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    log.warning(
+                        "options_chain.broker_failed broker=%s err=%s",
+                        link.broker_name, exc,
+                    )
+                    snapshot = None
+        if snapshot is None:
+            # Paper fallback — synthesised BSM chain. Strategy code can't
+            # tell the difference; only the `.source` field changes.
+            snapshot = PaperBrokerAdapter().options_chain(
+                underlying, expiry=expiry, strikes_window=strikes_window,
+            )
+        return snapshot

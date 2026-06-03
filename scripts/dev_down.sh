@@ -6,7 +6,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-for name in web celery vite; do
+for name in web celery beat vite; do
     pidfile="logs/$name.pid"
     if [[ -f "$pidfile" ]]; then
         pid="$(cat "$pidfile" || true)"
@@ -17,4 +17,23 @@ for name in web celery vite; do
         rm -f "$pidfile"
     fi
 done
+
+# Sweep up celery worker/beat orphans whose pidfile was lost (common after
+# IDE force-quits or stale dev_up.sh re-runs).
+pkill -f "celery -A config worker" 2>/dev/null || true
+pkill -f "celery -A config beat"   2>/dev/null || true
+
+# Sweep up any orphan web process on :8000 — a manually-started daphne or
+# a previous-run runserver whose pidfile is gone. Without this, the next
+# dev_up.sh gets a dual-binding on :8000 and requests randomly hit the
+# old code.
+if command -v lsof >/dev/null 2>&1; then
+    web_pids="$(lsof -ti tcp:8000 -sTCP:LISTEN 2>/dev/null || true)"
+    if [[ -n "${web_pids:-}" ]]; then
+        echo "killing stray web pid(s) on :8000 → $web_pids"
+        # shellcheck disable=SC2086
+        kill $web_pids 2>/dev/null || true
+    fi
+fi
+
 echo "done."

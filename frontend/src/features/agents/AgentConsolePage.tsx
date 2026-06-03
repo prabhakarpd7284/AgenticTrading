@@ -90,13 +90,42 @@ export function AgentConsolePage() {
     wsRef.current?.close();
     if (!selected) return;
     setWsState("connecting");
+
+    // 1) Hydrate the timeline from REST. Without this, opening a run
+    // page AFTER the run completed shows an empty stream — the WS
+    // broadcast is fire-and-forget, so any events that fired before
+    // the client subscribed are lost. The /steps/ endpoint replays
+    // them so the operator sees the full timeline regardless of when
+    // they navigated in. WS events are then merged on top, de-duped
+    // by `seq` to avoid double-rendering anything still in-flight.
+    let cancelled = false;
+    api
+      .get<{ events: AgentEvent[] }>(`/agents/runs/${selected.id}/steps/`)
+      .then((r) => {
+        if (cancelled) return;
+        const past = r.data?.events ?? [];
+        if (past.length) {
+          setEvents((prev) => {
+            const seen = new Set(prev.map((e) => e.seq));
+            const merged = [...prev, ...past.filter((e) => !seen.has(e.seq))];
+            merged.sort((a, b) => a.seq - b.seq);
+            return merged.slice(-MAX_RETAINED_EVENTS);
+          });
+        }
+      })
+      .catch(() => { /* non-fatal — stream will still populate via WS */ });
+
+    // 2) Open the live stream for events that haven't happened yet.
     wsRef.current = connect(
       `/ws/agents/${selected.id}/`,
       (msg) => setEvents((prev) => {
+        const incoming = msg as unknown as AgentEvent;
+        // Skip if we already hydrated this seq from REST.
+        if (prev.some((e) => e.seq === incoming.seq)) return prev;
         const next = prev.length >= MAX_RETAINED_EVENTS
           ? prev.slice(-(MAX_RETAINED_EVENTS - 1))
           : prev;
-        return [...next, msg as unknown as AgentEvent];
+        return [...next, incoming];
       }),
       {
         onOpen: () => setWsState("live"),
@@ -107,7 +136,10 @@ export function AgentConsolePage() {
         },
       },
     );
-    return () => wsRef.current?.close();
+    return () => {
+      cancelled = true;
+      wsRef.current?.close();
+    };
   }, [selected?.id]);
 
   // Autoscroll to newest event. Plain `auto` (not `smooth`) — a smooth-scroll

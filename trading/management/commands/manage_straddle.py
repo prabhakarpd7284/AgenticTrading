@@ -100,6 +100,12 @@ class Command(BaseCommand):
         mode.add_argument("--status",   action="store_true", help="Show current P&L + market snapshot (no LLM)")
         mode.add_argument("--execute",  metavar="ACTION",    help="Force-execute an action (CLOSE_BOTH, CLOSE_CE, CLOSE_PE, HOLD)")
         mode.add_argument("--list",     action="store_true", help="List all straddle positions")
+        mode.add_argument("--decide-entry", action="store_true", dest="decide_entry",
+                          help="Score whether to OPEN a new straddle (no LLM). Use with --underlying + --expiry")
+
+        # ── Optional: chain decision → registration when ENTER
+        parser.add_argument("--auto-register", action="store_true", dest="auto_register",
+                            help="When used with --decide-entry: if decision is ENTER, register the position at current LTPs")
 
         # ── Position selector ──
         # v2 OptionsPosition ids are UUIDs; accept the raw string. The legacy
@@ -134,6 +140,8 @@ class Command(BaseCommand):
             self._execute(options["execute"], options)
         elif options["list"]:
             self._list()
+        elif options["decide_entry"]:
+            self._decide_entry(options)
 
     # ──────────────────────────────────────────────
     # Register a new straddle
@@ -275,6 +283,61 @@ class Command(BaseCommand):
         self.stdout.write("\nSuggested next:")
         for s in steps:
             self.stdout.write(f"  > {s}")
+
+    # ──────────────────────────────────────────────
+    # Entry advisor — should we open a NEW straddle?
+    # ──────────────────────────────────────────────
+    def _decide_entry(self, options):
+        from trading.options.straddle.entry_advisor import decide_entry, format_decision
+
+        underlying = (options.get("underlying") or "NIFTY").upper()
+        expiry = options.get("expiry")
+        if not expiry:
+            raise CommandError(
+                "--decide-entry requires --expiry YYYY-MM-DD (e.g. --expiry 2026-06-02)"
+            )
+
+        try:
+            decision = decide_entry(underlying, expiry)
+        except (ValueError, RuntimeError) as e:
+            raise CommandError(str(e))
+
+        self.stdout.write(format_decision(decision))
+
+        if not options.get("auto_register"):
+            self._print_next_steps([
+                "Re-run on the morning of entry — the score is point-in-time",
+                (
+                    f"python manage.py manage_straddle --decide-entry "
+                    f"--underlying {underlying} --expiry {expiry} --auto-register"
+                    "   # chain into registration if score >= 55"
+                ),
+            ])
+            return
+
+        if decision.decision != "ENTER":
+            self.stdout.write(self.style.WARNING(
+                f"\n--auto-register skipped: decision is {decision.decision}, not ENTER."
+            ))
+            return
+
+        # Chain into registration at current LTPs (treat current LTP as our sell price —
+        # paper mode will fill at this; live mode will slip).
+        reg_opts = dict(options)
+        reg_opts.update({
+            "strike": decision.suggested_strike,
+            "ce_symbol": decision.ce_symbol,
+            "ce_token": decision.ce_token,
+            "ce_sell_price": decision.ce_ltp,
+            "pe_symbol": decision.pe_symbol,
+            "pe_token": decision.pe_token,
+            "pe_sell_price": decision.pe_ltp,
+        })
+        reg_opts.setdefault("lots", 1)
+        reg_opts.setdefault("lot_size", 65 if underlying == "NIFTY"
+                            else 30 if underlying == "BANKNIFTY" else 20)
+        self.stdout.write(self.style.NOTICE("\nAuto-registering at current LTPs..."))
+        self._register(reg_opts)
 
     # ──────────────────────────────────────────────
     # Full e2e analysis + LLM recommendation

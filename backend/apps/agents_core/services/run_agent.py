@@ -44,10 +44,32 @@ class ChannelsPublisher:
         payload["ts"] = timezone.now().isoformat()
 
         group = f"agent.{self.tenant_id}.{self.run_id}"
+        # ── async-safe broadcast ──
+        # If there's no running loop (e.g. emitted from the run-level
+        # init/error path), `asyncio.run` creates one and tears it down.
+        # If we're INSIDE a running loop (every plugin node runs inside
+        # `asyncio.run(graph.ainvoke(...))` upstream), `asyncio.run` raises
+        # `RuntimeError: cannot be called from a running event loop` and
+        # the broadcast is silently dropped. That dropped every plugin
+        # step from the live WS stream — only init reached the UI.
+        #
+        # Fix: detect the loop and schedule a task on it instead. The
+        # task awaits group_send concurrently with the calling node —
+        # group_send returns quickly (it just puts the message on Redis
+        # channels) so the brief overlap is fine.
         try:
-            asyncio.run(
-                self._layer.group_send(group, {"type": "agent.event", "event": payload})
-            )
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = None
+            if loop is not None:
+                loop.create_task(
+                    self._layer.group_send(group, {"type": "agent.event", "event": payload})
+                )
+            else:
+                asyncio.run(
+                    self._layer.group_send(group, {"type": "agent.event", "event": payload})
+                )
         except Exception:  # noqa: BLE001
             log.exception("channel.group_send_failed", run_id=str(self.run_id))
 

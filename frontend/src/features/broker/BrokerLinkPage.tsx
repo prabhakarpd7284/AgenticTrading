@@ -3,8 +3,8 @@ import { Link as RouterLink } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
-  ArrowRight, CheckCircle2, ExternalLink, Eye, EyeOff, Lock, Radio, RotateCw,
-  ShieldAlert, ShieldCheck, Star, Trash2,
+  AlertTriangle, ArrowRight, CheckCircle2, ExternalLink, Eye, EyeOff, KeyRound,
+  Lock, Radio, RotateCw, ShieldAlert, ShieldCheck, Star, Stethoscope, Trash2, X,
 } from "lucide-react";
 
 import { useTradingViewLinks } from "@/lib/v2";
@@ -41,6 +41,32 @@ interface BrokerLink {
   is_default: boolean;
   last_snapshot_at: string | null;
   last_snapshot_ok: boolean | null;
+  /** True for Zerodha/Fyers — their access_token expires ~6 AM IST. */
+  requires_daily_login: boolean;
+  /** False when an OAuth broker's stored token is from yesterday or earlier. */
+  token_valid_today: boolean;
+  /** ISO timestamp of the next 6 AM IST cutoff (null for non-daily brokers). */
+  next_token_expiry_at: string | null;
+}
+
+/** True when an OAuth broker needs a fresh login before it can serve data. */
+function needsRelogin(link: BrokerLink): boolean {
+  if (!link.requires_daily_login) return false;
+  return !link.token_valid_today
+    || link.status === "expired"
+    || link.status === "errored";
+}
+
+/** "in 4h 32m" / "in 2 min" / "expired" — for the next-token-expiry chip. */
+function fmtTokenExpiry(iso: string | null): string {
+  if (!iso) return "—";
+  const ms = new Date(iso).getTime() - Date.now();
+  if (ms <= 0) return "expired";
+  const mins = Math.round(ms / 60_000);
+  if (mins < 60) return `in ${mins} min`;
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  return m === 0 ? `in ${h}h` : `in ${h}h ${m}m`;
 }
 
 interface CombinedBroker {
@@ -56,6 +82,8 @@ interface CombinedBroker {
   positions: Array<{ symbol: string; quantity: number; pnl: number; mtm: number }>;
   holdings: Array<{ symbol: string; quantity: number; pnl: number }>;
   margin: { available_cash?: number; used?: number; total?: number };
+  requires_daily_login?: boolean;
+  token_valid_today?: boolean;
 }
 
 interface CombinedResponse {
@@ -85,6 +113,11 @@ function useLinks() {
   return useQuery({
     queryKey: ["broker-links"],
     queryFn: () => api.get<BrokerLink[]>("/brokers/").then((r) => r.data),
+    // Link metadata (status, token expiry, alias) changes rarely. 30s is
+    // tight enough that the re-login banner updates promptly without
+    // re-polling on every window focus.
+    staleTime: 30_000,
+    refetchOnWindowFocus: false,
   });
 }
 
@@ -93,6 +126,10 @@ function useCombined() {
     queryKey: ["broker-combined"],
     queryFn: () => api.get<CombinedResponse>("/brokers/combined/positions/").then((r) => r.data),
     refetchInterval: 15_000,
+    // staleTime just below refetchInterval — prevents the auto-poll from
+    // firing twice in the same window (once for interval, once on focus).
+    staleTime: 12_000,
+    refetchOnWindowFocus: false,
   });
 }
 
@@ -105,6 +142,7 @@ export function BrokerLinkPage() {
   const { data: combined, dataUpdatedAt: combinedUpdatedAt } = useCombined();
 
   const [connectBroker, setConnectBroker] = useState<BrokerSpec | null>(null);
+  const [diagnoseLink, setDiagnoseLink] = useState<BrokerLink | null>(null);
 
   // One-shot OAuth callback feedback. The backend bounces the browser to
   // /broker?connected=fyers or /broker?error=fyers&reason=... after the
@@ -130,23 +168,126 @@ export function BrokerLinkPage() {
   }, [qc]);
 
   const refreshOne = useMutation({
-    mutationFn: (id: string) => api.post(`/brokers/${id}/refresh/`),
-    onSuccess: () => {
-      toast.success("Refreshed");
+    mutationFn: (id: string) =>
+      api.post<{
+        link_id: string;
+        ok: boolean;
+        error: string;
+        positions: unknown[];
+        holdings: unknown[];
+        margin: Record<string, unknown>;
+      }>(`/brokers/${id}/refresh/`).then((r) => r.data),
+    onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ["broker-links"] });
       qc.invalidateQueries({ queryKey: ["broker-combined"] });
+      // The endpoint returns 200 even when the snapshot itself failed —
+      // the per-broker `ok` flag carries the real outcome.
+      if (!data.ok) {
+        const link = links.find((l) => l.id === data.link_id);
+        // OAuth brokers with auth failures can't recover via Refresh —
+        // pivot the user straight into the re-login flow.
+        if (link?.requires_daily_login) {
+          toast.error(data.error || "Daily token expired", {
+            description: "Refresh can't recover an expired session — re-login required.",
+            action: {
+              label: "Re-login",
+              onClick: () => relogin.mutate(data.link_id),
+            },
+            duration: 10_000,
+          });
+        } else {
+          toast.error(data.error || "Broker call failed", {
+            description: "Snapshot saved as failed — view details on the broker card.",
+          });
+        }
+        return;
+      }
+      const pos = data.positions?.length ?? 0;
+      const hold = data.holdings?.length ?? 0;
+      if (pos === 0 && hold === 0) {
+        toast.success("Refreshed — broker reports 0 positions / 0 holdings");
+      } else {
+        toast.success(`Refreshed: ${pos} positions, ${hold} holdings`);
+      }
     },
     onError: (e: any) =>
       toast.error(e?.response?.data?.detail ?? "Refresh failed"),
   });
 
+  // Daily re-login for OAuth brokers (Zerodha / Fyers). Re-uses the
+  // handshake (api_key + secret) we already stored, so the operator only
+  // has to click — they don't have to re-paste credentials at 6 AM.
+  const relogin = useMutation({
+    mutationFn: (id: string) =>
+      api.post<{ login_url: string }>(`/brokers/${id}/oauth/reauth/`).then((r) => r.data),
+    onSuccess: (data) => {
+      // Hand the browser to the broker login page. The callback bounces
+      // back to /broker?connected={name} when it's done.
+      toast.message("Redirecting to broker login…");
+      window.location.assign(data.login_url);
+    },
+    onError: (e: any) => {
+      toast.error(e?.response?.data?.detail ?? "Could not start re-login");
+    },
+  });
+
   const refreshAll = useMutation({
     mutationFn: () =>
       api.get<CombinedResponse>("/brokers/combined/positions/?refresh=1").then((r) => r.data),
-    onSuccess: () => {
-      toast.success("All brokers refreshed");
+    onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ["broker-links"] });
       qc.invalidateQueries({ queryKey: ["broker-combined"] });
+      const brokers = data.brokers ?? [];
+      if (brokers.length === 0) {
+        toast.info("No brokers linked");
+        return;
+      }
+      const failed = brokers.filter((b) => b.ok === false);
+      const empty = brokers.filter(
+        (b) => b.ok && b.positions.length === 0 && b.holdings.length === 0,
+      );
+      const okCount = brokers.length - failed.length;
+      if (failed.length === 0) {
+        const totalPos = brokers.reduce((s, b) => s + b.positions.length, 0);
+        const totalHold = brokers.reduce((s, b) => s + b.holdings.length, 0);
+        toast.success(
+          `${okCount} broker${okCount === 1 ? "" : "s"} refreshed — ${totalPos} positions, ${totalHold} holdings`,
+          empty.length > 0
+            ? { description: `${empty.length} broker(s) returned 0 positions / 0 holdings.` }
+            : undefined,
+        );
+      } else {
+        const first = failed[0];
+        const label = BROKER_CATALOG[first.broker_name]?.label ?? first.broker_name;
+        // If any failed brokers need re-login, offer a one-click pivot —
+        // for daily-token brokers Refresh can't recover the session.
+        const expired = failed.filter((b) => b.requires_daily_login);
+        const description = okCount > 0
+          ? `${okCount} other broker(s) refreshed successfully.`
+          : undefined;
+        if (expired.length > 0) {
+          toast.error(
+            expired.length === 1
+              ? `${BROKER_CATALOG[expired[0].broker_name]?.label ?? expired[0].broker_name} session expired — re-login required`
+              : `${expired.length} brokers need daily re-login`,
+            {
+              description,
+              action: expired.length === 1 ? {
+                label: "Re-login",
+                onClick: () => relogin.mutate(expired[0].link_id),
+              } : undefined,
+              duration: 10_000,
+            },
+          );
+        } else {
+          toast.error(
+            failed.length === 1
+              ? `${label} failed: ${first.error || "unknown error"}`
+              : `${failed.length} brokers failed (e.g. ${label}: ${first.error || "unknown error"})`,
+            description ? { description } : undefined,
+          );
+        }
+      }
     },
     onError: () => toast.error("Refresh failed"),
   });
@@ -198,27 +339,80 @@ export function BrokerLinkPage() {
       render: (l) => <StatusPill link={l} />,
     },
     {
-      key: "last_snapshot_at", header: "Last snapshot",
+      key: "last_snapshot_at", header: "Token / data",
       render: (l) => (
-        <FreshnessIndicator
-          timestamp={l.last_snapshot_at}
-          freshMs={60_000}
-          staleMs={5 * 60_000}
-          label="Snapshot"
-          variant="muted"
-        />
+        <div className="flex flex-col gap-0.5">
+          {l.requires_daily_login && (
+            <div className="text-caption flex items-center gap-1">
+              <KeyRound className="h-3 w-3 text-fg-subtle" aria-hidden />
+              <span className={cn(
+                "tabular-nums",
+                l.token_valid_today ? "text-fg-muted" : "text-warning font-medium",
+              )}>
+                {l.token_valid_today
+                  ? `token expires ${fmtTokenExpiry(l.next_token_expiry_at)}`
+                  : "token expired"}
+              </span>
+            </div>
+          )}
+          <FreshnessIndicator
+            timestamp={l.last_snapshot_at}
+            freshMs={60_000}
+            staleMs={5 * 60_000}
+            label="data"
+            variant="muted"
+          />
+        </div>
       ),
     },
     {
       key: "actions", header: "", align: "right",
       render: (l) => (
         <div className="flex items-center justify-end gap-1">
-          <Button
-            variant="ghost" size="sm"
-            onClick={() => refreshOne.mutate(l.id)}
-            loading={refreshOne.isPending && refreshOne.variables === l.id}
-            leading={<RotateCw className="h-4 w-4" />}
-          >Refresh</Button>
+          {needsRelogin(l) ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="primary" size="sm"
+                  onClick={() => relogin.mutate(l.id)}
+                  loading={relogin.isPending && relogin.variables === l.id}
+                  leading={<KeyRound className="h-4 w-4" />}
+                >Re-login</Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                Daily token expired — redirects to {BROKER_CATALOG[l.broker_name]?.label ?? l.broker_name} login (no need to re-paste keys).
+              </TooltipContent>
+            </Tooltip>
+          ) : (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost" size="sm"
+                  onClick={() => refreshOne.mutate(l.id)}
+                  loading={refreshOne.isPending && refreshOne.variables === l.id}
+                  leading={<RotateCw className="h-4 w-4" />}
+                >Refresh</Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                {l.requires_daily_login
+                  ? "Re-fetch positions / holdings / funds using the current daily token. If the token expired, you'll be prompted to re-login."
+                  : "Re-fetch positions / holdings / margin from the broker now."}
+              </TooltipContent>
+            </Tooltip>
+          )}
+          {l.requires_daily_login && !needsRelogin(l) && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost" size="sm"
+                  onClick={() => relogin.mutate(l.id)}
+                  loading={relogin.isPending && relogin.variables === l.id}
+                  aria-label="Force re-login now"
+                ><KeyRound className="h-4 w-4" /></Button>
+              </TooltipTrigger>
+              <TooltipContent>Re-login now (expires {fmtTokenExpiry(l.next_token_expiry_at)})</TooltipContent>
+            </Tooltip>
+          )}
           {!l.is_default && (
             <Tooltip>
               <TooltipTrigger asChild>
@@ -232,6 +426,16 @@ export function BrokerLinkPage() {
               <TooltipContent>Route new orders to this account.</TooltipContent>
             </Tooltip>
           )}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost" size="sm"
+                onClick={() => setDiagnoseLink(l)}
+                aria-label="Diagnose broker"
+              ><Stethoscope className="h-4 w-4" /></Button>
+            </TooltipTrigger>
+            <TooltipContent>Inspect raw broker response (auth + positions + holdings + funds).</TooltipContent>
+          </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
@@ -250,7 +454,7 @@ export function BrokerLinkPage() {
         </div>
       ),
     },
-  ], [refreshOne, setDefault, unlink]);
+  ], [refreshOne, relogin, setDefault, unlink]);
 
   // Catalog cards — show every backend-available broker, dimming those
   // already linked so the operator knows where the credential blob lives.
@@ -260,6 +464,8 @@ export function BrokerLinkPage() {
       .map((name) => ({ spec: getBrokerSpec(name), linked: linkedNames.has(name) }))
       .sort((a, b) => Number(b.spec.recommended) - Number(a.spec.recommended));
   }, [available, links]);
+
+  const reloginRequired = useMemo(() => links.filter(needsRelogin), [links]);
 
   return (
     <div className="px-6 py-6 space-y-6 max-w-[1440px] mx-auto">
@@ -272,6 +478,15 @@ export function BrokerLinkPage() {
           below and refreshed every 30 seconds during market hours.
         </p>
       </header>
+
+      {/* ── Daily re-login banner ──────────────────────────────────── */}
+      {reloginRequired.length > 0 && (
+        <ReloginBanner
+          links={reloginRequired}
+          onRelogin={(id) => relogin.mutate(id)}
+          pendingId={relogin.isPending ? (relogin.variables as string) : null}
+        />
+      )}
 
       {/* ── Catalog ─────────────────────────────────────────────────── */}
       <section aria-labelledby="catalog-h">
@@ -326,7 +541,12 @@ export function BrokerLinkPage() {
           </summary>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 mt-3">
             {(combined?.brokers ?? []).map((b) => (
-              <BrokerSnapshotCard key={b.link_id} broker={b} />
+              <BrokerSnapshotCard
+                key={b.link_id}
+                broker={b}
+                onRelogin={() => relogin.mutate(b.link_id)}
+                relogging={relogin.isPending && relogin.variables === b.link_id}
+              />
             ))}
             {combined && combined.brokers.length === 0 && (
               <Card className="md:col-span-3">
@@ -374,6 +594,22 @@ export function BrokerLinkPage() {
                 setConnectBroker(null);
                 qc.invalidateQueries({ queryKey: ["broker-links"] });
                 qc.invalidateQueries({ queryKey: ["broker-combined"] });
+              }}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Diagnose dialog ─────────────────────────────────────────── */}
+      <Dialog open={!!diagnoseLink} onOpenChange={(open) => !open && setDiagnoseLink(null)}>
+        <DialogContent>
+          {diagnoseLink && (
+            <DiagnosePanel
+              link={diagnoseLink}
+              onClose={() => setDiagnoseLink(null)}
+              onRelogin={() => {
+                relogin.mutate(diagnoseLink.id);
+                setDiagnoseLink(null);
               }}
             />
           )}
@@ -441,9 +677,76 @@ function CatalogCard({
   );
 }
 
+// ─── Daily re-login banner ─────────────────────────────────────────────
+
+function ReloginBanner({
+  links, onRelogin, pendingId,
+}: {
+  links: BrokerLink[];
+  onRelogin: (id: string) => void;
+  pendingId: string | null;
+}) {
+  return (
+    <div
+      role="alert"
+      className="rounded-md border border-warning/40 bg-warning/5 px-4 py-3 flex items-start gap-3"
+    >
+      <AlertTriangle className="h-5 w-5 text-warning shrink-0 mt-0.5" aria-hidden />
+      <div className="flex-1 min-w-0">
+        <div className="text-body-sm font-medium text-fg">
+          {links.length === 1
+            ? "1 broker needs daily re-login"
+            : `${links.length} brokers need daily re-login`}
+        </div>
+        <p className="text-caption text-fg-muted mt-0.5">
+          Zerodha and Fyers access tokens expire every day at ~6 AM IST. Click
+          re-login to authorize again — we&rsquo;ll re-use your stored API keys,
+          no need to re-paste anything.
+        </p>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          {links.map((l) => {
+            const label = BROKER_CATALOG[l.broker_name]?.label ?? l.broker_name;
+            const alias = l.display_name || l.credential_meta?.account_alias || "";
+            return (
+              <Button
+                key={l.id}
+                size="sm"
+                variant="primary"
+                onClick={() => onRelogin(l.id)}
+                loading={pendingId === l.id}
+                leading={<KeyRound className="h-3.5 w-3.5" />}
+                trailing={<ArrowRight className="h-3.5 w-3.5" />}
+              >
+                {label}{alias && <span className="opacity-80 ml-1">· {alias}</span>}
+              </Button>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Status pill ──────────────────────────────────────────────────────
 
 function StatusPill({ link }: { link: BrokerLink }) {
+  // OAuth broker whose daily token rolled over — surface this before any
+  // generic "active" pill, otherwise the operator thinks the link works.
+  if (link.requires_daily_login && !link.token_valid_today
+      && link.status !== "disabled") {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className="inline-flex">
+            <Badge tone="warning" dot>
+              <KeyRound className="h-3 w-3 mr-0.5" aria-hidden />Re-login needed
+            </Badge>
+          </span>
+        </TooltipTrigger>
+        <TooltipContent>Daily access-token expired at 6 AM IST — click Re-login to renew.</TooltipContent>
+      </Tooltip>
+    );
+  }
   if (link.status === "active") return <Badge tone="success" dot>Active</Badge>;
   if (link.status === "expired") return (
     <Tooltip>
@@ -534,6 +837,8 @@ function flattenHoldings(data: CombinedResponse | undefined): FlatRow[] {
 function UnifiedPositionsTable({ data }: { data: CombinedResponse | undefined }) {
   const rows = useMemo(() => flattenPositions(data), [data]);
   if (rows.length === 0) {
+    const failed = (data?.brokers ?? []).filter((b) => b.ok === false);
+    const total = (data?.brokers ?? []).length;
     return (
       <Card>
         <CardHeader>
@@ -541,7 +846,22 @@ function UnifiedPositionsTable({ data }: { data: CombinedResponse | undefined })
           <CardDescription>Open intraday + carryforward across every linked account.</CardDescription>
         </CardHeader>
         <CardContent className="py-6 text-center text-body-sm text-fg-muted">
-          No open positions at any linked broker right now.
+          {total === 0 ? (
+            "Link a broker above to see open positions here."
+          ) : failed.length === total ? (
+            <span className="text-warning">
+              All {total} broker call{total === 1 ? "" : "s"} failed — see the per-broker breakdown for the error.
+            </span>
+          ) : failed.length > 0 ? (
+            <>
+              No open positions reported by {total - failed.length} of {total} healthy broker(s).
+              <div className="text-caption text-warning mt-1">
+                {failed.length} broker(s) failed — positions there may be missing.
+              </div>
+            </>
+          ) : (
+            "All brokers responded healthy — no open positions right now."
+          )}
         </CardContent>
       </Card>
     );
@@ -873,10 +1193,30 @@ function SecondaryStat({ label, value }: { label: string; value: string }) {
 
 // ─── Per-broker snapshot card ─────────────────────────────────────────
 
-function BrokerSnapshotCard({ broker }: { broker: CombinedBroker }) {
+function BrokerSnapshotCard({
+  broker, onRelogin, relogging,
+}: {
+  broker: CombinedBroker;
+  onRelogin?: () => void;
+  relogging?: boolean;
+}) {
   const spec = BROKER_CATALOG[broker.broker_name];
   const cash = broker.margin?.available_cash ?? 0;
   const used = broker.margin?.used ?? 0;
+  // Show the inline re-login CTA when the broker reports a token problem
+  // or when it's an OAuth broker whose daily token has rolled over.
+  const needsLogin = !!broker.requires_daily_login && (
+    broker.ok === false
+    || broker.token_valid_today === false
+    || broker.status === "expired"
+    || broker.status === "errored"
+  );
+  // Non-OAuth brokers can also fail (transient broker errors, missing
+  // permissions, etc.) — surface those with a Refresh CTA.
+  const failedWithoutRelogin = !needsLogin && broker.ok === false;
+  const fetchedEmpty = broker.ok === true
+    && broker.positions.length === 0
+    && broker.holdings.length === 0;
   return (
     <Card>
       <CardHeader>
@@ -888,7 +1228,11 @@ function BrokerSnapshotCard({ broker }: { broker: CombinedBroker }) {
             </CardTitle>
             <CardDescription>{broker.display_name || broker.broker_name}</CardDescription>
           </div>
-          {broker.ok === false ? (
+          {needsLogin ? (
+            <Badge tone="warning" dot>
+              <KeyRound className="h-3 w-3 mr-0.5" aria-hidden />Re-login
+            </Badge>
+          ) : broker.ok === false ? (
             <Badge tone="danger" dot>Stale</Badge>
           ) : (
             <FreshnessIndicator
@@ -902,8 +1246,35 @@ function BrokerSnapshotCard({ broker }: { broker: CombinedBroker }) {
         </div>
       </CardHeader>
       <CardContent className="space-y-2">
-        {broker.error && (
-          <div className="text-caption text-danger">{broker.error}</div>
+        {needsLogin && (
+          <div className="rounded-sm border border-warning/40 bg-warning/5 px-2.5 py-2 flex items-center justify-between gap-2">
+            <div className="text-caption text-fg-muted">
+              {broker.error || "Daily token expired"} — fetches will return empty until you re-login.
+            </div>
+            {onRelogin && (
+              <Button
+                size="sm" variant="primary"
+                onClick={onRelogin} loading={relogging}
+                leading={<KeyRound className="h-3.5 w-3.5" />}
+              >Re-login</Button>
+            )}
+          </div>
+        )}
+        {failedWithoutRelogin && (
+          <div className="rounded-sm border border-danger/40 bg-danger/5 px-2.5 py-2">
+            <div className="flex items-center gap-2 mb-0.5">
+              <ShieldAlert className="h-4 w-4 text-danger shrink-0" aria-hidden />
+              <span className="text-caption font-medium text-fg">Last fetch failed</span>
+            </div>
+            <div className="text-caption text-fg-muted break-words">
+              {broker.error || "Unknown broker error"}
+            </div>
+          </div>
+        )}
+        {fetchedEmpty && (
+          <div className="text-caption text-fg-muted">
+            Connection healthy — broker reports 0 positions and 0 holdings.
+          </div>
         )}
         <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-body-sm">
           <Row label="Open positions" value={broker.positions.length.toString()} />
@@ -1035,8 +1406,10 @@ function ConnectForm({
 
       {spec.dailyTokenRefresh && (
         <div className="rounded-sm border border-warning/40 bg-warning/5 px-3 py-2 text-caption text-warning">
-          Daily access-token re-login required (expires ~6 AM IST). You&rsquo;ll
-          click &ldquo;Re-login&rdquo; on the brokers page each trading morning.
+          <span className="font-medium">Daily re-login required</span> — {spec.label}{" "}
+          access tokens expire at ~6 AM IST. Each trading morning you&rsquo;ll
+          click <strong>Re-login</strong> once; your API keys stay encrypted on
+          our end so you never re-paste them.
         </div>
       )}
 
@@ -1098,6 +1471,155 @@ function ConnectForm({
         </Button>
       </footer>
     </form>
+  );
+}
+
+/* ─── Diagnose panel ─────────────────────────────────────────────────── */
+
+interface DiagnoseCheck {
+  step: string;
+  ok?: boolean;
+  detail?: string;
+  count?: number;
+  sample?: unknown[];
+  data?: unknown;
+  traceback?: string;
+}
+interface DiagnoseResult {
+  link_id: string;
+  broker_name: string;
+  display_name: string;
+  checked_at: string;
+  checks: DiagnoseCheck[];
+}
+
+function DiagnosePanel({
+  link, onClose, onRelogin,
+}: {
+  link: BrokerLink;
+  onClose: () => void;
+  onRelogin: () => void;
+}) {
+  const { data, isLoading, isError, error, refetch, isFetching } = useQuery({
+    queryKey: ["broker-diagnose", link.id],
+    queryFn: () => api.get<DiagnoseResult>(`/brokers/${link.id}/diagnose/`).then((r) => r.data),
+    refetchOnWindowFocus: false,
+  });
+
+  const failedAuth = data?.checks.find((c) => c.step === "authenticate")?.ok === false;
+  const label = BROKER_CATALOG[link.broker_name]?.label ?? link.broker_name;
+
+  return (
+    <div className="space-y-4 max-w-2xl">
+      <header className="flex items-start justify-between gap-3">
+        <div>
+          <h2 className="text-h2 text-fg flex items-center gap-2">
+            <Stethoscope className="h-5 w-5" aria-hidden /> Diagnose {label}
+          </h2>
+          <p className="text-body-sm text-fg-muted mt-1">
+            Runs each broker call independently — shows exactly which step is
+            empty, and what {label} returned. Nothing is cached.
+          </p>
+        </div>
+        <button
+          type="button"
+          aria-label="Close"
+          onClick={onClose}
+          className="text-fg-muted hover:text-fg p-1"
+        ><X className="h-4 w-4" /></button>
+      </header>
+
+      {isLoading && (
+        <div className="py-8 text-center text-body-sm text-fg-muted">
+          Running checks…
+        </div>
+      )}
+
+      {isError && (
+        <div className="rounded-sm border border-danger/40 bg-danger/5 px-3 py-2 text-caption text-danger">
+          Diagnose failed: {(error as any)?.response?.data?.detail ?? (error as any)?.message ?? "unknown error"}
+        </div>
+      )}
+
+      {data && (
+        <div className="space-y-2">
+          {data.checks.map((c) => (
+            <DiagnoseRow key={c.step} check={c} />
+          ))}
+          {data.checks.length > 0 && data.checks.every((c) => c.ok) && (
+            <div className="rounded-sm border border-success/40 bg-success/5 px-3 py-2 text-caption text-success">
+              All checks passed. If you still see no data, the broker simply has 0 positions/holdings right now.
+            </div>
+          )}
+          {failedAuth && link.requires_daily_login && (
+            <div className="rounded-sm border border-warning/40 bg-warning/5 px-3 py-2 flex items-center justify-between gap-2">
+              <span className="text-caption text-fg-muted">
+                Authentication failed — the daily token has expired.
+              </span>
+              <Button
+                size="sm" variant="primary"
+                onClick={onRelogin}
+                leading={<KeyRound className="h-3.5 w-3.5" />}
+              >Re-login</Button>
+            </div>
+          )}
+        </div>
+      )}
+
+      <footer className="flex items-center justify-between gap-2 pt-2 border-t border-border">
+        <span className="text-caption text-fg-subtle">
+          {data ? `Checked at ${new Date(data.checked_at).toLocaleTimeString("en-IN", { hour12: false })}` : ""}
+        </span>
+        <div className="flex items-center gap-2">
+          <Button
+            size="sm" variant="secondary"
+            onClick={() => refetch()}
+            loading={isFetching && !isLoading}
+            leading={<RotateCw className="h-3.5 w-3.5" />}
+          >Re-run</Button>
+          <Button size="sm" variant="ghost" onClick={onClose}>Close</Button>
+        </div>
+      </footer>
+    </div>
+  );
+}
+
+function DiagnoseRow({ check }: { check: DiagnoseCheck }) {
+  const [open, setOpen] = useState(false);
+  const ok = check.ok === true;
+  const empty = ok && (check.count === 0 || (check.count == null && !check.data));
+  return (
+    <div className={cn(
+      "rounded-sm border px-3 py-2",
+      ok ? (empty ? "border-warning/30 bg-warning/5" : "border-success/30 bg-success/5")
+         : "border-danger/40 bg-danger/5",
+    )}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="w-full flex items-center justify-between gap-2 text-left"
+      >
+        <div className="flex items-center gap-2">
+          {ok
+            ? <CheckCircle2 className={cn("h-4 w-4", empty ? "text-warning" : "text-success")} aria-hidden />
+            : <AlertTriangle className="h-4 w-4 text-danger" aria-hidden />}
+          <span className="font-mono text-body-sm text-fg">{check.step}</span>
+          {ok && check.count != null && (
+            <span className="text-caption text-fg-muted">{check.count} item{check.count === 1 ? "" : "s"}</span>
+          )}
+          {empty && <Badge tone="warning">empty</Badge>}
+        </div>
+        <span className="text-caption text-fg-subtle">{open ? "hide" : "details"}</span>
+      </button>
+      {check.detail && (
+        <div className="mt-1 text-caption text-fg-muted">{check.detail}</div>
+      )}
+      {open && (check.sample || check.data || check.traceback) && (
+        <pre className="mt-2 rounded-xs bg-surface-2 p-2 text-caption text-fg-muted overflow-auto max-h-64">
+{JSON.stringify(check.sample ?? check.data ?? null, null, 2)}{check.traceback ? `\n\n${check.traceback}` : ""}
+        </pre>
+      )}
+    </div>
   );
 }
 
