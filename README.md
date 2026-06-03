@@ -81,6 +81,35 @@ uv pip install -e .              # registers entry-points (alphadesk.strategies/
 cd ..
 ```
 
+### 3b. Move data to a new machine (optional — for a populated UI)
+
+App data (trades, signals, portfolios, events) lives in Postgres, not git — and
+the DB holds **broker credentials + PII**, so dumps are **gitignored and must be
+transferred out-of-band** (scp / cloud), never committed.
+
+On the source machine, dump it:
+
+```bash
+docker exec alphadesk-pg pg_dump -U alphadesk -d alphadesk -Fc \
+  --no-owner --no-privileges > dumps/alphadesk.dump
+```
+
+Copy `dumps/alphadesk.dump` to the target machine, then (Postgres up, step 2):
+
+```bash
+docker exec -i alphadesk-pg pg_restore -U alphadesk -d alphadesk \
+  --clean --if-exists --no-owner < dumps/alphadesk.dump
+```
+
+Skip this for an empty DB. To (re)generate trade data instead of restoring,
+replay it from live candles (paper):
+
+```bash
+cd backend
+.venv/bin/python manage.py derive_trades       --from 2026-05-01 --to 2026-05-31  # intraday
+.venv/bin/python manage.py derive_swing_trades  --from 2026-05-01 --to 2026-05-31  # swing (Oliver Kell)
+```
+
 ### 4. Frontend (one-time setup)
 
 ```bash
