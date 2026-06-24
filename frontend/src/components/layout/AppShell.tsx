@@ -1,9 +1,9 @@
 import * as React from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import {
-  Activity, BarChart3, Bot, Briefcase, Calendar, Gauge, Layers, Link2, LineChart,
-  ListChecks, LogOut, Moon, Radio, Search, Settings, ShoppingBag, Sigma, Sun,
-  Terminal, TrendingUp, Triangle, Workflow,
+  Activity, BarChart3, Bot, Briefcase, Calendar, Gauge, HeartPulse, Layers, Link2,
+  LineChart, ListChecks, LogOut, Moon, Radio, Search, Settings, ShoppingBag, Sigma,
+  Sun, Terminal, TrendingUp, Triangle, Workflow,
 } from "lucide-react";
 import { useAuthStore } from "@/stores/auth";
 import { cn } from "@/lib/utils";
@@ -28,6 +28,7 @@ const nav = [
   { to: "/backtester", label: "Backtester",   icon: BarChart3, hint: "g b" },
   { to: "/pyramid",   label: "Pyramid",      icon: Triangle,   hint: "g y" },
   { to: "/brokers",    label: "Broker Link",  icon: Link2,     hint: "g k" },
+  { to: "/broker-monitor", label: "Broker Monitor", icon: HeartPulse, hint: "g n" },
   { to: "/tradingview",label: "TradingView",  icon: Radio,     hint: "g v" },
   { to: "/ops",        label: "Ops Console",  icon: Terminal,  hint: "g o" },
   { to: "/pipeline",   label: "Daily Pipeline", icon: Workflow, hint: "g i" },

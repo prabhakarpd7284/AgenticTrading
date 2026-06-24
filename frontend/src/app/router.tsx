@@ -13,6 +13,7 @@ import { AgentConsolePage } from "@/features/agents/AgentConsolePage";
 import { StrategyBuilderPage } from "@/features/strategies/StrategyBuilderPage";
 import { BacktesterPage } from "@/features/backtester/BacktesterPage";
 import { BrokerLinkPage } from "@/features/broker/BrokerLinkPage";
+import { BrokerMonitorPage } from "@/features/broker-monitor/BrokerMonitorPage";
 import { TradingViewPage } from "@/features/tradingview/TradingViewPage";
 import { SwingScannerPage } from "@/features/swing-scanner/SwingScannerPage";
 import { BasketPage } from "@/features/basket/BasketPage";
@@ -57,6 +58,8 @@ export const router = createBrowserRouter([
       // strategy (straddle, vertical spreads, iron condor, pyramid).
       { path: "options", element: <OptionsDashboardPage /> },
       { path: "brokers", element: <BrokerLinkPage /> },
+      // Broker telemetry — live SmartAPI rate-limit, call volume, queues.
+      { path: "broker-monitor", element: <BrokerMonitorPage /> },
       // TradingView Manager — dedicated page for webhook links, named
       // watchlists, and grouped incoming signals.
       { path: "tradingview", element: <TradingViewPage /> },

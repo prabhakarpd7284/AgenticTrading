@@ -243,6 +243,14 @@ class BrokerClient:
             return  # Redis unavailable — local throttle was the best we could do.
         if r is None:
             return
+        # Per-minute SmartAPI call counter (best effort) for the broker-monitor
+        # dashboard — counts every throttled call across ALL processes.
+        try:
+            ckey = f"{self._REDIS_CALLS_PREFIX}{int(time.time() // 60)}"
+            r.incr(ckey)
+            r.expire(ckey, 3700)
+        except Exception:
+            pass
         try:
             wait_ms = r.eval(
                 self._LUA_THROTTLE, 1,
@@ -255,6 +263,49 @@ class BrokerClient:
             return
         if wait_ms > 0:
             time.sleep(wait_ms / 1000.0)
+
+    _REDIS_CALLS_PREFIX = "alphadesk:smartapi:calls:"
+
+    def recent_call_rate(self, minutes: int = 30) -> list:
+        """Per-minute SmartAPI call counts for the last `minutes` (oldest first).
+
+        Returns [{"minute": <epoch_seconds>, "calls": int}, ...] — drives the
+        broker-monitor dashboard's call-volume chart. Empty if Redis is down."""
+        try:
+            r = _get_redis_for_throttle()
+        except Exception:
+            r = None
+        if r is None:
+            return []
+        now_min = int(time.time() // 60)
+        keys = [f"{self._REDIS_CALLS_PREFIX}{now_min - i}" for i in range(minutes)]
+        try:
+            vals = r.mget(keys)
+        except Exception:
+            return []
+        out = [
+            {"minute": (now_min - i) * 60, "calls": int(v) if v else 0}
+            for i, v in enumerate(vals)
+        ]
+        out.reverse()
+        return out
+
+    def breaker_status(self) -> dict:
+        """Snapshot of the rate-limit breaker for the monitor dashboard."""
+        remaining_ms = self.breaker_remaining_ms()
+        trips = 0
+        try:
+            r = _get_redis_for_throttle()
+            if r is not None:
+                t = r.get(self._REDIS_BREAKER_TRIPS_KEY)
+                trips = int(t) if t else 0
+        except Exception:
+            pass
+        return {
+            "open": remaining_ms > 0,
+            "cooldown_remaining_s": remaining_ms // 1000,
+            "trips": trips,
+        }
 
     # Public alias — the v2 multi-tenant AngelOneAdapter uses this to
     # share the 0.4s gap with every other SmartAPI call in the process,
