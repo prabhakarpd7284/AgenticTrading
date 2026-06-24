@@ -417,7 +417,10 @@ export default function PyramidPage() {
             <div>
               <p className="font-medium">Simulation failed</p>
               <p className="text-body-sm text-fg-muted">
-                {(error as any)?.response?.data?.detail || (error as any)?.message || "Unknown error"}
+                {(error as any)?.response?.data?.error
+                  || (error as any)?.response?.data?.detail
+                  || (error as any)?.message
+                  || "Unknown error"}
               </p>
             </div>
           </CardContent>
