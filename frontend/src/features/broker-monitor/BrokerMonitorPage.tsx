@@ -120,13 +120,23 @@ function BreakerCard({
     return () => window.clearInterval(id);
   }, [open, remaining]);
 
+  const tripped = (trips ?? 0) > 0;
+  // Three states — a CLOSED breaker that has tripped recently is still
+  // recovering (calls are getting denied / oscillating), NOT "healthy". Only
+  // CLOSED + zero trips is truly green.
+  const state: "open" | "recovering" | "healthy" = open
+    ? "open"
+    : tripped
+    ? "recovering"
+    : "healthy";
+  const TONE = {
+    open: { text: "text-danger", border: "border-danger/40", sub: "Calls paused — cooling down" },
+    recovering: { text: "text-warn", border: "border-warn/40", sub: "Recovering — recent rate-limit trips" },
+    healthy: { text: "text-pnl-up", border: "border-pnl-up/30", sub: "Healthy — calls flowing" },
+  }[state];
+
   return (
-    <Card
-      className={cn(
-        open === true && "border-danger/40",
-        open === false && "border-pnl-up/30",
-      )}
-    >
+    <Card className={cn(TONE.border)}>
       <CardHeader>
         <div className="flex items-start justify-between gap-3">
           <div>
@@ -135,10 +145,10 @@ function BreakerCard({
               Trips when the SmartAPI rate limit is exceeded.
             </CardDescription>
           </div>
-          {open === true ? (
-            <ShieldAlert className="h-5 w-5 text-danger shrink-0" aria-hidden />
-          ) : (
+          {state === "healthy" ? (
             <ShieldCheck className="h-5 w-5 text-pnl-up shrink-0" aria-hidden />
+          ) : (
+            <ShieldAlert className={cn("h-5 w-5 shrink-0", TONE.text)} aria-hidden />
           )}
         </div>
       </CardHeader>
@@ -149,19 +159,12 @@ function BreakerCard({
           <div className="flex items-center justify-between gap-4 flex-wrap">
             <div>
               <div
-                className={cn(
-                  "text-num-lg font-mono font-semibold",
-                  open ? "text-danger" : "text-pnl-up",
-                )}
+                className={cn("text-num-lg font-mono font-semibold", TONE.text)}
                 aria-live="polite"
               >
                 {open ? "OPEN" : "CLOSED"}
               </div>
-              <p className="text-caption text-fg-subtle mt-0.5">
-                {open
-                  ? "Calls paused — cooling down"
-                  : "Healthy — calls flowing"}
-              </p>
+              <p className="text-caption text-fg-subtle mt-0.5">{TONE.sub}</p>
             </div>
 
             {open && (
@@ -173,7 +176,7 @@ function BreakerCard({
               </div>
             )}
 
-            <Badge tone={(trips ?? 0) > 0 ? "warning" : "neutral"}>
+            <Badge tone={tripped ? "warning" : "neutral"}>
               {trips ?? 0} trip{(trips ?? 0) === 1 ? "" : "s"}
             </Badge>
           </div>
