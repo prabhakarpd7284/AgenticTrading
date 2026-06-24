@@ -301,8 +301,10 @@ class BrokerClient:
                 trips = int(t) if t else 0
         except Exception:
             pass
+        state = "open" if remaining_ms > 0 else ("recovering" if trips > 0 else "closed")
         return {
             "open": remaining_ms > 0,
+            "state": state,
             "cooldown_remaining_s": remaining_ms // 1000,
             "trips": trips,
         }
@@ -312,24 +314,62 @@ class BrokerClient:
     # so multiple linked accounts can't race past Angel's rate limit.
     throttle = _throttle
 
-    # ── Rate-limit circuit breaker (Redis-coordinated) ────────────────
+    # ── Rate-limit circuit breaker (Redis-coordinated, HALF-OPEN) ─────
     # Angel One's "exceeding access rate" is an ACCOUNT-level cooldown that
-    # denies EVERY call, login included; continuing to poke it extends the
-    # ban. The breaker records an "open until" deadline in Redis so ALL
-    # processes (every Celery ForkPool worker, Daphne, CLIs) AND both call
-    # paths — the v2 AngelOneAdapter (via throttle()) and this legacy client's
-    # candle/quote calls — share ONE cooldown. A per-process module breaker is
-    # useless here: with ~14 ForkPool workers and a round-robin refresh fan-out,
-    # no single process accumulates enough trips to stay open (verified: the
-    # old per-process breaker opened 0 times across 208 rate-limit errors).
-    # In-process state is the fallback when Redis is unreachable.
+    # denies EVERY call. We must back off — but a blunt "block everything for
+    # the whole cooldown" STARVES legitimate calls (a backtest / position
+    # refresh fails for 30-300s even after Angel has recovered). So this is a
+    # proper HALF-OPEN breaker, shared across all processes via Redis:
+    #
+    #   CLOSED → call normally.
+    #   OPEN   → (short cooldown) deny fast, no network hit.
+    #   HALF-OPEN (cooldown elapsed) → let exactly ONE probe call through
+    #            (Redis NX lock); everyone else still denied. Probe succeeds →
+    #            CLOSED (full traffic resumes immediately). Probe fails →
+    #            OPEN again with escalated backoff.
+    #
+    # Net: at most one in-flight probe at a time (never a re-storm), the base
+    # cooldown is short so calls aren't starved, and traffic resumes the moment
+    # Angel recovers instead of after a fixed window. In-process deadline is the
+    # fallback when Redis is unreachable.
     _REDIS_BREAKER_KEY = "alphadesk:smartapi:breaker:open_until_ms"
     _REDIS_BREAKER_TRIPS_KEY = "alphadesk:smartapi:breaker:trips"
-    _BREAKER_BASE_COOLDOWN = 30.0   # seconds — first trip
-    _BREAKER_MAX_COOLDOWN = 300.0   # cap on exponential backoff
+    _REDIS_BREAKER_PROBE_KEY = "alphadesk:smartapi:breaker:probe"
+    _BREAKER_BASE_COOLDOWN = 5.0    # seconds — first trip (short → fast recovery)
+    _BREAKER_MAX_COOLDOWN = 60.0    # cap — still probe ≥ every 60s during a hard ban
+    _BREAKER_PROBE_TTL = 10         # seconds — auto-release a stuck probe lock
+
+    def breaker_gate(self) -> str:
+        """Half-open gate. Returns 'closed' | 'probe' | 'open'.
+
+        'closed' → make the call normally.
+        'probe'  → cooldown elapsed and THIS call won the single probe slot;
+                   caller MUST reset_breaker() on success / trip_breaker() on a
+                   rate-limit failure.
+        'open'   → cooling down; do NOT touch Angel.
+        Cross-process via Redis; falls back to in-process open/closed."""
+        now_ms = int(time.time() * 1000)
+        try:
+            r = _get_redis_for_throttle()
+        except Exception:
+            r = None
+        if r is None:
+            return "open" if (self._breaker_open_until - time.monotonic()) > 0 else "closed"
+        try:
+            raw = r.get(self._REDIS_BREAKER_KEY)
+            if not raw:
+                return "closed"
+            if now_ms < int(raw):
+                return "open"
+            # Cooldown elapsed → half-open. Exactly one caller wins the probe.
+            got = r.set(self._REDIS_BREAKER_PROBE_KEY, "1", nx=True, ex=self._BREAKER_PROBE_TTL)
+            return "probe" if got else "open"
+        except Exception:
+            return "closed"   # fail-open on a Redis blip — don't starve on infra
 
     def breaker_remaining_ms(self) -> int:
-        """Milliseconds until the rate-limit breaker closes (0 = closed)."""
+        """Milliseconds until the rate-limit breaker's cooldown elapses (0 = not
+        open). Used for the operator-facing cooldown message, not the gate."""
         now_ms = int(time.time() * 1000)
         try:
             r = _get_redis_for_throttle()
@@ -346,10 +386,9 @@ class BrokerClient:
         return int(rem * 1000) if rem > 0 else 0
 
     def trip_breaker(self) -> float:
-        """Open the breaker with exponential backoff. Returns cooldown seconds.
-
-        The trip counter is Redis-shared so backoff escalates across processes
-        and only ever EXTENDS the deadline (never shortens it)."""
+        """Open/extend the breaker with exponential backoff (Redis-shared trip
+        counter, deadline only ever EXTENDS). Clears the half-open probe lock so
+        the next window can probe. Returns the cooldown in seconds."""
         with self._breaker_lock:
             self._breaker_trips += 1
             trips = self._breaker_trips
@@ -371,25 +410,28 @@ class BrokerClient:
                 deadline_ms = now_ms + int(cooldown * 1000)
                 existing = r.get(self._REDIS_BREAKER_KEY)
                 if not existing or int(existing) < deadline_ms:
-                    r.set(self._REDIS_BREAKER_KEY, deadline_ms, px=int(cooldown * 1000) + 5000)
+                    r.set(self._REDIS_BREAKER_KEY, deadline_ms, px=int(cooldown * 1000) + 60000)
+                r.delete(self._REDIS_BREAKER_PROBE_KEY)
             except Exception:
                 pass
         self._breaker_open_until = time.monotonic() + cooldown
-        logger.warning("smartapi.breaker_open cooldown=%.0fs", cooldown)
+        logger.warning("smartapi.breaker_open cooldown=%.0fs (trips=%d)", cooldown, trips)
         return cooldown
 
     def reset_breaker(self) -> None:
-        """Close the breaker after a clean call. Cheap no-op on the hot path
-        unless this process previously tripped."""
-        if not (self._breaker_open_until or self._breaker_trips):
-            return
+        """Close the breaker — a probe (or clean call) succeeded. Clears the
+        deadline, trip counter and probe lock so full traffic resumes."""
         with self._breaker_lock:
             self._breaker_open_until = 0.0
             self._breaker_trips = 0
         try:
             r = _get_redis_for_throttle()
             if r is not None:
-                r.delete(self._REDIS_BREAKER_KEY, self._REDIS_BREAKER_TRIPS_KEY)
+                r.delete(
+                    self._REDIS_BREAKER_KEY,
+                    self._REDIS_BREAKER_TRIPS_KEY,
+                    self._REDIS_BREAKER_PROBE_KEY,
+                )
         except Exception:
             pass
 
@@ -539,12 +581,11 @@ class BrokerClient:
         }
         # Honour the shared rate-limit breaker: during an account-level
         # cooldown every candle call is denied anyway, and retrying just
-        # extends the ban. Fail fast (and quietly) instead.
-        remaining_ms = self.breaker_remaining_ms()
-        if remaining_ms > 0:
-            logger.debug(
-                f"Candle fetch skipped — rate-limit breaker open ({remaining_ms // 1000}s left)"
-            )
+        # extends the ban. Honour the half-open gate: deny while OPEN, allow a
+        # single probe when the cooldown has elapsed.
+        gate = self.breaker_gate()
+        if gate == "open":
+            logger.debug("Candle fetch skipped — rate-limit breaker open")
             return []
 
         max_retries = 2
@@ -559,7 +600,8 @@ class BrokerClient:
                         continue
                     logger.warning("Candle fetch returned None after retries")
                     return []
-                self.reset_breaker()
+                if gate == "probe":
+                    self.reset_breaker()   # probe succeeded → resume full traffic
                 return response.get("data", []) or []
             except Exception as e:
                 # A rate-limit ban / connection give-up: trip the shared breaker

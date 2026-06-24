@@ -63,11 +63,13 @@ def _throttled(fn: Callable[..., T], *args, **kwargs) -> T:
         logger.debug("angel.throttle.unavailable: %s", e)
         return fn(*args, **kwargs)
 
-    remaining_ms = bc.breaker_remaining_ms()
-    if remaining_ms > 0:
-        raise BrokerRateLimited(
-            f"Angel rate-limit breaker open; {remaining_ms // 1000}s cooldown left"
-        )
+    # Half-open gate: deny while OPEN, allow a single probe once the cooldown
+    # has elapsed. Only the probe call resets the breaker on success — a normal
+    # CLOSED call doesn't touch Redis, and only one probe runs at a time (no
+    # re-storm), so legitimate calls aren't starved for a fixed window.
+    gate = bc.breaker_gate()
+    if gate == "open":
+        raise BrokerRateLimited("Angel rate-limit breaker open — backing off")
     bc.throttle()
 
     try:
@@ -76,7 +78,8 @@ def _throttled(fn: Callable[..., T], *args, **kwargs) -> T:
         if _is_transient_broker_error(e):
             bc.trip_breaker()
         raise
-    bc.reset_breaker()
+    if gate == "probe":
+        bc.reset_breaker()
     return result
 
 

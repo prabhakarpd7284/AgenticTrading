@@ -42,3 +42,29 @@ def test_throttled_short_circuits_while_breaker_open():
         assert called["n"] == 0
     finally:
         bc.reset_breaker()
+
+
+def test_breaker_half_open_allows_single_probe_then_closes():
+    """After the cooldown elapses the breaker is HALF-OPEN: exactly one caller
+    gets 'probe', the rest get 'open', and a successful probe closes it — so
+    traffic isn't starved for the whole window and never re-storms."""
+    from trading.services.data_service import BrokerClient, _get_redis_for_throttle
+
+    bc = BrokerClient.get_instance()
+    bc.reset_breaker()
+    r = _get_redis_for_throttle()
+    if r is None:
+        return  # Redis-less env: half-open coordination isn't exercised
+    try:
+        bc.trip_breaker()
+        assert bc.breaker_gate() == "open"
+        # Simulate the cooldown having elapsed without sleeping.
+        import time as _t
+        r.set(bc._REDIS_BREAKER_KEY, int(_t.time() * 1000) - 1000)
+        r.delete(bc._REDIS_BREAKER_PROBE_KEY)
+        assert bc.breaker_gate() == "probe"   # first caller wins the probe
+        assert bc.breaker_gate() == "open"    # probe already taken → others wait
+        bc.reset_breaker()                    # probe succeeded → resume traffic
+        assert bc.breaker_gate() == "closed"
+    finally:
+        bc.reset_breaker()
