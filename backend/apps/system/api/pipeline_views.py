@@ -14,6 +14,8 @@ from __future__ import annotations
 from datetime import date as date_cls, datetime
 
 from django.utils import timezone
+from drf_spectacular.types import OpenApiTypes
+from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -202,6 +204,17 @@ class PipelineStatusView(APIView):
 
     permission_classes = [OwnerOnly]
 
+    @extend_schema(
+        parameters=[
+            OpenApiParameter(
+                "date", OpenApiTypes.DATE, OpenApiParameter.QUERY,
+                description="Trading day to view (YYYY-MM-DD). Defaults to the most "
+                            "recent day that has signal data.",
+                required=False,
+            ),
+        ],
+        responses=OpenApiTypes.OBJECT,
+    )
     def get(self, request):
         from apps.market_data.services.market_calendar import (
             is_trading_day, next_trading_day,
@@ -403,6 +416,27 @@ class PipelineTriggerView(APIView):
 
     permission_classes = [OwnerOnly]
 
+    @extend_schema(
+        parameters=[
+            OpenApiParameter(
+                "task", OpenApiTypes.STR, OpenApiParameter.PATH,
+                description="Pipeline task key (swing_scan, premarket_basket, "
+                            "screener_session, eod_enrichment, intraday_agent).",
+            ),
+            OpenApiParameter(
+                "backfill", OpenApiTypes.BOOL, OpenApiParameter.QUERY, required=False,
+                description="eod_enrichment only — re-enrich all un-enriched signals "
+                            "across every date (also accepted in the request body).",
+            ),
+            OpenApiParameter(
+                "date", OpenApiTypes.DATE, OpenApiParameter.QUERY, required=False,
+                description="eod_enrichment / intraday_agent — target a specific past "
+                            "session (also accepted in the request body).",
+            ),
+        ],
+        request=OpenApiTypes.OBJECT,
+        responses=OpenApiTypes.OBJECT,
+    )
     def post(self, request, task: str):
         if task not in _TASK_KEYS:
             return Response(
@@ -480,6 +514,7 @@ class PipelineConfigView(APIView):
 
     permission_classes = [OwnerOnly]
 
+    @extend_schema(request=OpenApiTypes.OBJECT, responses=OpenApiTypes.OBJECT)
     def post(self, request):
         from apps.system.services.flags import AUTO_EXECUTE_KEY, set_flag
 

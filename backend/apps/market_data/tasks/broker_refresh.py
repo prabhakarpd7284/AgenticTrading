@@ -45,7 +45,7 @@ def schedule_cadence_seconds(now=None) -> int:
     return 300
 
 
-@shared_task
+@shared_task(ignore_result=True)
 def refresh_broker_positions() -> dict:
     """Fan out per-link refreshes. Safe to invoke standalone; the beat
     schedule calls this every 30s during market hours.
@@ -101,7 +101,7 @@ def refresh_broker_positions() -> dict:
     }
 
 
-@shared_task
+@shared_task(ignore_result=True)
 def refresh_link_snapshot(link_id: str) -> dict:
     """Take one snapshot for one link. Returns a small dict for logging."""
     from apps.market_data.api.broker_views import _take_snapshot
@@ -121,7 +121,7 @@ def refresh_link_snapshot(link_id: str) -> dict:
     }
 
 
-@shared_task
+@shared_task(ignore_result=True)
 def prune_old_snapshots() -> dict:
     """Trim each link's snapshot history to the last SNAPSHOT_RETENTION_PER_LINK rows."""
     pruned = 0

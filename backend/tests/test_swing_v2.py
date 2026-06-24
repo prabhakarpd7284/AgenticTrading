@@ -239,6 +239,16 @@ def test_persist_dao_is_single_bulk_insert_and_idempotent():
 
     tenant = TenantFactory()
     user = UserFactory()
+    # Isolation guard: the suite has a cross-test leak of committed owner
+    # Membership rows (some path escapes the per-test transaction rollback).
+    # _persist() resolves its target tenant via
+    # Membership.objects.filter(role="owner").first(), so a stray earlier
+    # owner with a lower PK would capture the signals and make the
+    # tenant-scoped assertion below see 0 — the source of this test's
+    # intermittent failures. Clear leaked owners first so THIS tenant is the
+    # deterministic target (the delete is rolled back with the test txn).
+    from apps.tenants.models import Membership
+    Membership.objects.filter(role="owner").delete()
     MembershipFactory(user=user, tenant=tenant, role="owner")
 
     sigs = [_fake_long(f"SYM{i}") for i in range(8)]

@@ -1,6 +1,9 @@
+import logging
 import os
 
 from celery import Celery
+
+logger = logging.getLogger(__name__)
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings.dev")
 
@@ -54,13 +57,44 @@ def debug_task(self) -> None:
 # Tier cadence: small=15m (intraday-ish), medium=1h, long=daily; enrichment
 # walks each open swing across its time-stop window once a day after close.
 # ──────────────────────────────────────────────────────────────────────────
-@app.task(ignore_result=True)
+# soft_time_limit (raises inside the task → clean exit + lock release) and a
+# hard time_limit bound a scan that would otherwise run for hours. With the
+# day-range fetch fix a full scan is well under a minute, so 25m/30m is huge
+# headroom — purely a backstop against another runaway like 2026-06-24.
+@app.task(ignore_result=True, soft_time_limit=1500, time_limit=1800)
 def run_swing_v2(tier: str = "medium") -> None:
     from django.core.management import call_command
-    call_command("run_ok_scanner_v2", tier=tier, actionable_only=True)
+
+    # Redis advisory lock (NX + TTL) keyed by tier: with CELERY_TASK_ACKS_LATE
+    # a worker crash REDELIVERS the message, which used to relaunch an
+    # already-running 11h scan from scratch. The lock makes the task
+    # non-re-entrant per tier; the TTL frees it if a worker dies holding it.
+    from trading.services.data_service import _get_redis_for_throttle
+
+    lock_key = f"alphadesk:swing_v2:lock:{tier}"
+    r = None
+    try:
+        r = _get_redis_for_throttle()
+    except Exception:
+        r = None
+    if r is not None:
+        try:
+            if not r.set(lock_key, "1", nx=True, ex=1800):
+                logger.info("run_swing_v2(%s) skipped — already running", tier)
+                return
+        except Exception:
+            r = None  # lock unavailable → run without it rather than skip silently
+    try:
+        call_command("run_ok_scanner_v2", tier=tier, actionable_only=True)
+    finally:
+        if r is not None:
+            try:
+                r.delete(lock_key)
+            except Exception:
+                pass
 
 
-@app.task(ignore_result=True)
+@app.task(ignore_result=True, soft_time_limit=900, time_limit=1200)
 def enrich_swing_v2() -> None:
     from django.core.management import call_command
     call_command("enrich_signals_v2")

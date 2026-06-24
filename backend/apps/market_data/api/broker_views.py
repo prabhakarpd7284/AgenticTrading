@@ -367,6 +367,30 @@ def _take_snapshot(link: BrokerLink) -> BrokerPositionSnapshot:
         link.save(update_fields=["status", "last_error"])
         return snap
 
+    # If Angel's shared rate-limit breaker is open, do NOT poll: every fetch
+    # would short-circuit to empty (auth is denied during the account-level
+    # cooldown) and writing ok=True would publish a FAKE flat book (zero cash,
+    # no positions) that combined_views would sum as real. Mark the link
+    # ERRORED (transient) so the back-off window applies and the UI shows a
+    # cooldown instead of a wrong zero balance. Gated to Angel — the breaker
+    # only reflects Angel's state, so other brokers' links must not be touched.
+    if link.broker_name == "angel_one":
+        try:
+            from trading.services.data_service import BrokerClient
+            remaining_ms = BrokerClient.get_instance().breaker_remaining_ms()
+        except Exception:
+            remaining_ms = 0
+        if remaining_ms > 0:
+            snap = BrokerPositionSnapshot.objects.create(
+                tenant=link.tenant, link=link, fetched_at=timezone.now(),
+                ok=False,
+                error=f"Angel rate-limit cooldown — {remaining_ms // 1000}s remaining; not polling",
+            )
+            link.status = BrokerLink.Status.ERRORED
+            link.last_error = snap.error
+            link.save(update_fields=["status", "last_error"])
+            return snap
+
     # We deliberately do NOT pre-probe with adapter.authenticate() here —
     # for Angel One that means a fresh SmartAPI generateSession() on every
     # 30-second beat, which hits SmartAPI's rate limit ("Access denied

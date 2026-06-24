@@ -57,6 +57,25 @@ def _get_redis_for_throttle():
     return _THROTTLE_REDIS_CLIENT
 
 
+# Error fingerprints that should OPEN the rate-limit breaker: the account-level
+# rate-limit ban plus the connection give-ups it manifests as (Angel drops/
+# refuses connections once the key is throttled). Tripping on these backs the
+# whole fleet off instead of hammering an unreachable/banned endpoint.
+_TRANSIENT_BROKER_MARKERS = (
+    "exceeding access rate",
+    "max retries exceeded",
+    "timed out",
+    "connection aborted",
+    "connection reset",
+    "connection refused",
+)
+
+
+def _is_transient_broker_error(err) -> bool:
+    s = str(err).lower()
+    return any(m in s for m in _TRANSIENT_BROKER_MARKERS)
+
+
 def load_symbol_master(file_path: str) -> list:
     """
     Load Angel One OpenAPI scrip master JSON.
@@ -167,6 +186,13 @@ class BrokerClient:
         # Login lock
         self._login_lock = threading.Lock()
 
+        # Rate-limit circuit breaker (in-process fallback; the authoritative
+        # state is Redis-shared so all worker processes + the v2 adapter +
+        # this legacy client honour one cooldown). See breaker_* methods.
+        self._breaker_open_until = 0.0   # time.monotonic() deadline
+        self._breaker_trips = 0
+        self._breaker_lock = threading.Lock()
+
     # Lua: atomically read the recorded last-call timestamp (ms), compute
     # how long we still need to wait, and overwrite the slot with our
     # claim. KEYS[1] = redis key, ARGV[1] = min gap in ms, ARGV[2] = now ms.
@@ -234,6 +260,87 @@ class BrokerClient:
     # share the 0.4s gap with every other SmartAPI call in the process,
     # so multiple linked accounts can't race past Angel's rate limit.
     throttle = _throttle
+
+    # ── Rate-limit circuit breaker (Redis-coordinated) ────────────────
+    # Angel One's "exceeding access rate" is an ACCOUNT-level cooldown that
+    # denies EVERY call, login included; continuing to poke it extends the
+    # ban. The breaker records an "open until" deadline in Redis so ALL
+    # processes (every Celery ForkPool worker, Daphne, CLIs) AND both call
+    # paths — the v2 AngelOneAdapter (via throttle()) and this legacy client's
+    # candle/quote calls — share ONE cooldown. A per-process module breaker is
+    # useless here: with ~14 ForkPool workers and a round-robin refresh fan-out,
+    # no single process accumulates enough trips to stay open (verified: the
+    # old per-process breaker opened 0 times across 208 rate-limit errors).
+    # In-process state is the fallback when Redis is unreachable.
+    _REDIS_BREAKER_KEY = "alphadesk:smartapi:breaker:open_until_ms"
+    _REDIS_BREAKER_TRIPS_KEY = "alphadesk:smartapi:breaker:trips"
+    _BREAKER_BASE_COOLDOWN = 30.0   # seconds — first trip
+    _BREAKER_MAX_COOLDOWN = 300.0   # cap on exponential backoff
+
+    def breaker_remaining_ms(self) -> int:
+        """Milliseconds until the rate-limit breaker closes (0 = closed)."""
+        now_ms = int(time.time() * 1000)
+        try:
+            r = _get_redis_for_throttle()
+        except Exception:
+            r = None
+        if r is not None:
+            try:
+                raw = r.get(self._REDIS_BREAKER_KEY)
+                deadline = int(raw) if raw else 0
+                return max(0, deadline - now_ms)
+            except Exception:
+                pass
+        rem = self._breaker_open_until - time.monotonic()
+        return int(rem * 1000) if rem > 0 else 0
+
+    def trip_breaker(self) -> float:
+        """Open the breaker with exponential backoff. Returns cooldown seconds.
+
+        The trip counter is Redis-shared so backoff escalates across processes
+        and only ever EXTENDS the deadline (never shortens it)."""
+        with self._breaker_lock:
+            self._breaker_trips += 1
+            trips = self._breaker_trips
+        cooldown = min(self._BREAKER_BASE_COOLDOWN * (2 ** (trips - 1)), self._BREAKER_MAX_COOLDOWN)
+        now_ms = int(time.time() * 1000)
+        try:
+            r = _get_redis_for_throttle()
+        except Exception:
+            r = None
+        if r is not None:
+            try:
+                shared_trips = int(r.incr(self._REDIS_BREAKER_TRIPS_KEY))
+                r.pexpire(self._REDIS_BREAKER_TRIPS_KEY,
+                          int(self._BREAKER_MAX_COOLDOWN * 1000) + 60000)
+                cooldown = min(
+                    self._BREAKER_BASE_COOLDOWN * (2 ** (shared_trips - 1)),
+                    self._BREAKER_MAX_COOLDOWN,
+                )
+                deadline_ms = now_ms + int(cooldown * 1000)
+                existing = r.get(self._REDIS_BREAKER_KEY)
+                if not existing or int(existing) < deadline_ms:
+                    r.set(self._REDIS_BREAKER_KEY, deadline_ms, px=int(cooldown * 1000) + 5000)
+            except Exception:
+                pass
+        self._breaker_open_until = time.monotonic() + cooldown
+        logger.warning("smartapi.breaker_open cooldown=%.0fs", cooldown)
+        return cooldown
+
+    def reset_breaker(self) -> None:
+        """Close the breaker after a clean call. Cheap no-op on the hot path
+        unless this process previously tripped."""
+        if not (self._breaker_open_until or self._breaker_trips):
+            return
+        with self._breaker_lock:
+            self._breaker_open_until = 0.0
+            self._breaker_trips = 0
+        try:
+            r = _get_redis_for_throttle()
+            if r is not None:
+                r.delete(self._REDIS_BREAKER_KEY, self._REDIS_BREAKER_TRIPS_KEY)
+        except Exception:
+            pass
 
     def login(self) -> bool:
         """Authenticate with Angel One (thread-safe, idempotent)."""
@@ -379,6 +486,16 @@ class BrokerClient:
             "fromdate": start,
             "todate": end,
         }
+        # Honour the shared rate-limit breaker: during an account-level
+        # cooldown every candle call is denied anyway, and retrying just
+        # extends the ban. Fail fast (and quietly) instead.
+        remaining_ms = self.breaker_remaining_ms()
+        if remaining_ms > 0:
+            logger.debug(
+                f"Candle fetch skipped — rate-limit breaker open ({remaining_ms // 1000}s left)"
+            )
+            return []
+
         max_retries = 2
         for attempt in range(max_retries + 1):
             self._throttle()
@@ -391,8 +508,17 @@ class BrokerClient:
                         continue
                     logger.warning("Candle fetch returned None after retries")
                     return []
+                self.reset_breaker()
                 return response.get("data", []) or []
             except Exception as e:
+                # A rate-limit ban / connection give-up: trip the shared breaker
+                # and stop — retrying with 2s sleeps only amplifies the storm
+                # (this except branch, not the None branch, is where Angel's
+                # "exceeding access rate" actually lands).
+                if _is_transient_broker_error(e):
+                    self.trip_breaker()
+                    logger.warning(f"Candle fetch hit broker rate-limit/timeout; breaker tripped: {str(e)[:120]}")
+                    return []
                 logger.exception(f"Candle fetch failed: {e}")
                 if attempt < max_retries:
                     time.sleep(2)
@@ -848,69 +974,75 @@ class DataService:
         end_dt = datetime.strptime(to_date, "%Y-%m-%d").date()
 
         all_candles: List[Dict[str, Any]] = []
-        current = start_dt
 
         logger.info(
             f"Fetching historical data: {symbol} | {from_date} → {to_date} | interval={interval}"
         )
 
-        # For ONE_DAY interval, we can fetch the whole range in one call
-        if interval == "ONE_DAY":
-            raw = self._broker.fetch_candles(
+        # Angel One getCandleData caps the span PER CALL by interval. Fetch the
+        # whole lookback in as few calls as possible by chunking the range to
+        # each interval's max span — instead of one call per day, which made a
+        # single 120-day intraday scan ~83 calls/symbol and tripped the broker
+        # rate limit. (NSE weekends/holidays are skipped server-side, so we
+        # request the full window and let grouping yield only trading days.)
+        _INTERVAL_MAX_DAYS = {
+            "ONE_MINUTE": 30, "THREE_MINUTE": 60,
+            "FIVE_MINUTE": 100, "TEN_MINUTE": 100,
+            "FIFTEEN_MINUTE": 200, "THIRTY_MINUTE": 200,
+            "ONE_HOUR": 400, "ONE_DAY": 2000,
+        }
+        cap_days = _INTERVAL_MAX_DAYS.get(interval, 100)
+
+        raw_rows: List[list] = []
+        win_start = start_dt
+        while win_start <= end_dt:
+            win_end = min(win_start + timedelta(days=cap_days - 1), end_dt)
+            chunk = self._broker.fetch_candles(
                 token,
-                f"{from_date} 09:15",
-                f"{to_date} 15:30",
+                f"{win_start.strftime('%Y-%m-%d')} 09:15",
+                f"{win_end.strftime('%Y-%m-%d')} 15:30",
                 interval,
             )
-            for row in raw:
-                ts, o, h, l, c, v = row[0], row[1], row[2], row[3], row[4], row[5]
-                # Parse date from timestamp like "2026-02-20T00:00:00+05:30"
-                candle_date = ts[:10] if isinstance(ts, str) else str(ts)
+            if chunk:
+                raw_rows.extend(chunk)
+            win_start = win_end + timedelta(days=1)
+
+        # ONE_DAY rows are already daily granularity — map straight through.
+        if interval == "ONE_DAY":
+            for row in raw_rows:
+                ts = row[0]
                 all_candles.append({
-                    "date": candle_date,
-                    "open": float(o),
-                    "high": float(h),
-                    "low": float(l),
-                    "close": float(c),
-                    "volume": int(v),
+                    "date": ts[:10] if isinstance(ts, str) else str(ts),
+                    "open": float(row[1]),
+                    "high": float(row[2]),
+                    "low": float(row[3]),
+                    "close": float(row[4]),
+                    "volume": int(row[5]),
                 })
-            logger.info(f"  ONE_DAY: fetched {len(all_candles)} daily candles")
+            logger.info(f"Historical fetch complete: {len(all_candles)} daily candles for {symbol}")
             return all_candles
 
-        # For intraday intervals, fetch day-by-day
-        while current <= end_dt:
-            # Skip weekends (Saturday=5, Sunday=6)
-            if current.weekday() >= 5:
-                current += timedelta(days=1)
-                continue
+        # Intraday intervals → aggregate each trading day into one daily OHLCV
+        # row (identical contract to the old day-by-day loop). raw_rows are in
+        # ascending time order, so per-day first-open / last-close stay correct.
+        by_day: Dict[str, list] = {}
+        for row in raw_rows:
+            ts = row[0]
+            day = ts[:10] if isinstance(ts, str) else str(ts)
+            by_day.setdefault(day, []).append(row)
 
-            day_str = current.strftime("%Y-%m-%d")
-            start_time = f"{day_str} 09:15"
-            end_time = f"{day_str} 15:30"
-
-            raw = self._broker.fetch_candles(token, start_time, end_time, interval)
-
-            if raw:
-                # Aggregate into a single daily candle (OHLCV summary for backtest)
-                opens = [r[1] for r in raw]
-                highs = [r[2] for r in raw]
-                lows = [r[3] for r in raw]
-                closes = [r[4] for r in raw]
-                volumes = [r[5] for r in raw]
-
-                all_candles.append({
-                    "date": day_str,
-                    "open": float(opens[0]),
-                    "high": float(max(highs)),
-                    "low": float(min(lows)),
-                    "close": float(closes[-1]),
-                    "volume": int(sum(volumes)),
-                })
-                logger.info(f"  {day_str}: {len(raw)} intraday candles → 1 daily candle")
-            else:
-                logger.warning(f"  {day_str}: no data (holiday or no trading)")
-
-            current += timedelta(days=1)
+        for day_str, rows in by_day.items():
+            highs = [r[2] for r in rows]
+            lows = [r[3] for r in rows]
+            volumes = [r[5] for r in rows]
+            all_candles.append({
+                "date": day_str,
+                "open": float(rows[0][1]),
+                "high": float(max(highs)),
+                "low": float(min(lows)),
+                "close": float(rows[-1][4]),
+                "volume": int(sum(volumes)),
+            })
 
         logger.info(f"Historical fetch complete: {len(all_candles)} trading days for {symbol}")
         return all_candles

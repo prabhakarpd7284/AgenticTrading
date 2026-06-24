@@ -23,7 +23,7 @@ from apps.notifications.services.watchlist_resolvers import refresh_watchlist
 log = structlog.get_logger()
 
 
-@shared_task(name="apps.notifications.tasks.watchlists.refresh_auto_watchlists")
+@shared_task(name="apps.notifications.tasks.watchlists.refresh_auto_watchlists", ignore_result=True)
 def refresh_auto_watchlists() -> dict:
     """Refresh every non-MANUAL watchlist. Returns a summary for telemetry."""
     refreshed = 0

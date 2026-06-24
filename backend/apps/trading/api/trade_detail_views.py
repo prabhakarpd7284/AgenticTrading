@@ -14,6 +14,11 @@ from __future__ import annotations
 
 from datetime import timedelta
 
+from drf_spectacular.types import OpenApiTypes
+from drf_spectacular.utils import (
+    OpenApiParameter, extend_schema, inline_serializer,
+)
+from rest_framework import serializers
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -125,6 +130,17 @@ def _entry_exit_ts(candles, side, entry, stop, target, close_reason):
 class TradeChartView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+        parameters=[
+            OpenApiParameter(
+                "interval", OpenApiTypes.STR, OpenApiParameter.QUERY,
+                description="Swing-trade candle interval: '1d' (default) or '1h'. "
+                            "Ignored for intraday trades (always 5m).",
+                enum=["1d", "1h"], required=False,
+            ),
+        ],
+        responses=OpenApiTypes.OBJECT,
+    )
     def get(self, request, trade_id):
         trade = Trade.objects.filter(tenant=request.tenant, id=trade_id).first()
         if not trade:
@@ -183,6 +199,7 @@ class TradeChartView(APIView):
 class TradeFeedbackView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(responses=OpenApiTypes.OBJECT)
     def get(self, request, trade_id):
         from apps.events.models import Event
 
@@ -197,6 +214,18 @@ class TradeFeedbackView(APIView):
         p = ev.payload or {}
         return Response({"vote": p.get("vote"), "note": p.get("note", ""), "ts": ev.ts.isoformat()})
 
+    @extend_schema(
+        request=inline_serializer(
+            name="TradeFeedbackRequest",
+            fields={
+                "vote": serializers.ChoiceField(choices=["up", "down"]),
+                "note": serializers.CharField(
+                    required=False, allow_blank=True, max_length=1000,
+                ),
+            },
+        ),
+        responses=OpenApiTypes.OBJECT,
+    )
     def post(self, request, trade_id):
         trade = Trade.objects.filter(tenant=request.tenant, id=trade_id).first()
         if not trade:

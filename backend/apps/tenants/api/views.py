@@ -1,7 +1,23 @@
+from drf_spectacular.types import OpenApiTypes
+from drf_spectacular.utils import (
+    OpenApiParameter, extend_schema, extend_schema_view,
+)
 from rest_framework import serializers, viewsets
 
 from apps.common.pagination import CursorPagination
 from apps.tenants.models import Membership, Tenant
+
+# Tenant + Membership both carry UUID primary keys. Pin the detail-route {id}
+# param to UUID so the generated schema doesn't default it to "string" (the
+# cause of the "could not derive type of path parameter" warning). Annotation
+# only — routing + lookup_field are untouched.
+_UUID_PK = [OpenApiParameter("id", OpenApiTypes.UUID, OpenApiParameter.PATH)]
+_uuid_detail_schema = extend_schema_view(
+    retrieve=extend_schema(parameters=_UUID_PK),
+    update=extend_schema(parameters=_UUID_PK),
+    partial_update=extend_schema(parameters=_UUID_PK),
+    destroy=extend_schema(parameters=_UUID_PK),
+)
 
 
 class MembershipPagination(CursorPagination):
@@ -27,6 +43,7 @@ class MembershipSerializer(serializers.ModelSerializer):
         fields = ["id", "user", "tenant", "role", "is_active", "invited_at"]
 
 
+@_uuid_detail_schema
 class TenantViewSet(viewsets.ModelViewSet):
     serializer_class = TenantSerializer
 
@@ -34,6 +51,7 @@ class TenantViewSet(viewsets.ModelViewSet):
         return Tenant.objects.filter(memberships__user=self.request.user).distinct()
 
 
+@_uuid_detail_schema
 class MembershipViewSet(viewsets.ModelViewSet):
     serializer_class = MembershipSerializer
     pagination_class = MembershipPagination

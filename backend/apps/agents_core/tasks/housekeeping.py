@@ -6,7 +6,7 @@ from django.utils import timezone
 from apps.agents_core.models import AgentRun
 
 
-@shared_task
+@shared_task(ignore_result=True)
 def expire_runs() -> int:
     cutoff = timezone.now() - timedelta(minutes=30)
     n = AgentRun.objects.filter(

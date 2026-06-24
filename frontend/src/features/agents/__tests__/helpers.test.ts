@@ -3,7 +3,7 @@ import { describe, it, expect } from "vitest";
 import type { AgentEvent } from "@/types";
 import {
   agentForNode, inferStepKind, computeKpis, cliForStrategy,
-} from "../AgentConsolePage";
+} from "../agentConsole.utils";
 
 /**
  * Pure-helper coverage for the Agents Console enhancements. Keeps the

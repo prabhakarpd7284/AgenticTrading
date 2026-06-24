@@ -1,7 +1,7 @@
 from celery import shared_task
 
 
-@shared_task
+@shared_task(ignore_result=True)
 def refresh_all() -> int:
     from apps.trading.models import Portfolio, PortfolioSnapshot, Position
 

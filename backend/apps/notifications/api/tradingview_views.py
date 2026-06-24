@@ -18,6 +18,10 @@ from typing import Literal
 import structlog
 from django.db.models import Count, Max, Q
 from django.utils import timezone
+from drf_spectacular.types import OpenApiTypes
+from drf_spectacular.utils import (
+    OpenApiParameter, extend_schema, extend_schema_view, inline_serializer,
+)
 from rest_framework import mixins, permissions, serializers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -32,6 +36,18 @@ from apps.notifications.services.tradingview import (
 from apps.strategies.models import Signal
 
 log = structlog.get_logger()
+
+# Watchlist carries a UUID primary key (notifications.models.Watchlist). Pin the
+# detail-route {id} param to UUID so the generated schema doesn't default it to
+# "string" (the "could not derive type of path parameter" warning). Annotation
+# only — routing + lookup_field are untouched.
+_UUID_PK = [OpenApiParameter("id", OpenApiTypes.UUID, OpenApiParameter.PATH)]
+_uuid_detail_schema = extend_schema_view(
+    retrieve=extend_schema(parameters=_UUID_PK),
+    update=extend_schema(parameters=_UUID_PK),
+    partial_update=extend_schema(parameters=_UUID_PK),
+    destroy=extend_schema(parameters=_UUID_PK),
+)
 
 
 # ── Serializers ──────────────────────────────────────────────────────────
@@ -73,6 +89,20 @@ class TradingViewLinkSerializer(serializers.ModelSerializer):
         ):
             raise serializers.ValidationError(
                 "Watchlist must belong to the same owner as the link.",
+            )
+        return value
+
+    def validate_portfolio(self, value):
+        if value is None:
+            return value
+        # Same tenant guard as watchlist — autofire spawns AgentRuns against
+        # this portfolio, so binding it cross-tenant would route trades into
+        # someone else's book. PrimaryKeyRelatedField's default queryset spans
+        # all portfolios, hence the explicit check here.
+        request = self.context.get("request")
+        if request is not None and value.tenant_id != request.tenant.id:
+            raise serializers.ValidationError(
+                "Portfolio must belong to the same tenant as the link.",
             )
         return value
 
@@ -136,6 +166,14 @@ class TradingViewWebhookView(APIView):
     # 200 with parse_error in the body is the right answer (the audit row is
     # safely persisted). Reserve 4xx for real auth/lookup failures.
 
+    @extend_schema(
+        parameters=[
+            OpenApiParameter("secret", OpenApiTypes.STR, OpenApiParameter.PATH,
+                             description="Per-link webhook secret (URL-path auth)."),
+        ],
+        request=OpenApiTypes.OBJECT,
+        responses=OpenApiTypes.OBJECT,
+    )
     def post(self, request, secret: str):
         try:
             link = TradingViewLink.objects.get(webhook_secret=secret, is_active=True)
@@ -229,6 +267,7 @@ class WatchlistSerializer(serializers.ModelSerializer):
         return attrs
 
 
+@_uuid_detail_schema
 class WatchlistViewSet(
     mixins.CreateModelMixin,
     mixins.ListModelMixin,
@@ -240,6 +279,12 @@ class WatchlistViewSet(
     serializer_class = WatchlistSerializer
 
     def get_queryset(self):
+        # During drf-spectacular schema generation the request is a stub with
+        # no tenant/user — short-circuit so param-type derivation succeeds (and
+        # the {id} UUID annotation applies cleanly). No runtime effect: the flag
+        # is only set while introspecting for docs.
+        if getattr(self, "swagger_fake_view", False):
+            return Watchlist.objects.none()
         return Watchlist.objects.filter(
             tenant=self.request.tenant,
             owner=self.request.user,
@@ -366,6 +411,22 @@ class GroupedSignalsView(APIView):
 
     permission_classes = [permissions.IsAuthenticated]
 
+    @extend_schema(
+        parameters=[
+            OpenApiParameter("by", OpenApiTypes.STR, OpenApiParameter.QUERY,
+                             required=False, enum=sorted(_VALID_GROUP_BY),
+                             description="Group dimension (default symbol)."),
+            OpenApiParameter("days", OpenApiTypes.INT, OpenApiParameter.QUERY,
+                             required=False, description="Window in days (default 7, max 90)."),
+            OpenApiParameter("source", OpenApiTypes.STR, OpenApiParameter.QUERY,
+                             required=False, description="Filter to one Signal source."),
+            OpenApiParameter("symbol", OpenApiTypes.STR, OpenApiParameter.QUERY,
+                             required=False, description="Filter to one symbol."),
+            OpenApiParameter("watchlist", OpenApiTypes.UUID, OpenApiParameter.QUERY,
+                             required=False, description="Restrict to this watchlist's symbols."),
+        ],
+        responses=OpenApiTypes.OBJECT,
+    )
     def get(self, request):
         tenant = request.tenant
         by = (request.query_params.get("by") or "symbol").lower()
@@ -424,6 +485,22 @@ class GroupedSignalsDetailView(APIView):
 
     permission_classes = [permissions.IsAuthenticated]
 
+    @extend_schema(
+        parameters=[
+            OpenApiParameter("by", OpenApiTypes.STR, OpenApiParameter.QUERY,
+                             required=False, enum=sorted(_VALID_GROUP_BY),
+                             description="Group dimension (default symbol)."),
+            OpenApiParameter("key", OpenApiTypes.STR, OpenApiParameter.QUERY,
+                             required=True, description="Bucket key to drill into (e.g. RELIANCE)."),
+            OpenApiParameter("days", OpenApiTypes.INT, OpenApiParameter.QUERY,
+                             required=False, description="Window in days (default 7, max 90)."),
+            OpenApiParameter("source", OpenApiTypes.STR, OpenApiParameter.QUERY,
+                             required=False, description="Filter to one Signal source."),
+            OpenApiParameter("watchlist", OpenApiTypes.UUID, OpenApiParameter.QUERY,
+                             required=False, description="Restrict to this watchlist's symbols."),
+        ],
+        responses=OpenApiTypes.OBJECT,
+    )
     def get(self, request):
         tenant = request.tenant
         by = (request.query_params.get("by") or "symbol").lower()
@@ -549,6 +626,17 @@ class WatchlistKindsView(APIView):
 
     permission_classes = [permissions.IsAuthenticated]
 
+    @extend_schema(
+        responses=inline_serializer(
+            name="WatchlistKind",
+            many=True,
+            fields={
+                "kind": serializers.CharField(),
+                "label": serializers.CharField(),
+                "defaults": serializers.DictField(),
+            },
+        ),
+    )
     def get(self, request):
         return Response([
             {

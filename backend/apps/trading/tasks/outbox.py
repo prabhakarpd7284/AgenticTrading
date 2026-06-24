@@ -9,7 +9,7 @@ from apps.trading.models import OutboxEvent
 from apps.trading.services.order_saga import OrderSaga
 
 
-@shared_task(queue="orders")
+@shared_task(queue="orders", ignore_result=True)
 def process_outbox(batch: int = 50) -> int:
     """Pull up to `batch` pending events FOR UPDATE SKIP LOCKED and run the saga."""
     processed = 0

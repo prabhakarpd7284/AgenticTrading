@@ -175,6 +175,11 @@ from celery.schedules import crontab  # noqa: E402
 
 CELERY_BROKER_URL = env("CELERY_BROKER_URL", default=REDIS_URL)
 CELERY_RESULT_BACKEND = env("CELERY_RESULT_BACKEND", default=REDIS_URL)
+# High-frequency periodic tasks store a celery-task-meta-* result blob nobody
+# reads; cap their lifetime (was an implicit 24h) so Redis doesn't accumulate
+# them. Per-task ignore_result=True on the fire-and-forget periodics suppresses
+# the write entirely; this TTL is the safety net for the rest.
+CELERY_RESULT_EXPIRES = 3600
 CELERY_TASK_ACKS_LATE = True
 CELERY_TASK_REJECT_ON_WORKER_LOST = True
 CELERY_WORKER_PREFETCH_MULTIPLIER = 1
@@ -182,18 +187,26 @@ CELERY_WORKER_PREFETCH_MULTIPLIER = 1
 # Celery timezone so 09:15 means 09:15 IST, not UTC. Interval-based entries
 # (the float schedules below) are timezone-agnostic, so this is safe.
 CELERY_TIMEZONE = "Asia/Kolkata"
+# Every entry carries options.expires >= its cadence so a wake-up produced
+# while the worker is DOWN self-discards instead of piling into a durable
+# queue. (On 2026-06-24 a stopped worker let process_outbox accumulate 13,669
+# stale messages over ~11h.) A 1s poll is worthless 10s later, so its TTL is
+# tight; longer cadences get >= one interval.
 CELERY_BEAT_SCHEDULE = {
     "process-order-outbox": {
         "task": "apps.trading.tasks.outbox.process_outbox",
         "schedule": 1.0,
+        "options": {"expires": 10},
     },
     "refresh-portfolio-snapshots": {
         "task": "apps.trading.tasks.snapshots.refresh_all",
         "schedule": 60.0,
+        "options": {"expires": 120},
     },
     "expire-old-agent-runs": {
         "task": "apps.agents_core.tasks.housekeeping.expire_runs",
         "schedule": 300.0,
+        "options": {"expires": 600},
     },
     # Broker snapshot refresh — fan-out task picks every ACTIVE BrokerLink
     # and dispatches per-link refreshes. The task itself derives the next
@@ -202,10 +215,12 @@ CELERY_BEAT_SCHEDULE = {
     "refresh-broker-positions": {
         "task": "apps.market_data.tasks.broker_refresh.refresh_broker_positions",
         "schedule": 30.0,
+        "options": {"expires": 60},
     },
     "prune-broker-snapshots": {
         "task": "apps.market_data.tasks.broker_refresh.prune_old_snapshots",
         "schedule": 3600.0 * 6,  # every 6h
+        "options": {"expires": 3600},
     },
     # Auto-kind watchlists (SIGNAL_RANK, SOURCE_HOT, RECENT_ACTIVE, …)
     # re-resolve every 5 min. Task is cheap — pure DB aggregates with no
@@ -214,6 +229,7 @@ CELERY_BEAT_SCHEDULE = {
     "refresh-auto-watchlists": {
         "task": "apps.notifications.tasks.watchlists.refresh_auto_watchlists",
         "schedule": 300.0,
+        "options": {"expires": 600},
     },
     # ── Daily trading pipeline ────────────────────────────────────────
     # Three crontab tasks (IST) make AlphaDesk produce data on its own
@@ -282,6 +298,12 @@ LOGGING = {
     "loggers": {
         "django.request": {"level": "WARNING", "propagate": True},
         "apps": {"level": "INFO", "propagate": True},
+        # Angel SmartApi SDK stdlib loggers — keep at ERROR so verbose request
+        # dumps stay quiet. (The plaintext-credential leak comes from the SDK's
+        # SEPARATE logzero logger, neutralised by CredentialRedactionFilter in
+        # apps.common.logging, installed via the apps.common AppConfig.ready.)
+        "SmartApi": {"level": "ERROR", "propagate": True},
+        "SmartApi.smartConnect": {"level": "ERROR", "propagate": True},
     },
 }
 

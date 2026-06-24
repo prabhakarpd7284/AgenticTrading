@@ -22,7 +22,6 @@ Rate limiting:
 from __future__ import annotations
 
 import logging
-import time
 from typing import Any, Callable, TypeVar
 
 from apps.market_data.adapters.base import (
@@ -34,6 +33,10 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T")
 
 
+class BrokerRateLimited(Exception):
+    """Raised by _throttled while the rate-limit breaker is open (no API hit)."""
+
+
 def _throttled(fn: Callable[..., T], *args, **kwargs) -> T:
     """Run a SmartAPI call after taking a slot on the universal throttle.
 
@@ -41,13 +44,39 @@ def _throttled(fn: Callable[..., T], *args, **kwargs) -> T:
     BrokerClient is lazy — strategies / tests that never link an Angel
     account don't pay the import cost. Falls back to a no-op if the
     legacy module isn't available (e.g. in tests that mock the broker).
+
+    Guarded by the Redis-coordinated rate-limit breaker living on
+    BrokerClient (shared across ALL ForkPool workers + the legacy candle
+    path). While the breaker is open the call fast-fails with
+    BrokerRateLimited instead of touching the API, so an account-level
+    cooldown can actually elapse. A rate-limit / connection-timeout error
+    trips the breaker; any clean call resets it.
     """
+    bc = None
     try:
-        from trading.services.data_service import BrokerClient  # type: ignore
-        BrokerClient.get_instance().throttle()
+        from trading.services.data_service import (  # type: ignore
+            BrokerClient, _is_transient_broker_error,
+        )
+        bc = BrokerClient.get_instance()
     except Exception as e:  # pragma: no cover — defensive only
         logger.debug("angel.throttle.unavailable: %s", e)
-    return fn(*args, **kwargs)
+        return fn(*args, **kwargs)
+
+    remaining_ms = bc.breaker_remaining_ms()
+    if remaining_ms > 0:
+        raise BrokerRateLimited(
+            f"Angel rate-limit breaker open; {remaining_ms // 1000}s cooldown left"
+        )
+    bc.throttle()
+
+    try:
+        result = fn(*args, **kwargs)
+    except Exception as e:
+        if _is_transient_broker_error(e):
+            bc.trip_breaker()
+        raise
+    bc.reset_breaker()
+    return result
 
 
 class AngelOneAdapter(BrokerAdapterBase):
@@ -75,10 +104,16 @@ class AngelOneAdapter(BrokerAdapterBase):
             otp = pyotp.TOTP(totp_secret).now()
             data = _throttled(self._api.generateSession, client_code, password, otp)
             if not isinstance(data, dict) or not data.get("data"):
-                logger.error("angel_one.auth.failed payload=%s", str(data)[:200])
+                _msg = data.get("message") if isinstance(data, dict) else None
+                _code = data.get("errorcode") if isinstance(data, dict) else None
+                logger.error("angel_one.auth.failed code=%s msg=%s", _code, _msg)
                 return False
             self._session_expires = time.time() + 22 * 3600
             return True
+        except BrokerRateLimited as e:
+            # Breaker open — concise one-liner, no traceback spam per refresh.
+            logger.warning("angel_one.auth.rate_limited: %s", e)
+            return False
         except Exception as e:
             logger.exception("angel_one.auth.exception: %s", e)
             return False

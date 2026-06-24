@@ -60,9 +60,30 @@ EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
 INTERNAL_IPS = ["127.0.0.1"]
 
 # ---------------------------------------------------------------------------
-# Channels — in-memory layer in dev unless USE_REDIS=1 or REDIS_URL is set.
+# Redis / Celery — pin to the dev docker host (docker-compose.dev.yml maps
+# 6380:6379). base.py defaults REDIS_URL to :6379, which on this machine is a
+# SEPARATE project's Redis (bull:* / analytics:* keys) — AlphaDesk must NEVER
+# touch it. dev.py overriding only DATABASE_URL (above) previously left Celery
+# pointing at base.py's :6379 default whenever backend/.env wasn't loaded.
 # ---------------------------------------------------------------------------
-if not env.bool("USE_REDIS", default=False):
+REDIS_URL = env("REDIS_URL", default="redis://localhost:6380/0")
+CELERY_BROKER_URL = env("CELERY_BROKER_URL", default=REDIS_URL)
+CELERY_RESULT_BACKEND = env("CELERY_RESULT_BACKEND", default=REDIS_URL)
+
+# ---------------------------------------------------------------------------
+# Channels — in-memory layer in dev unless USE_REDIS=1. When Redis channels
+# ARE enabled, rebuild CHANNEL_LAYERS from the pinned REDIS_URL above: base.py
+# built its CHANNEL_LAYERS from the old :6379 default at import time, so we
+# must rebuild here or USE_REDIS=1 would still route channels to :6379.
+# ---------------------------------------------------------------------------
+if env.bool("USE_REDIS", default=False):
+    CHANNEL_LAYERS = {
+        "default": {
+            "BACKEND": "channels_redis.core.RedisChannelLayer",
+            "CONFIG": {"hosts": [REDIS_URL]},
+        },
+    }
+else:
     CHANNEL_LAYERS = {
         "default": {"BACKEND": "channels.layers.InMemoryChannelLayer"},
     }
