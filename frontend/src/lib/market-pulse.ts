@@ -618,10 +618,13 @@ export function useOKBacktest(params: {
   return useQuery<OKBacktestPayload>({
     queryKey: ["ok-backtest", params.mode, params.from_date, params.to_date],
     queryFn: async () => {
-      // Backtests are slow (daily ~30s, intraday ~120s) — use a long timeout
+      // Backtests are slow and synchronous. The basket mode does a first-of-day
+      // NIFTY-100 universe scan (~98 daily fetches) before the intraday backtest;
+      // cold that's ~90s, but broker latency / a first cold cache can push it
+      // higher, so allow 5 min. Warm re-runs are a few seconds (Redis-cached).
       const r = await api.get<OKBacktestPayload>("/market-data/ok-backtest/", {
         params: { mode: params.mode, from_date: params.from_date, to_date: params.to_date },
-        timeout: 180_000,
+        timeout: 300_000,
       });
       return r.data;
     },

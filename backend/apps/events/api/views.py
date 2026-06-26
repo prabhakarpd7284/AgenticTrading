@@ -1,5 +1,7 @@
 from rest_framework import serializers, viewsets
+from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
 
 from apps.events.models import Event
 
@@ -25,6 +27,7 @@ class EventViewSet(viewsets.ReadOnlyModelViewSet):
       ?trade_id=<uuid>
       ?severity=error
       ?actor_kind=workflow
+      ?symbol=DRREDDY             (payload.symbol exact, uppercased)
       ?since=2026-05-01           (ts >= since)
       ?until=2026-05-31           (ts <= until)
       ?step_name=plan
@@ -54,6 +57,13 @@ class EventViewSet(viewsets.ReadOnlyModelViewSet):
         if prefix:
             qs = qs.filter(type__startswith=prefix)
 
+        # Symbol — JSONB payload lookup (e.g. ?symbol=DRREDDY). Symbols are
+        # persisted uppercase, so normalise the param. Events without a
+        # payload.symbol (text-only rows) simply won't match.
+        symbol = params.get("symbol")
+        if symbol:
+            qs = qs.filter(payload__symbol=symbol.upper())
+
         # Time window
         since = params.get("since")
         if since:
@@ -63,3 +73,21 @@ class EventViewSet(viewsets.ReadOnlyModelViewSet):
             qs = qs.filter(ts__lte=until)
 
         return qs
+
+    @action(detail=False, methods=["get"])
+    def count(self, request):
+        """Total + most-recent matching event for the given filters.
+
+        The list endpoint uses cursor pagination (no `count`), so callers
+        that need a total — e.g. "screener fired N signals for SYMBOL" —
+        hit this instead.  Honours every query-param filter on the list.
+        """
+        qs = self.get_queryset()
+        latest = qs.first()  # qs is ordered by -ts, so this is the newest
+        return Response({
+            "count": qs.count(),
+            "latest": (
+                {"ts": latest.ts, "type": latest.type, "payload": latest.payload}
+                if latest else None
+            ),
+        })

@@ -38,7 +38,7 @@ import {
   type SetupPayload,
   type SetupPlan,
 } from "@/lib/market-pulse";
-import { cn, fmtInr, fmtNum, fmtPct, fmtRel } from "@/lib/utils";
+import { cn, fmtDateTime, fmtInr, fmtNum, fmtPct, fmtRel } from "@/lib/utils";
 import {
   Card, CardContent, CardDescription, CardHeader, CardTitle,
 } from "@/components/ui/Card";
@@ -47,6 +47,8 @@ import { Button } from "@/components/ui/Button";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { OpButton } from "@/features/ops/OpButton";
+import { LivePositionGuard, TrackRecordCard } from "./TrackRecordCard";
+import { TrackSetupButton } from "./TrackSetupButton";
 
 export function SetupPage() {
   const { symbol = "" } = useParams();
@@ -96,10 +98,14 @@ export function SetupPage() {
         updatedAt={dataUpdatedAt}
       />
 
+      <LivePositionGuard symbol={data.symbol} />
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <PlanCard data={data} />
         <RiskBreakdownCard data={data} />
       </div>
+
+      <TrackRecordCard symbol={data.symbol} lastPrice={data.market.last} />
 
       {data.errors.length > 0 && (
         <Card>
@@ -161,9 +167,19 @@ function SetupHeader({
         <div className="flex items-center gap-2 flex-wrap">
           <SideToggle side={side} setSide={setSide} />
           <RegimePill data={data} />
-          <span className="text-caption text-fg-subtle">
-            Updated {fmtRel(new Date(updatedAt).toISOString())}
+          {/* Generation time of THIS plan (server as_of), so a saved setup
+              has a fixed anchor to measure performance from. The client
+              fetch time is secondary, shown as the relative "· refreshed". */}
+          <span
+            className="text-caption text-fg-subtle"
+            title={`Setup generated ${fmtDateTime(data.as_of)} · refreshed ${fmtRel(new Date(updatedAt).toISOString())} ago`}
+          >
+            Generated {fmtDateTime(data.as_of)}
           </span>
+
+          {/* Non-execute action: add to the "Tracked Setups" watchlist +
+              snapshot the plan. Nothing here sends an order. */}
+          <TrackSetupButton data={data} />
 
           {/* Send the symbol to the planner CLI — read the rationale + RiskGuard
               verdict in the streamed log. Doesn't auto-refetch the deterministic

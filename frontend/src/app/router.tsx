@@ -18,6 +18,7 @@ import { TradingViewPage } from "@/features/tradingview/TradingViewPage";
 import { SwingScannerPage } from "@/features/swing-scanner/SwingScannerPage";
 import { BasketPage } from "@/features/basket/BasketPage";
 import PyramidPage from "@/features/pyramid/PyramidPage";
+import ScalpingPage from "@/features/scalping/ScalpingPage";
 import OptionsDashboardPage from "@/features/options/OptionsDashboardPage";
 import { OpsPage } from "@/features/ops/OpsPage";
 import { PipelinePage } from "@/features/pipeline/PipelinePage";
@@ -54,6 +55,8 @@ export const router = createBrowserRouter([
       { path: "basket", element: <BasketPage /> },
       { path: "backtester", element: <BacktesterPage /> },
       { path: "pyramid", element: <PyramidPage /> },
+      // Scalping Simulator — bin-pressure scalper with live tick replay.
+      { path: "scalping", element: <ScalpingPage /> },
       // Options Desk — single-screen trader cockpit covering every options
       // strategy (straddle, vertical spreads, iron condor, pyramid).
       { path: "options", element: <OptionsDashboardPage /> },

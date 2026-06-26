@@ -37,6 +37,12 @@ class EngineConfig:
     daily_loss_limit_pct: float = 3.0
     cooldown_bars: int = 0          # Min bars between entries (per symbol)
     max_concurrent_per_symbol: int = 1  # Max open trades per symbol
+    # Entry window (inclusive, 'YYYY-MM-DD'). Bars OUTSIDE this window are still
+    # processed — for indicator warmup and for exiting open trades — but NO new
+    # entries are opened outside it. Lets a backtest fetch a long lookback for
+    # warmup yet only trade the requested period. None = no restriction.
+    entry_from: Optional[str] = None
+    entry_to: Optional[str] = None
 
 
 class BacktestEngine:
@@ -120,6 +126,12 @@ class BacktestEngine:
         for day in trading_days:
             self._daily_pnl = 0.0
 
+            # Whether new entries are allowed on this day. Bars before the
+            # window still run (warmup + exits) but don't open trades, so a
+            # 120-day lookback doesn't leak warmup-period trades into the
+            # requested window's stats.
+            entries_allowed = self._in_entry_window(day)
+
             # 1. Check exits on open trades
             for trade in list(self._open):
                 bar = self._find_bar_for_day(data.get(trade.symbol, []), day)
@@ -143,7 +155,9 @@ class BacktestEngine:
             if self._daily_pnl < -loss_limit:
                 continue
 
-            # 3. Scan for new entries
+            # 3. Scan for new entries (only inside the entry window)
+            if not entries_allowed:
+                continue
             for symbol, bars in data.items():
                 if self._count_open(symbol) >= self.config.max_concurrent_per_symbol:
                     continue
@@ -175,6 +189,10 @@ class BacktestEngine:
             last_exit_idx = -self.config.cooldown_bars
 
             for i in range(len(bars)):
+                # Only open entries inside the window; bars outside still feed
+                # the detector (warmup) and exit walk-forward below.
+                if not self._in_entry_window(bars[i].timestamp[:10]):
+                    continue
                 signals = self.entry.detect(symbol, bars, i, context)
                 if not signals:
                     continue
@@ -233,6 +251,17 @@ class BacktestEngine:
 
     def _count_open(self, symbol: str) -> int:
         return sum(1 for t in self._open if t.symbol == symbol)
+
+    def _in_entry_window(self, day: str) -> bool:
+        """True if `day` ('YYYY-MM-DD') is within the configured entry window.
+
+        No window configured → always True (back-compat). Comparison is on the
+        date string, which is lexicographically ordered for ISO dates."""
+        if self.config.entry_from and day < self.config.entry_from:
+            return False
+        if self.config.entry_to and day > self.config.entry_to:
+            return False
+        return True
 
     def _close_remaining(self, data: Dict[str, List[Bar]]):
         """Close all open trades at last available price."""

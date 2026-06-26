@@ -174,3 +174,79 @@ class TestGroupedSignals:
         resp = auth_client.get("/api/v1/notifications/tradingview/signals/")
         assert resp.status_code == 200
         assert resp.json()["rows"] == []
+
+
+# ── Grouped-signals drill-in ────────────────────────────────────────────
+
+class TestGroupedSignalsDetail:
+    """The detail endpoint backs the row-click drill-in sheet. The sheet
+    passes the *same* by/key/days/source filters it's grouped under, so the
+    raw rows it shows must match the bucket the operator clicked — across
+    every group-by dimension, not just symbol."""
+
+    DETAIL = "/api/v1/notifications/tradingview/signals/detail/"
+
+    @pytest.fixture
+    def seeded(self, owner):
+        tenant = owner.memberships.first().tenant
+        now = timezone.now()
+        seed = [
+            ("RELIANCE", "BUY",  "vwap",     "TRADINGVIEW", now - timedelta(hours=1)),
+            ("RELIANCE", "SELL", "vwap",     "TRADINGVIEW", now - timedelta(hours=2)),
+            ("TCS",      "BUY",  "breakout", "SCREENER",    now - timedelta(hours=3)),
+        ]
+        for sym, side, strat, src, ts in seed:
+            Signal.objects.create(
+                tenant=tenant, symbol=sym, signal_date=ts.date(), signal_time=ts,
+                source=src, strategy=strat, side=side,
+                entry_price=100.0, stoploss=0.0, target=0.0,
+            )
+        return tenant
+
+    def test_by_symbol(self, auth_client, seeded):
+        resp = auth_client.get(f"{self.DETAIL}?by=symbol&key=RELIANCE")
+        assert resp.status_code == 200, resp.content
+        body = resp.json()
+        assert body["by"] == "symbol"
+        assert body["key"] == "RELIANCE"
+        assert {r["symbol"] for r in body["rows"]} == {"RELIANCE"}
+        assert len(body["rows"]) == 2
+
+    def test_by_strategy(self, auth_client, seeded):
+        resp = auth_client.get(f"{self.DETAIL}?by=strategy&key=vwap")
+        assert resp.status_code == 200
+        rows = resp.json()["rows"]
+        assert all(r["strategy"] == "vwap" for r in rows)
+        assert len(rows) == 2
+
+    def test_by_source(self, auth_client, seeded):
+        resp = auth_client.get(f"{self.DETAIL}?by=source&key=SCREENER")
+        assert resp.status_code == 200
+        rows = resp.json()["rows"]
+        assert {r["symbol"] for r in rows} == {"TCS"}
+
+    def test_by_day(self, auth_client, seeded):
+        key = timezone.now().date().isoformat()
+        resp = auth_client.get(f"{self.DETAIL}?by=day&key={key}")
+        assert resp.status_code == 200
+        # All three seeded signals fired today.
+        assert len(resp.json()["rows"]) == 3
+
+    def test_source_filter_composes(self, auth_client, seeded):
+        # Drill into the RELIANCE symbol bucket but with a source filter that
+        # excludes it — should come back empty, mirroring the feed.
+        resp = auth_client.get(f"{self.DETAIL}?by=symbol&key=RELIANCE&source=SCREENER")
+        assert resp.status_code == 200
+        assert resp.json()["rows"] == []
+
+    def test_missing_key_returns_400(self, auth_client, seeded):
+        resp = auth_client.get(f"{self.DETAIL}?by=symbol")
+        assert resp.status_code == 400
+
+    def test_invalid_by_returns_400(self, auth_client, seeded):
+        resp = auth_client.get(f"{self.DETAIL}?by=bogus&key=RELIANCE")
+        assert resp.status_code == 400
+
+    def test_malformed_day_key_returns_400(self, auth_client, seeded):
+        resp = auth_client.get(f"{self.DETAIL}?by=day&key=not-a-date")
+        assert resp.status_code == 400

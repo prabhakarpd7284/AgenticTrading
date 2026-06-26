@@ -72,6 +72,12 @@ class IntradayCycleResult:
     target: float = 0.0
     risk_points: float = 0.0
 
+    # Unrounded entry/risk — let a grid-search backtest recompute the target for
+    # a different R:R (target = entry ± risk × rr) WITHOUT re-running the scan,
+    # reproducing _build_signal's rounding exactly. See IntradayCycleAdapter.
+    entry_raw: float = 0.0
+    risk_raw: float = 0.0
+
     @property
     def confirmed(self) -> bool:
         """Phase + momentum both confirm."""
@@ -416,6 +422,8 @@ class IntradayCycleDetector:
             sl=round(sl, 2),
             target=round(target, 2),
             risk_points=round(risk, 2) if risk > 0 else 0,
+            entry_raw=close,
+            risk_raw=risk if risk > 0 else 0.0,
         )
 
 

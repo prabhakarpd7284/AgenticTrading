@@ -55,6 +55,19 @@ export function fmtRel(iso: string | Date | null | undefined, nowMs = Date.now()
   return `${Math.floor(diff / 86_400)}d`;
 }
 
+/** Absolute IST timestamp for anchored events: "24 Jun, 14:32". Always IST
+ *  (the market timezone) regardless of the viewer's locale, so a saved
+ *  setup's generation time reads the same for everyone. */
+export function fmtDateTime(iso: string | Date | null | undefined): string {
+  if (!iso) return "—";
+  const d = iso instanceof Date ? iso : new Date(iso);
+  if (isNaN(d.getTime())) return "—";
+  return d.toLocaleString("en-IN", {
+    day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit",
+    hour12: false, timeZone: "Asia/Kolkata",
+  });
+}
+
 /** Semantic P&L colour class — never relies on sign alone (paired with +/− glyph). */
 export function clsPnl(n: number | string | null | undefined): string {
   const v = typeof n === "string" ? parseFloat(n) : (n ?? 0);

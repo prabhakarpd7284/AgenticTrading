@@ -46,7 +46,12 @@ def _get_redis_for_throttle():
     _THROTTLE_REDIS_PROBED = True
     try:
         import redis  # type: ignore
-        url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+        # AlphaDesk's Redis is :6380 (docker maps 6380:6379); :6379 on this host
+        # is a SEPARATE project. The fallback must match dev.py's pinned :6380,
+        # never the bare :6379 default — otherwise the throttle + breaker would
+        # silently coordinate on the wrong Redis and each process would burst
+        # past Angel's rate limit independently. REDIS_URL (from .env) wins.
+        url = os.getenv("REDIS_URL", "redis://localhost:6380/0")
         client = redis.Redis.from_url(url, socket_timeout=2)
         # Cheap liveness probe so we fail-fast on a misconfig.
         client.ping()
@@ -141,7 +146,8 @@ class BrokerClient:
 
     ALL broker API calls go through this class. It provides:
       - Single authenticated session (thread-safe login)
-      - Global rate limiter (0.4s min gap between ANY API call)
+      - Two-tier rate limiter (0.4s global gap; wider 0.7s gap for the
+        rate-tight getCandleData endpoint), enforced cross-process via Redis
       - TTL cache for ltpData (avoids redundant spot/LTP fetches)
       - Retry with backoff on rate-limit errors
       - Request counting for monitoring
@@ -170,10 +176,21 @@ class BrokerClient:
         self.smart_api = SmartConnect(self.api_key)
         self._logged_in = False
 
-        # Rate limiting: min 0.4s between any API call
+        # Rate limiting: min gap between API calls, enforced both in-process
+        # and cross-process (Redis). Two tiers, because Angel One throttles
+        # PER ENDPOINT and the historical/candle endpoint is the tight one:
+        #   • global  — light endpoints (LTP / quote / order / position).
+        #   • candle  — getCandleData is capped at ~3 req/s by Angel and is the
+        #     endpoint that bursts during backtests / screener bootstrap, so it
+        #     gets a wider gap (default 0.7s ≈ 1.4/s → ~50% headroom under 3/s)
+        #     to keep clock/round-trip jitter from ever crossing the limit and
+        #     tripping the breaker. Both tunable via env without a redeploy.
         self._last_call_time = 0.0
         self._rate_lock = threading.Lock()
-        self._min_interval = 0.4  # seconds
+        self._min_interval = float(os.getenv("SMARTAPI_MIN_INTERVAL", "0.4"))
+        self._candle_min_interval = float(
+            os.getenv("SMARTAPI_CANDLE_MIN_INTERVAL", "0.7")
+        )
 
         # LTP cache: {cache_key: (timestamp, result)}
         self._ltp_cache: Dict[str, tuple] = {}
@@ -215,7 +232,7 @@ class BrokerClient:
     """
     _REDIS_THROTTLE_KEY = "alphadesk:smartapi:throttle:last_call_ms"
 
-    def _throttle(self):
+    def _throttle(self, min_gap: float | None = None):
         """Enforce min interval between SmartAPI calls — process-wide
         AND cross-process when Redis is available.
 
@@ -225,18 +242,24 @@ class BrokerClient:
         the Daphne process, plus the legacy CLI scripts all share the
         same queue. Falls back gracefully to local-only when Redis is
         unreachable.
+
+        `min_gap` overrides the default global gap for endpoints with a
+        tighter limit (e.g. getCandleData passes the wider candle gap). It
+        only ever WIDENS the gap — never narrower than the global floor.
         """
+        gap = self._min_interval if min_gap is None else max(self._min_interval, min_gap)
         with self._rate_lock:
             now = time.monotonic()
             elapsed = now - self._last_call_time
-            if elapsed < self._min_interval:
-                time.sleep(self._min_interval - elapsed)
+            if elapsed < gap:
+                time.sleep(gap - elapsed)
             self._last_call_time = time.monotonic()
             self._call_count += 1
-        self._cross_process_throttle()
+        self._cross_process_throttle(gap)
 
-    def _cross_process_throttle(self) -> None:
+    def _cross_process_throttle(self, min_gap: float | None = None) -> None:
         """Sleep until our turn in the Redis-coordinated slot queue."""
+        gap = self._min_interval if min_gap is None else max(self._min_interval, min_gap)
         try:
             r = _get_redis_for_throttle()
         except Exception:
@@ -255,7 +278,7 @@ class BrokerClient:
             wait_ms = r.eval(
                 self._LUA_THROTTLE, 1,
                 self._REDIS_THROTTLE_KEY,
-                int(self._min_interval * 1000),
+                int(gap * 1000),
                 int(time.time() * 1000),
             )
             wait_ms = int(wait_ms or 0)
@@ -435,6 +458,46 @@ class BrokerClient:
         except Exception:
             pass
 
+    def await_breaker(self, max_wait: float | None = None) -> str:
+        """Block (bounded) until the rate-limit breaker lets a call through.
+
+        For BATCH/HISTORICAL callers only (backtests, EOD enrichment) where
+        blocking is acceptable and an empty result would silently corrupt the
+        run. A live tick loop must NOT use this — it would wedge the ASGI
+        thread; those callers fail-fast on an open breaker instead.
+
+        Returns the resolved gate once it clears: 'closed' or 'probe' (caller
+        proceeds; 'probe' still obliges reset_breaker()/trip_breaker()), or
+        'open' if the cooldown didn't clear within max_wait (caller gives up).
+        """
+        if max_wait is None:
+            max_wait = self._BREAKER_MAX_COOLDOWN + 5
+        deadline = time.monotonic() + max_wait
+        announced = False
+        while True:
+            rem_ms = self.breaker_remaining_ms()
+            if rem_ms > 0:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return "open"
+                # +0.05s so we re-check just AFTER the cooldown elapses.
+                sleep_s = min(rem_ms / 1000.0 + 0.05, remaining)
+                if not announced:
+                    logger.info(
+                        "Candle fetch waiting up to %.1fs for rate-limit breaker cooldown…",
+                        rem_ms / 1000.0,
+                    )
+                    announced = True
+                time.sleep(sleep_s)
+            gate = self.breaker_gate()
+            if gate != "open":
+                return gate              # closed, or we won the half-open probe
+            if time.monotonic() >= deadline:
+                return "open"
+            # Cooldown elapsed but another caller won the probe slot (or it
+            # re-tripped). Brief backoff, then try for the next probe window.
+            time.sleep(0.5)
+
     def login(self) -> bool:
         """Authenticate with Angel One (thread-safe, idempotent)."""
         with self._login_lock:
@@ -530,6 +593,7 @@ class BrokerClient:
         end: str,
         interval: str = "FIVE_MINUTE",
         exchange: str | None = None,
+        wait_on_breaker: bool = False,
     ) -> List:
         """Fetch OHLCV candle data with retry on rate-limit errors.
 
@@ -538,6 +602,12 @@ class BrokerClient:
         segment (NSE/BSE); other tokens fall back to ticker_service for
         NSE/NFO/BSE/BFO/MCX classification; ultimate default is NSE.
         Pass exchange explicitly to override.
+
+        `wait_on_breaker` is for BATCH/HISTORICAL callers (backtests, EOD
+        enrichment): instead of fail-fast returning [] when the rate-limit
+        breaker is open, block (bounded) until the cooldown clears, then
+        probe. Live tick loops leave it False so they never wedge on an open
+        breaker. See await_breaker().
         """
         self.ensure_login()
 
@@ -584,13 +654,21 @@ class BrokerClient:
         # extends the ban. Honour the half-open gate: deny while OPEN, allow a
         # single probe when the cooldown has elapsed.
         gate = self.breaker_gate()
+        if gate == "open" and wait_on_breaker:
+            # Batch/historical path: don't silently return [] (which corrupts a
+            # backtest into a misleading "0 trades" success) — wait out the
+            # cooldown, then probe.
+            gate = self.await_breaker()
         if gate == "open":
             logger.debug("Candle fetch skipped — rate-limit breaker open")
             return []
 
         max_retries = 2
         for attempt in range(max_retries + 1):
-            self._throttle()
+            # getCandleData is the rate-tight endpoint — throttle it on the
+            # wider candle gap so bursts (backtests / bootstrap) stay under
+            # Angel's ~3/s cap and never trip the breaker.
+            self._throttle(self._candle_min_interval)
             try:
                 response = self.smart_api.getCandleData(params)
                 if response is None:
@@ -1072,20 +1150,61 @@ class DataService:
             f"Fetching historical data: {symbol} | {from_date} → {to_date} | interval={interval}"
         )
 
-        # Angel One getCandleData caps the span PER CALL by interval. Fetch the
-        # whole lookback in as few calls as possible by chunking the range to
-        # each interval's max span — instead of one call per day, which made a
-        # single 120-day intraday scan ~83 calls/symbol and tripped the broker
-        # rate limit. (NSE weekends/holidays are skipped server-side, so we
-        # request the full window and let grouping yield only trading days.)
-        _INTERVAL_MAX_DAYS = {
-            "ONE_MINUTE": 30, "THREE_MINUTE": 60,
-            "FIVE_MINUTE": 100, "TEN_MINUTE": 100,
-            "FIFTEEN_MINUTE": 200, "THIRTY_MINUTE": 200,
-            "ONE_HOUR": 400, "ONE_DAY": 2000,
-        }
-        cap_days = _INTERVAL_MAX_DAYS.get(interval, 100)
+        # ONE_DAY rows are already daily granularity AND immutable once the
+        # session closes — so cache them per-day in Redis (shared across the
+        # fleet, survives restarts). A repeat/overlapping backtest then hits
+        # Angel only for today's still-forming bar, not the whole lookback.
+        if interval == "ONE_DAY":
+            return self._fetch_daily_cached(token, symbol, start_dt, end_dt, interval)
 
+        # Intraday intervals → reuse the Redis-cached raw intraday fetch, then
+        # aggregate each trading day into one daily OHLCV row. Sharing
+        # fetch_intraday_candles (same per-day cache namespace) means completed
+        # days cost ~0 broker calls on repeat. Candles are in ascending time
+        # order per day, so per-day first-open / last-close stay correct.
+        intraday = self.fetch_intraday_candles(symbol, from_date, to_date, interval)
+        by_day: Dict[str, list] = {}
+        for c in intraday:
+            day = str(c["timestamp"])[:10]
+            by_day.setdefault(day, []).append(c)
+
+        for day_str, rows in by_day.items():
+            all_candles.append({
+                "date": day_str,
+                "open": float(rows[0]["open"]),
+                "high": float(max(r["high"] for r in rows)),
+                "low": float(min(r["low"] for r in rows)),
+                "close": float(rows[-1]["close"]),
+                "volume": int(sum(r["volume"] for r in rows)),
+            })
+
+        logger.info(f"Historical fetch complete: {len(all_candles)} trading days for {symbol}")
+        return all_candles
+
+    # ── Daily candle cache (Redis, per completed trading day) ──────────
+    # Completed daily candles never change, so cache them once and serve every
+    # later backtest from Redis. Shared across Daphne + all Celery workers (vs.
+    # the per-process LocMemCache), so a "Run again" costs ~0 broker calls.
+    _REDIS_CANDLE_PREFIX = "alphadesk:candles:"   # + {interval}:{token}:{YYYY-MM-DD}
+    _CANDLE_CACHE_TTL = 40 * 24 * 3600            # 40 days — bounds Redis growth
+
+    # Angel One getCandleData caps the span PER CALL by interval. Fetch a range
+    # in as few calls as possible by chunking to each interval's max span —
+    # instead of one call per day, which made a 120-day intraday scan ~83
+    # calls/symbol and tripped the broker rate limit.
+    _INTERVAL_MAX_DAYS = {
+        "ONE_MINUTE": 30, "THREE_MINUTE": 60,
+        "FIVE_MINUTE": 100, "TEN_MINUTE": 100,
+        "FIFTEEN_MINUTE": 200, "THIRTY_MINUTE": 200,
+        "ONE_HOUR": 400, "ONE_DAY": 2000,
+    }
+
+    def _fetch_raw_rows(self, token, start_dt, end_dt, interval: str) -> List[list]:
+        """Chunked broker fetch of raw candle rows over [start_dt, end_dt].
+
+        (NSE weekends/holidays are skipped server-side, so we request the full
+        window and let grouping yield only trading days.)"""
+        cap_days = self._INTERVAL_MAX_DAYS.get(interval, 100)
         raw_rows: List[list] = []
         win_start = start_dt
         while win_start <= end_dt:
@@ -1095,50 +1214,124 @@ class DataService:
                 f"{win_start.strftime('%Y-%m-%d')} 09:15",
                 f"{win_end.strftime('%Y-%m-%d')} 15:30",
                 interval,
+                wait_on_breaker=True,
             )
             if chunk:
                 raw_rows.extend(chunk)
             win_start = win_end + timedelta(days=1)
+        return raw_rows
 
-        # ONE_DAY rows are already daily granularity — map straight through.
-        if interval == "ONE_DAY":
-            for row in raw_rows:
-                ts = row[0]
-                all_candles.append({
-                    "date": ts[:10] if isinstance(ts, str) else str(ts),
-                    "open": float(row[1]),
-                    "high": float(row[2]),
-                    "low": float(row[3]),
-                    "close": float(row[4]),
-                    "volume": int(row[5]),
-                })
-            logger.info(f"Historical fetch complete: {len(all_candles)} daily candles for {symbol}")
-            return all_candles
-
-        # Intraday intervals → aggregate each trading day into one daily OHLCV
-        # row (identical contract to the old day-by-day loop). raw_rows are in
-        # ascending time order, so per-day first-open / last-close stay correct.
-        by_day: Dict[str, list] = {}
+    @staticmethod
+    def _map_daily_rows(raw_rows: List[list]) -> Dict[str, dict]:
+        """Map raw ONE_DAY broker rows → {YYYY-MM-DD: candle dict}."""
+        out: Dict[str, dict] = {}
         for row in raw_rows:
             ts = row[0]
-            day = ts[:10] if isinstance(ts, str) else str(ts)
-            by_day.setdefault(day, []).append(row)
+            day = ts[:10] if isinstance(ts, str) else str(ts)[:10]
+            out[day] = {
+                "date": day,
+                "open": float(row[1]),
+                "high": float(row[2]),
+                "low": float(row[3]),
+                "close": float(row[4]),
+                "volume": int(row[5]),
+            }
+        return out
 
-        for day_str, rows in by_day.items():
-            highs = [r[2] for r in rows]
-            lows = [r[3] for r in rows]
-            volumes = [r[5] for r in rows]
-            all_candles.append({
-                "date": day_str,
-                "open": float(rows[0][1]),
-                "high": float(max(highs)),
-                "low": float(min(lows)),
-                "close": float(rows[-1][4]),
-                "volume": int(sum(volumes)),
-            })
+    def _fetch_daily_cached(
+        self, token: str, symbol: str, start_dt, end_dt, interval: str,
+    ) -> List[Dict[str, Any]]:
+        """ONE_DAY fetch backed by a per-day Redis cache of completed sessions.
 
-        logger.info(f"Historical fetch complete: {len(all_candles)} trading days for {symbol}")
-        return all_candles
+        Only days strictly before today are cached (today's bar is still
+        forming). Non-trading days are cached as a null marker so they aren't
+        re-requested. Falls back to a plain uncached fetch when Redis is down.
+        """
+        import json as _json
+        from datetime import date as _date
+
+        today = _date.today()
+
+        r = _get_redis_for_throttle()
+        if r is None:
+            # No Redis → original behaviour (single chunked fetch, no cache).
+            rows = self._fetch_raw_rows(token, start_dt, end_dt, interval)
+            out = sorted(self._map_daily_rows(rows).values(), key=lambda c: c["date"])
+            logger.info(f"Historical fetch complete: {len(out)} daily candles for {symbol}")
+            return out
+
+        prefix = f"{self._REDIS_CANDLE_PREFIX}{interval}:{token}:"
+
+        # All calendar days in the requested range.
+        days: List = []
+        d = start_dt
+        while d <= end_dt:
+            days.append(d)
+            d += timedelta(days=1)
+
+        completed = [d for d in days if d < today]
+        live = [d for d in days if d >= today]   # today + any future → never cache
+
+        # One round-trip: look up every completed day.
+        cached: Dict[str, Optional[dict]] = {}
+        missing: List = []
+        if completed:
+            try:
+                vals = r.mget([f"{prefix}{d.isoformat()}" for d in completed])
+            except Exception:
+                vals = [None] * len(completed)
+            for d, v in zip(completed, vals):
+                if v is None:
+                    missing.append(d)
+                else:
+                    try:
+                        cached[d.isoformat()] = _json.loads(v)   # candle dict or None
+                    except (ValueError, TypeError):
+                        missing.append(d)
+
+        # Broker-fetch the span covering everything still needed (missing
+        # completed days + the live tail). In the common cases this is either
+        # the whole range (cold cache) or just the few live days (warm cache).
+        fetched: Dict[str, dict] = {}
+        to_fetch = sorted(missing + live)
+        if to_fetch:
+            rows = self._fetch_raw_rows(token, to_fetch[0], to_fetch[-1], interval)
+            fetched = self._map_daily_rows(rows)
+            # Persist every COMPLETED calendar day we just queried — trading day
+            # → its candle, non-trading day → null marker (so holidays/weekends
+            # aren't re-requested). Today/future stay uncached.
+            # GUARD: only cache if the broker actually returned data. An empty
+            # result is far more likely a transient failure (rate-limit/breaker)
+            # than a genuinely empty span, and caching null for real trading
+            # days would poison the cache for the whole TTL.
+            if fetched:
+                try:
+                    pipe = r.pipeline()
+                    d = to_fetch[0]
+                    span_end = min(to_fetch[-1], today - timedelta(days=1))
+                    while d <= span_end:
+                        payload = fetched.get(d.isoformat())   # dict or None
+                        pipe.set(f"{prefix}{d.isoformat()}",
+                                 _json.dumps(payload), ex=self._CANDLE_CACHE_TTL)
+                        d += timedelta(days=1)
+                    pipe.execute()
+                except Exception:
+                    pass
+
+        # Merge cached (skip null holiday markers) + freshly fetched.
+        merged: Dict[str, dict] = {}
+        for day_str, candle in cached.items():
+            if candle:
+                merged[day_str] = candle
+        merged.update(fetched)
+        out = sorted(merged.values(), key=lambda c: c["date"])
+
+        hits = sum(1 for c in cached.values() if c)
+        logger.info(
+            f"Historical fetch complete: {len(out)} daily candles for {symbol} "
+            f"({hits} cached, {len(out) - hits} fetched)"
+        )
+        return out
 
     def fetch_intraday_candles(
         self,
@@ -1150,8 +1343,11 @@ class DataService:
         """
         Fetch raw intraday candles (not aggregated) across multiple days.
 
-        Uses per-day disk cache at /tmp/intraday_cache/ to avoid redundant
-        broker API calls. Second run for same symbol/day/interval is instant.
+        Per-day cache of completed sessions to avoid redundant broker calls:
+        Redis (shared across the fleet, key
+        ``alphadesk:candles:{interval}:{token}:{day}``) when available, else a
+        per-day disk cache at ``/tmp/intraday_cache/`` (single-node fallback).
+        Today's still-forming session is never cached.
 
         Args:
             symbol: NSE symbol (e.g. 'RELIANCE')
@@ -1164,6 +1360,7 @@ class DataService:
         """
         import json as _json
         from pathlib import Path
+        from datetime import date as _date
 
         self._ensure_broker()
 
@@ -1173,69 +1370,117 @@ class DataService:
             logger.error(f"Token not found for {symbol}")
             return []
 
-        cache_dir = Path("/tmp/intraday_cache")
-        cache_dir.mkdir(parents=True, exist_ok=True)
-
         interval_short = {
             "ONE_MINUTE": "1m", "THREE_MINUTE": "3m", "FIVE_MINUTE": "5m",
             "TEN_MINUTE": "10m", "FIFTEEN_MINUTE": "15m", "THIRTY_MINUTE": "30m",
             "ONE_HOUR": "1h",
         }.get(interval, interval)
 
-        start_dt = datetime.strptime(from_date, "%Y-%m-%d").date()
-        end_dt = datetime.strptime(to_date, "%Y-%m-%d").date()
-        current = start_dt
-        all_candles: List[Dict[str, Any]] = []
-        cached_days = 0
-        fetched_days = 0
+        today = _date.today()
 
-        while current <= end_dt:
-            if current.weekday() >= 5:
-                current += timedelta(days=1)
-                continue
+        # Redis is the shared primary cache; disk is only a single-node fallback
+        # used when Redis is unreachable (preserves the old offline behaviour).
+        r = _get_redis_for_throttle()
+        prefix = f"{self._REDIS_CANDLE_PREFIX}{interval}:{token}:"
+        cache_dir = None
+        if r is None:
+            cache_dir = Path("/tmp/intraday_cache")
+            cache_dir.mkdir(parents=True, exist_ok=True)
 
-            day_str = current.strftime("%Y-%m-%d")
+        def _cache_get(day_str: str):
+            """Return cached candles for a completed day, or None on a miss."""
+            if r is not None:
+                try:
+                    v = r.get(f"{prefix}{day_str}")
+                    return _json.loads(v) if v is not None else None
+                except Exception:
+                    return None
             cache_file = cache_dir / f"{symbol}_{interval_short}_{day_str}.json"
-
-            # Try disk cache first
             if cache_file.exists():
                 try:
-                    day_candles = _json.loads(cache_file.read_text())
-                    all_candles.extend(day_candles)
-                    cached_days += 1
-                    current += timedelta(days=1)
-                    continue
+                    return _json.loads(cache_file.read_text())
                 except (_json.JSONDecodeError, IOError):
+                    return None
+            return None
+
+        def _cache_put(day_str: str, candles: list):
+            if r is not None:
+                try:
+                    r.set(f"{prefix}{day_str}", _json.dumps(candles),
+                          ex=self._CANDLE_CACHE_TTL)
+                except Exception:
+                    pass
+            elif cache_dir is not None:
+                try:
+                    (cache_dir / f"{symbol}_{interval_short}_{day_str}.json").write_text(
+                        _json.dumps(candles))
+                except IOError:
                     pass
 
-            # Fetch from broker
-            raw = self._broker.fetch_candles(
-                token, f"{day_str} 09:15", f"{day_str} 15:30", interval
-            )
+        start_dt = datetime.strptime(from_date, "%Y-%m-%d").date()
+        end_dt = datetime.strptime(to_date, "%Y-%m-%d").date()
 
-            day_candles = []
-            if raw:
-                for row in raw:
-                    ts, o, h, l, c, v = row[0], row[1], row[2], row[3], row[4], row[5]
-                    day_candles.append({
-                        "timestamp": ts if isinstance(ts, str) else str(ts),
-                        "open": float(o),
-                        "high": float(h),
-                        "low": float(l),
-                        "close": float(c),
-                        "volume": int(v),
-                    })
-                # Cache to disk (only complete trading days, not today)
-                from datetime import date as _date
-                if current < _date.today():
-                    try:
-                        cache_file.write_text(_json.dumps(day_candles))
-                    except IOError:
-                        pass
+        # Weekday calendar days only — intraday data exists on trading days,
+        # and the broker skips weekends/holidays server-side.
+        weekdays: List = []
+        d = start_dt
+        while d <= end_dt:
+            if d.weekday() < 5:
+                weekdays.append(d)
+            d += timedelta(days=1)
+
+        # 1. Serve completed days from cache; collect the rest to fetch.
+        by_day: Dict[str, list] = {}
+        cached_days = 0
+        to_fetch: List = []
+        for d in weekdays:
+            day_str = d.isoformat()
+            if d < today:
+                hit = _cache_get(day_str)
+                if hit is not None:
+                    by_day[day_str] = hit
+                    cached_days += 1
+                    continue
+            to_fetch.append(d)
+
+        # 2. Fetch everything still needed as ONE chunked span — instead of one
+        # broker call per day, which made a NIFTY50 × 1-month basket backtest
+        # ~1100 calls (the same day-by-day storm the 2026-06-24 incident fixed
+        # in fetch_historical). _fetch_raw_rows chunks by the interval's max
+        # span and the broker drops weekends/holidays server-side.
+        fetched_days = 0
+        if to_fetch:
+            raw = self._fetch_raw_rows(token, to_fetch[0], to_fetch[-1], interval)
+            run_by_day: Dict[str, list] = {}
+            for row in raw:
+                ts = row[0]
+                rday = ts[:10] if isinstance(ts, str) else str(ts)[:10]
+                run_by_day.setdefault(rday, []).append({
+                    "timestamp": ts if isinstance(ts, str) else str(ts),
+                    "open": float(row[1]),
+                    "high": float(row[2]),
+                    "low": float(row[3]),
+                    "close": float(row[4]),
+                    "volume": int(row[5]),
+                })
+            # Persist every COMPLETED day in the span — trading day → candles,
+            # non-trading day → [] (so holidays aren't re-requested and a warm
+            # run is a full cache hit). GUARD: only cache when the span returned
+            # data; an empty result is likely a transient failure (rate-limit/
+            # breaker), and caching it would poison real trading days.
+            span_has_data = bool(raw)
+            for d in to_fetch:
+                day_str = d.isoformat()
+                day_candles = run_by_day.get(day_str, [])
+                by_day[day_str] = day_candles
                 fetched_days += 1
+                if d < today and span_has_data:
+                    _cache_put(day_str, day_candles)
 
-            all_candles.extend(day_candles)
-            current += timedelta(days=1)
+        # 3. Flatten in chronological order.
+        all_candles: List[Dict[str, Any]] = []
+        for day_str in sorted(by_day):
+            all_candles.extend(by_day[day_str])
 
         logger.info(
             f"Intraday fetch: {symbol} {interval_short} {from_date}→{to_date}: "

@@ -19,17 +19,34 @@ export interface Position {
   status: "open" | "closed";
 }
 
-export interface AgentRun {
+export type AgentRunStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled";
+
+export interface AgentRunSummaryKpis {
+  realized_pnl_inr?: number;
+  trades?: number;
+  won?: boolean;
+  total_pnl_inr?: number;
+  roi_pct?: number;
+  peak_lots?: number;
+}
+
+/** Light row returned by the paginated list endpoint (no config/result blobs). */
+export interface AgentRunSummary {
   id: string;
   strategy_name: string;
   strategy_version: string;
-  status: "queued" | "running" | "succeeded" | "failed" | "cancelled";
-  config: Record<string, unknown>;
-  result: Record<string, unknown> | null;
-  error: string;
+  status: AgentRunStatus;
   created_at: string;
   started_at: string | null;
   completed_at: string | null;
+  summary?: AgentRunSummaryKpis | null;
+}
+
+/** Full record returned by the detail (retrieve) endpoint. */
+export interface AgentRun extends AgentRunSummary {
+  config: Record<string, unknown>;
+  result: Record<string, unknown> | null;
+  error: string;
 }
 
 export interface StrategySchema {

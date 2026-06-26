@@ -82,6 +82,12 @@ def run_ok_backtest(
             max_positions=max_positions,
             slippage_pct=slippage_pct,
             daily_loss_limit_pct=tc.risk.max_daily_loss_pct,
+            # Restrict ENTRIES to the requested window. The fetched data starts
+            # `warmup_days` earlier (line above) purely to warm the EMAs/cycle
+            # detector — without this, trades fired during the warmup period
+            # leaked into the stats (e.g. a June backtest booked May trades).
+            entry_from=from_date,
+            entry_to=to_date,
         ),
         entry=OKCycleAdapter(min_rr=min_rr, slippage_pct=slippage_pct),
         exits=[
@@ -98,7 +104,6 @@ def run_ok_backtest(
         ],
     )
 
-    # Filter data to backtest range only for bar matching
     stats = engine.run(data)
     logger.info(f"OK Backtest (v2): {stats.total_trades} trades, PF {stats.profit_factor:.2f}")
     return stats
@@ -152,20 +157,29 @@ def run_intraday_backtest(
             except Exception as e:
                 logger.warning(f"Skip {symbol} {tf}: {e}")
 
-    # Grid search: one engine per (TF, SL, RR)
+    # Grid search: one engine per (TF, SL, RR). The expensive precompute
+    # (indicators + bar-walk) depends on (TF, SL) but NOT on R:R — only each
+    # signal's target does — so run it ONCE per (TF, SL) and derive the 3 R:R
+    # variants cheaply (with_rr), instead of 9× per TF. The Bar conversion
+    # depends only on (TF, symbol), so it's hoisted to once per TF too. This
+    # cuts the ~27-combo CPU cost to roughly a third with identical results.
     results = []
     for tf in timeframes:
         if tf not in tf_data:
             continue
-        for sl_atr in sl_atr_mults:
-            for rr in rr_ratios:
-                adapter = IntradayCycleAdapter(sl_atr_mult=sl_atr, min_rr=rr)
 
-                # Pre-compute signals for all symbols
-                bars_data: Dict[str, List[Bar]] = {}
-                for symbol, candles in tf_data[tf].items():
-                    adapter.precompute(symbol, candles)
-                    bars_data[symbol] = [Bar.from_dict(c) for c in candles]
+        bars_data: Dict[str, List[Bar]] = {
+            symbol: [Bar.from_dict(c) for c in candles]
+            for symbol, candles in tf_data[tf].items()
+        }
+
+        for sl_atr in sl_atr_mults:
+            base = IntradayCycleAdapter(sl_atr_mult=sl_atr, min_rr=rr_ratios[0])
+            for symbol, candles in tf_data[tf].items():
+                base.precompute(symbol, candles)
+
+            for rr in rr_ratios:
+                adapter = base.with_rr(rr)
 
                 engine = BacktestEngine(
                     config=EngineConfig(

@@ -127,6 +127,19 @@ class FyersAdapter(BrokerAdapterBase):
             total = avail + used
         return Margin(available_cash=avail, used=used, total=total, raw=r or {})
 
+    # ── Historical seconds candles (scalp strategy) ──────────────────
+    def history(self, symbol: str, resolution: str = "5S", range_from: str = "",
+                range_to: str = "", cont_flag: int = 1) -> list[list]:
+        """Seconds/minute historical candles ``[[epoch,o,h,l,c,v], …]``.
+
+        Used by the scalp strategy for intra-candle pressure (Angel can't go
+        below 1-minute). Delegates to :mod:`plugins.broker_fyers.history`.
+        """
+        if self._api is None and not self.authenticate():
+            raise RuntimeError("Fyers authentication failed — daily re-login required")
+        from .history import fetch_history
+        return fetch_history(self._api, symbol, resolution, range_from, range_to, cont_flag)
+
     # ── Options chain — Fyers serves the whole chain in one call ──────
     def options_chain(
         self,

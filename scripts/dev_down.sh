@@ -6,7 +6,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-for name in web celery beat vite; do
+for name in web celery beat flower vite; do
     pidfile="logs/$name.pid"
     if [[ -f "$pidfile" ]]; then
         pid="$(cat "$pidfile" || true)"
@@ -22,6 +22,7 @@ done
 # IDE force-quits or stale dev_up.sh re-runs).
 pkill -f "celery -A config worker" 2>/dev/null || true
 pkill -f "celery -A config beat"   2>/dev/null || true
+pkill -f "celery -A config flower" 2>/dev/null || true
 
 # Sweep up any orphan web process on :8000 — a manually-started daphne or
 # a previous-run runserver whose pidfile is gone. Without this, the next

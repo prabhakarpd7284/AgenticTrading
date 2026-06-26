@@ -45,11 +45,17 @@ function isPaginatedEnvelope(body: unknown): body is { results: unknown[] } {
   );
 }
 
+/** Request config can opt out of the auto-unwrap to keep the cursor links
+ *  (needed for "load more" pagination — see `fetchPage`). */
+type EnvelopeConfig = AxiosRequestConfig & { _envelope?: boolean };
+
 /** Shared response interceptor — unwraps pagination + handles 401 refresh. */
 function attachResponse(client: AxiosInstance) {
   client.interceptors.response.use(
     (r: AxiosResponse) => {
-      if (isPaginatedEnvelope(r.data)) r.data = r.data.results;
+      if (!(r.config as EnvelopeConfig)?._envelope && isPaginatedEnvelope(r.data)) {
+        r.data = r.data.results;
+      }
       return r;
     },
     async (err: AxiosError) => {
@@ -77,6 +83,25 @@ attachResponse(api);
 // error body, empty 204, paginator turned off, etc.).  Falls back to `[]` so
 // downstream `.map(...)` / `rows.length` never crash the page.
 // ---------------------------------------------------------------------------
+/** One cursor-paginated page (DRF CursorPagination envelope, links preserved). */
+export interface Page<T> {
+  results: T[];
+  next: string | null;
+  previous: string | null;
+}
+
+/** Fetch a cursor-paginated page WITHOUT unwrapping, so callers can follow
+ *  `next` for infinite scroll / "load more". Pass a relative path for page 1,
+ *  or the absolute `next` URL returned by the previous page. */
+export async function fetchPage<T>(url: string, params?: Record<string, unknown>): Promise<Page<T>> {
+  const { data } = await api.get<Page<T>>(url, { _envelope: true, params } as EnvelopeConfig);
+  return {
+    results: Array.isArray(data?.results) ? data.results : [],
+    next: data?.next ?? null,
+    previous: data?.previous ?? null,
+  };
+}
+
 export async function list<T>(url: string, config?: AxiosRequestConfig): Promise<T[]> {
   const { data } = await api.get<T[] | { results: T[] } | null | undefined>(url, config);
   if (Array.isArray(data)) return data;

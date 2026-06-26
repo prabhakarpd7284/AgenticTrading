@@ -6,6 +6,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.events.services.event_writer import emit as emit_event
 from apps.market_data.models import Symbol
 from apps.market_data.services.data_port import DefaultMarketData
 from apps.market_data.services.pulse_service import build_pulse
@@ -133,6 +134,58 @@ class SetupPreviewView(APIView):
             tenant_id=getattr(getattr(request, "tenant", None), "id", None),
         )
         return Response(asdict(payload))
+
+    def post(self, request):
+        """Snapshot the setup the operator is looking at.
+
+        Records an append-only ``setup.saved`` Event capturing the exact plan
+        on screen + its generation time, so a setup can later be correlated
+        with whatever trade (if any) was taken on the symbol — "did I act on
+        this, and how did it do?".  Does NOT execute anything.
+        """
+        d = request.data or {}
+        symbol = (d.get("symbol") or "").strip().upper()
+        side = (d.get("side") or "").strip().upper()
+        if not symbol or side not in ("BUY", "SELL"):
+            return Response(
+                {"detail": "Body must include 'symbol' and a 'side' of BUY or SELL."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        def _num(key):
+            v = d.get(key)
+            try:
+                return float(v) if v is not None else None
+            except (TypeError, ValueError):
+                return None
+
+        snapshot = {
+            "symbol": symbol,
+            "side": side,
+            "entry_price": _num("entry_price"),
+            "stop_loss": _num("stop_loss"),
+            "target": _num("target"),
+            "quantity": int(_num("quantity") or 0),
+            "confidence": _num("confidence"),
+            "risk_reward_ratio": _num("risk_reward_ratio"),
+            "risk_approved": bool(d.get("risk_approved")),
+            # The setup's own as-of time (when the plan was computed), distinct
+            # from the Event's ts (when the operator clicked save).
+            "generated_at": d.get("generated_at") or d.get("as_of") or "",
+        }
+
+        event = emit_event(
+            tenant=getattr(request, "tenant", None),
+            type="setup.saved",
+            actor_kind="user",
+            actor_user=request.user if request.user.is_authenticated else None,
+            text=f"Saved {side} setup for {symbol} @ {snapshot['entry_price']}",
+            payload=snapshot,
+        )
+        return Response(
+            {"id": event.id if event else None, "saved": snapshot},
+            status=status.HTTP_201_CREATED,
+        )
 
 
 class SwingScannerView(APIView):

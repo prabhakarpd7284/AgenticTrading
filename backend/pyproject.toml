@@ -10,6 +10,7 @@ dependencies = [
     "Django>=5.1,<5.2",
     "djangorestframework>=3.15",
     "djangorestframework-simplejwt>=5.3",
+    "django-cors-headers>=4.3",
     "drf-spectacular>=0.27",
     "channels>=4.1",
     "channels-redis>=4.2",
@@ -60,6 +61,11 @@ dependencies = [
     # (and downstream /rotation, /shortlist, /setup). Without it, the
     # service returns its empty fallback and the Pulse page is blank.
     "yfinance>=0.2",
+    # Flower — Celery monitoring dashboard (http://localhost:5555). Booted by
+    # scripts/dev_up.sh alongside the worker + beat; read-only ops surface
+    # (task history, worker state, queue depth). Harmless in prod but only
+    # started locally.
+    "flower>=2.0",
 ]
 
 [project.optional-dependencies]
@@ -81,6 +87,7 @@ directional = "plugins.strategy_directional.strategy:DirectionalStrategy"
 short_straddle = "plugins.strategy_short_straddle.strategy:ShortStraddleStrategy"
 vertical_spread = "plugins.strategy_vertical_spread.strategy:VerticalSpreadStrategy"
 pyramid = "plugins.strategy_pyramid:PyramidStrategy"
+scalp = "plugins.strategy_scalp:ScalpStrategy"
 intraday_screener = "plugins.strategy_screener:ScreenerStrategy"
 swing_scanner = "plugins.strategy_swing:SwingScannerStrategy"
 swing_scanner_v2 = "plugins.strategy_swing.v2.plugin:SwingScannerV2Strategy"

@@ -76,7 +76,7 @@ export interface PositionsOverview {
 }
 
 export interface Trade {
-  id: number;
+  id: string;                    // Trade UUID (string) — keys the chart endpoint
   trade_date: string;
   symbol: string;
   side: "BUY" | "SELL";
@@ -86,10 +86,14 @@ export interface Trade {
   target: number;
   quantity: number;
   fill_price: number | null;
+  exit_price: number | null;     // null while still open
+  exit_quantity: number | null;
+  closed_at: string | null;      // ISO; null while open
+  close_reason: string;          // SL_HIT | TARGET_HIT | EOD | TRAIL | MANUAL | ""
   pnl: number | null;
   confidence: number;
   reasoning: string;
-  exit_reason: string;
+  source: string;                // "swing" | "intraday" — drives chart interval
   created_at: string;
 }
 
@@ -227,6 +231,111 @@ export function useTrades(opts?: { limit?: number; symbol?: string }) {
       api
         .get<{ count: number; results: Trade[] }>(`/trades/${qs ? "?" + qs : ""}`)
         .then((r) => r.data),
+  });
+}
+
+/** Count + most-recent of the `signal.fired` events for one symbol.
+ *  Backs the Setup track-record "Screener fired N signals" line.  Reads
+ *  `count` straight off DRF pagination, so the page size is irrelevant. */
+export interface SymbolSignals {
+  count: number;
+  latest: { ts: string; side?: string; source?: string } | null;
+}
+
+export function useSymbolSignals(symbol: string | undefined) {
+  return useQuery({
+    queryKey: ["symbol-signals", symbol],
+    enabled: !!symbol,
+    queryFn: async () => {
+      // The list endpoint is cursor-paginated (no `count`), so use the
+      // dedicated count action which returns total + the latest match.
+      const { data } = await api.get<{
+        count: number;
+        latest: { ts: string; type: string; payload: Record<string, unknown> | null } | null;
+      }>(`/events/count/?type=signal.fired&symbol=${encodeURIComponent(symbol!)}`);
+      const latest = data.latest
+        ? {
+            ts: data.latest.ts,
+            side: (data.latest.payload?.side as string) ?? undefined,
+            source: (data.latest.payload?.source as string) ?? undefined,
+          }
+        : null;
+      return { count: data.count ?? 0, latest } as SymbolSignals;
+    },
+  });
+}
+
+/* ── Saved setups (Setup snapshots → setup.saved events) ──────────────── */
+
+/** Body for POST /market-data/setup/ — snapshots the on-screen plan. */
+export interface SetupSnapshotBody {
+  symbol: string;
+  side: "BUY" | "SELL";
+  entry_price: number | null;
+  stop_loss: number | null;
+  target: number | null;
+  quantity: number;
+  confidence: number | null;
+  risk_reward_ratio: number | null;
+  risk_approved: boolean;
+  generated_at: string;
+}
+
+/** A persisted setup.saved snapshot, flattened from the Event payload. */
+export interface SavedSetup {
+  id: number;
+  saved_at: string;       // Event ts — when the operator clicked save
+  generated_at: string;   // when the plan itself was computed (as_of)
+  symbol: string;
+  side: "BUY" | "SELL";
+  entry_price: number | null;
+  stop_loss: number | null;
+  target: number | null;
+  quantity: number;
+  confidence: number | null;
+  risk_reward_ratio: number | null;
+  risk_approved: boolean;
+}
+
+export function useSaveSetupSnapshot() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: SetupSnapshotBody) =>
+      api.post<{ id: number | null }>("/market-data/setup/", body).then((r) => r.data),
+    onSuccess: (_d, body) =>
+      qc.invalidateQueries({ queryKey: ["saved-setups", body.symbol] }),
+  });
+}
+
+export function useSavedSetups(symbol: string | undefined) {
+  return useQuery({
+    queryKey: ["saved-setups", symbol],
+    enabled: !!symbol,
+    queryFn: async () => {
+      // api.ts unwraps the cursor envelope → a bare EventDetail[].
+      const { data } = await api.get<EventDetail[]>(
+        `/events/?type=setup.saved&symbol=${encodeURIComponent(symbol!)}`,
+      );
+      return (data ?? []).map((e): SavedSetup => {
+        const p = (e.payload ?? {}) as Record<string, unknown>;
+        const num = (k: string) =>
+          typeof p[k] === "number" ? (p[k] as number) : null;
+        return {
+          id: e.id,
+          saved_at: e.ts,
+          generated_at: (p.generated_at as string) || e.ts,
+          symbol: (p.symbol as string) || symbol!,
+          side: (p.side as "BUY" | "SELL") || "BUY",
+          entry_price: num("entry_price"),
+          stop_loss: num("stop_loss"),
+          target: num("target"),
+          quantity: typeof p.quantity === "number" ? (p.quantity as number) : 0,
+          confidence: num("confidence"),
+          risk_reward_ratio: num("risk_reward_ratio"),
+          risk_approved: Boolean(p.risk_approved),
+        };
+      });
+    },
   });
 }
 
@@ -651,6 +760,47 @@ export function useTradingViewRecent(id: string | undefined) {
       .then((r) => r.data),
     enabled: !!id,
     refetchInterval: REFETCH_MS,
+  });
+}
+
+/* ── Pine Script export (generated from screener strategies) ──────────── */
+
+export interface PineStrategy {
+  key: string;
+  label: string;
+  description: string;
+  side: string;
+}
+
+/** Enabled screener strategies that can be exported as a TradingView Pine v5
+ *  indicator. Long staleTime — the set only changes on backend deploy. */
+export function usePineStrategies() {
+  return useQuery({
+    queryKey: ["pine-strategies"],
+    queryFn: () => api
+      .get<PineStrategy[]>("/notifications/tradingview/pine-strategies/")
+      .then((r) => (Array.isArray(r.data) ? r.data : [])),
+    staleTime: 5 * 60_000,
+  });
+}
+
+/** Generated Pine v5 source for one strategy. When `linkId` is supplied the
+ *  script's comment header carries that link's webhook URL (owner-scoped on
+ *  the backend — another tenant's secret is never embedded). */
+export function usePineScript(strategy: string | undefined, linkId?: string) {
+  return useQuery({
+    queryKey: ["pine-script", strategy, linkId],
+    queryFn: () => {
+      const qs = new URLSearchParams({ strategy: strategy! });
+      if (linkId) qs.set("link", linkId);
+      return api
+        .get<{ strategy: string; code: string }>(
+          `/notifications/tradingview/pine/?${qs.toString()}`,
+        )
+        .then((r) => r.data);
+    },
+    enabled: !!strategy,
+    staleTime: 5 * 60_000,
   });
 }
 

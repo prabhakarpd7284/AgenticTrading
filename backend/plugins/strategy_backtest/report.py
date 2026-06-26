@@ -45,7 +45,9 @@ class ReportFormatter:
             f"{'─' * 60}",
             f"  Profit Factor: {stats.profit_factor:.2f}",
             f"  Avg R:R: {stats.avg_rr:.2f}",
-            f"  Max Drawdown: {self._fmt(stats.max_drawdown)} ({stats.max_drawdown_pct:.2f}%)",
+            # max_drawdown is a positive magnitude; render it as the loss it is
+            # (-₹…), matching the telegram report — not "+₹…".
+            f"  Max Drawdown: {self._fmt(-stats.max_drawdown)} ({stats.max_drawdown_pct:.2f}%)",
             f"  Avg Hold: {stats.avg_bars_held:.1f} bars",
         ]
 

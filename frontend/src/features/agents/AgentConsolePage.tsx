@@ -1,17 +1,17 @@
 import * as React from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
-  AlertTriangle, Bot, ChevronRight, CircleDot, Clock,
+  AlertTriangle, Bot, CircleDot, Clock,
   ExternalLink, Play, Send, ShieldCheck, Sparkles, Terminal,
   Wifi, WifiOff,
 } from "lucide-react";
 import { toast } from "sonner";
 
-import { api } from "@/lib/api";
+import { api, fetchPage } from "@/lib/api";
 import { connect } from "@/lib/ws";
-import type { AgentEvent, AgentRun, Portfolio, StrategySchema } from "@/types";
-import { cn, fmtRel, formatElapsed, safeStringify } from "@/lib/utils";
+import type { AgentEvent, AgentRun, AgentRunStatus, AgentRunSummary, Portfolio, StrategySchema } from "@/types";
+import { cn, fmtInr, fmtRel, formatElapsed, safeStringify } from "@/lib/utils";
 import { useAuditFeed, useEvent } from "@/lib/v2";
 import { agentForNode, inferStepKind, computeKpis, cliForStrategy } from "./agentConsole.utils";
 import type { KpiSummary } from "./agentConsole.utils";
@@ -63,33 +63,56 @@ export function AgentConsolePage() {
     queryKey: ["portfolios"],
     queryFn: () => api.get<Portfolio[]>("/portfolios/").then((r) => r.data),
   });
-  const { data: runs = [] } = useQuery({
-    queryKey: ["agent-runs"],
-    queryFn: () => api.get<AgentRun[]>("/agents/runs/").then((r) => r.data),
+  /* ---------- runs list: filtered + cursor-paginated ---------- */
+  const [fStrategy, setFStrategy] = React.useState("");
+  const [fStatus, setFStatus] = React.useState<AgentRunStatus | "">("");
+
+  const runsQuery = useInfiniteQuery({
+    queryKey: ["agent-runs", fStrategy, fStatus],
+    queryFn: ({ pageParam }) =>
+      fetchPage<AgentRunSummary>("/agents/runs/", {
+        strategy: fStrategy || undefined,
+        status: fStatus || undefined,
+        cursor: pageParam || undefined,
+      }),
+    initialPageParam: "" as string,
+    getNextPageParam: (last) => cursorOf(last.next) ?? undefined,
     refetchInterval: 8_000,
   });
+  const runs = React.useMemo(
+    () => runsQuery.data?.pages.flatMap((p) => p.results) ?? [],
+    [runsQuery.data],
+  );
 
-  // Legacy audit feed — shown alongside v2 runs so the console has real
-  // content on day one (the legacy DB has 398 AuditLog rows from the
-  // Streamlit-era pipelines).
+  // Legacy audit feed — shown below v2 runs so the console has real content on
+  // day one (the legacy DB has AuditLog rows from the Streamlit-era pipelines).
   const { data: legacyAudit = [] } = useAuditFeed(50);
-
-  // Which legacy audit row (Event PK) the user has clicked to inspect.
-  // `undefined` keeps the EventDetailDialog suspended (useEvent gates on it).
   const [auditEventId, setAuditEventId] = React.useState<number | undefined>();
 
-  /* ---------- selected run + stream ---------- */
+  /* ---------- selected run: light row + full detail ---------- */
+  const selectedId = runId ?? runs[0]?.id;
+  const selectedRow = runs.find((r) => r.id === selectedId);
+  // Sim runs (scalp) carry their data in config/result and never emit agent
+  // events — skip the agent WS + the event-stream chrome for them.
+  const selectedIsSim = isSimRun(selectedRow);
+
+  const detailQuery = useQuery({
+    queryKey: ["agent-run", selectedId],
+    queryFn: () => api.get<AgentRun>(`/agents/runs/${selectedId}/`).then((r) => r.data),
+    enabled: !!selectedId,
+  });
+  const detail = detailQuery.data;
+
+  /* ---------- event stream (agent runs only) ---------- */
   const [events, setEvents] = React.useState<AgentEvent[]>([]);
   const [wsState, setWsState] = React.useState<WsState>("connecting");
   const feedRef = React.useRef<HTMLDivElement>(null);
   const wsRef = React.useRef<ReturnType<typeof connect>>();
 
-  const selected = runs.find((r) => r.id === runId) ?? runs[0];
-
   React.useEffect(() => {
     setEvents([]);
     wsRef.current?.close();
-    if (!selected) return;
+    if (!selectedId || selectedIsSim) return;   // sim runs don't stream agent events
     setWsState("connecting");
 
     // 1) Hydrate the timeline from REST. Without this, opening a run
@@ -101,7 +124,7 @@ export function AgentConsolePage() {
     // by `seq` to avoid double-rendering anything still in-flight.
     let cancelled = false;
     api
-      .get<{ events: AgentEvent[] }>(`/agents/runs/${selected.id}/steps/`)
+      .get<{ events: AgentEvent[] }>(`/agents/runs/${selectedId}/steps/`)
       .then((r) => {
         if (cancelled) return;
         const past = r.data?.events ?? [];
@@ -118,7 +141,7 @@ export function AgentConsolePage() {
 
     // 2) Open the live stream for events that haven't happened yet.
     wsRef.current = connect(
-      `/ws/agents/${selected.id}/`,
+      `/ws/agents/${selectedId}/`,
       (msg) => setEvents((prev) => {
         const incoming = msg as unknown as AgentEvent;
         // Skip if we already hydrated this seq from REST.
@@ -141,7 +164,7 @@ export function AgentConsolePage() {
       cancelled = true;
       wsRef.current?.close();
     };
-  }, [selected?.id]);
+  }, [selectedId, selectedIsSim]);
 
   // Autoscroll to newest event. Plain `auto` (not `smooth`) — a smooth-scroll
   // animation queues per-event and visibly stutters when tokens stream at
@@ -183,41 +206,64 @@ export function AgentConsolePage() {
           </Dialog>
         </div>
 
+        <RunFilters
+          catalog={catalog}
+          strategy={fStrategy} onStrategy={setFStrategy}
+          status={fStatus} onStatus={setFStatus}
+        />
+
         <div className="flex-1 overflow-auto">
-          {runs.length === 0 && legacyAudit.length === 0 ? (
+          {runsQuery.isLoading ? (
+            <div className="p-3 space-y-2">
+              <Skeleton className="h-14 w-full" />
+              <Skeleton className="h-14 w-full" />
+              <Skeleton className="h-14 w-5/6" />
+            </div>
+          ) : runs.length === 0 && legacyAudit.length === 0 ? (
             <EmptyState
               className="m-3"
               icon={<Sparkles />}
-              title="No runs yet"
-              description="Start your first run to see the desk think."
+              title={fStrategy || fStatus ? "No matching runs" : "No runs yet"}
+              description={fStrategy || fStatus
+                ? "No runs match the current filter."
+                : "Start your first run to see the desk think."}
             />
           ) : (
             <>
               {runs.length > 0 && (
-                <ul className="divide-y divide-border">
-                  {runs.map((r) => (
-                    <li key={r.id}>
-                      <button
-                        onClick={() => nav(`/agents/${r.id}`)}
-                        className={cn(
-                          "w-full text-left px-4 py-3 flex gap-2 hover:bg-surface-2",
-                          selected?.id === r.id && "bg-surface-2 border-l-2 border-l-accent",
-                        )}
+                <ul>
+                  {groupRuns(runs).map((it) =>
+                    it.type === "header" ? (
+                      <li
+                        key={`h-${it.label}`}
+                        className="px-4 py-1.5 text-caption uppercase tracking-wider text-fg-subtle bg-surface-2/50 border-y border-border"
                       >
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2">
-                            <RunDot status={r.status} />
-                            <span className="text-body-sm text-fg truncate">{r.strategy_name}</span>
-                          </div>
-                          <div className="text-caption text-fg-subtle mt-0.5 font-mono">
-                            {r.id.slice(0, 8)} · {fmtRel(r.created_at)} ago
-                          </div>
-                        </div>
-                        <ChevronRight className="h-4 w-4 text-fg-subtle self-center" aria-hidden />
-                      </button>
-                    </li>
-                  ))}
+                        {it.label}
+                      </li>
+                    ) : (
+                      <li key={it.run.id} className="border-b border-border">
+                        <RunRow
+                          run={it.run}
+                          selected={selectedId === it.run.id}
+                          onClick={() => nav(`/agents/${it.run.id}`)}
+                        />
+                      </li>
+                    ),
+                  )}
                 </ul>
+              )}
+              {runsQuery.hasNextPage && (
+                <div className="p-3">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    className="w-full"
+                    loading={runsQuery.isFetchingNextPage}
+                    onClick={() => runsQuery.fetchNextPage()}
+                  >
+                    Load more
+                  </Button>
+                </div>
               )}
               {legacyAudit.length > 0 && (
                 <div className="border-t border-border">
@@ -271,9 +317,9 @@ export function AgentConsolePage() {
         </div>
       </aside>
 
-      {/* ----- stream pane ----- */}
+      {/* ----- detail pane ----- */}
       <section className="flex flex-col min-w-0">
-        {!selected ? (
+        {!selectedId ? (
           <div className="flex-1 flex items-center justify-center p-6">
             <EmptyState
               icon={<Bot />}
@@ -282,8 +328,16 @@ export function AgentConsolePage() {
               action={<Button onClick={() => setNewOpen(true)} leading={<Play className="h-4 w-4" />}>New run</Button>}
             />
           </div>
+        ) : !detail ? (
+          <div className="p-5 space-y-3">
+            <Skeleton className="h-12 w-full" />
+            <Skeleton className="h-40 w-full" />
+            <Skeleton className="h-40 w-full" />
+          </div>
+        ) : selectedIsSim ? (
+          <SimRunDetail key={detail.id} run={detail} />
         ) : (
-          <RunDetail run={selected} events={events} feedRef={feedRef} wsState={wsState} />
+          <RunDetail key={detail.id} run={detail} events={events} feedRef={feedRef} wsState={wsState} />
         )}
       </section>
 
@@ -307,6 +361,14 @@ export function AgentConsolePage() {
 /* =================================================================== */
 /* Run detail                                                           */
 /* =================================================================== */
+/** A sim/data run (scalp etc.) keeps its data in config/result, not agent
+ *  events. Detect so the console renders the right view for the type. */
+function isSimRun(run?: { strategy_name: string; result?: Record<string, unknown> | null }): boolean {
+  if (!run) return false;
+  if (run.strategy_name === "scalp") return true;
+  return !!run.result && ("kpis" in run.result || "log" in run.result);
+}
+
 function RunDetail({
   run, events, feedRef, wsState,
 }: {
@@ -315,6 +377,7 @@ function RunDetail({
   feedRef: React.RefObject<HTMLDivElement>;
   wsState: WsState;
 }) {
+
   // Memoise the per-render scans of `events`. Without these, every WS token
   // append re-runs three O(n) finds, a fresh KPI reduce, and the CLI lookup
   // — the bigger cost is the cascade re-rendering 200+ EventBubbles below.
@@ -393,10 +456,15 @@ function RunDetail({
       <Tabs defaultValue="stream" className="flex-1 min-h-0 flex flex-col">
         <TabsList className="px-5">
           <TabsTrigger value="stream">Stream</TabsTrigger>
+          <TabsTrigger value="summary">Summary</TabsTrigger>
           <TabsTrigger value="plan">Plan</TabsTrigger>
           <TabsTrigger value="risk">Risk</TabsTrigger>
           <TabsTrigger value="execution">Execution</TabsTrigger>
         </TabsList>
+
+        <TabsContent value="summary" className="flex-1 min-h-0 overflow-auto px-5 pb-5 pt-3">
+          <SummaryView run={run} />
+        </TabsContent>
 
         <TabsContent value="stream" className="flex-1 min-h-0 px-5 pb-5">
           <div
@@ -671,6 +739,114 @@ function severityTone(s: "info" | "warn" | "error"): "info" | "warning" | "dange
   return s === "error" ? "danger" : s === "warn" ? "warning" : "info";
 }
 
+/* ---------- Sim / data run detail (scalp etc. — no agent stream) ---------- */
+function SimRunDetail({ run }: { run: AgentRun }) {
+  return (
+    <>
+      <header className="h-12 px-5 border-b border-border flex items-center gap-3 sticky top-0 bg-bg/80 backdrop-blur z-sticky">
+        <RunStatusPill status={run.status} />
+        <div className="flex-1 min-w-0">
+          <div className="text-body-sm text-fg truncate">
+            {run.strategy_name} <span className="text-fg-subtle">v{run.strategy_version}</span>
+          </div>
+          <div className="text-caption text-fg-subtle font-mono truncate">run {run.id}</div>
+        </div>
+        <Badge tone="neutral">
+          <Clock className="h-3 w-3 mr-1" aria-hidden /> {fmtRel(run.created_at)} ago
+        </Badge>
+      </header>
+      <div className="flex-1 overflow-auto p-5">
+        <SummaryView run={run} />
+      </div>
+    </>
+  );
+}
+
+/* ---------- Universal run summary (config + result, any run type) ---------- */
+function fmtVal(v: unknown): string {
+  if (v == null) return "—";
+  if (typeof v === "object") return Array.isArray(v) ? `[${v.length}]` : "{…}";
+  if (typeof v === "number") return Number.isInteger(v) ? String(v) : v.toLocaleString();
+  return String(v);
+}
+
+function SummaryView({ run }: { run: AgentRun }) {
+  const cfg = run.config ?? {};
+  const res = run.result;
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader><CardTitle>Config</CardTitle></CardHeader>
+        <CardContent>
+          {Object.keys(cfg).length ? (
+            <dl className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-5 gap-y-1 text-body-sm">
+              {Object.entries(cfg).map(([k, v]) => (
+                <div key={k} className="flex items-center justify-between gap-3 border-b border-border/40 py-1">
+                  <dt className="text-fg-subtle">{k}</dt>
+                  <dd className="text-fg font-mono truncate max-w-[60%]" title={String(v)}>{fmtVal(v)}</dd>
+                </div>
+              ))}
+            </dl>
+          ) : <p className="text-body-sm text-fg-subtle">No config recorded.</p>}
+        </CardContent>
+      </Card>
+
+      {run.error && (
+        <div role="alert" className="rounded-md border border-danger/40 bg-pnl-down/5 p-3 text-body-sm text-fg">
+          {run.error}
+        </div>
+      )}
+
+      {res ? <ResultView result={res} /> : (
+        <Card><CardContent className="py-6">
+          <p className="text-body-sm text-fg-subtle">
+            {run.status === "running" || run.status === "queued"
+              ? "Run in progress — results appear when it completes. Live runs that stream (e.g. scalp) update on their own page."
+              : "No result recorded for this run."}
+          </p>
+        </CardContent></Card>
+      )}
+    </div>
+  );
+}
+
+function ResultView({ result }: { result: Record<string, unknown> }) {
+  const kpis = result.kpis as Record<string, unknown> | undefined;
+  const log = result.log as string[] | undefined;
+  const hasKpis = kpis && typeof kpis === "object";
+  const hasLog = Array.isArray(log) && log.length > 0;
+  return (
+    <Card>
+      <CardHeader><CardTitle>Result</CardTitle></CardHeader>
+      <CardContent className="space-y-3">
+        {hasKpis && (
+          <dl className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
+            {Object.entries(kpis).map(([k, v]) => (
+              <div key={k} className="rounded-sm border border-border/60 px-3 py-1.5">
+                <dt className="text-caption text-fg-subtle uppercase tracking-wider truncate" title={k}>{k}</dt>
+                <dd className="text-body-sm text-fg font-mono mt-0.5">{fmtVal(v)}</dd>
+              </div>
+            ))}
+          </dl>
+        )}
+        {hasLog && (
+          <div>
+            <div className="text-caption uppercase tracking-wider text-fg-subtle mb-1">log · {log!.length}</div>
+            <div className="max-h-72 overflow-auto rounded-sm border border-border bg-surface-2 p-3 font-mono text-caption space-y-0.5">
+              {log!.map((l, i) => <div key={i} className="text-fg-muted whitespace-pre-wrap break-words">{l}</div>)}
+            </div>
+          </div>
+        )}
+        {!hasKpis && !hasLog && (
+          <pre className="text-caption font-mono text-fg-muted whitespace-pre-wrap break-all max-h-96 overflow-auto">
+            {safeStringify(result)}
+          </pre>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 function JsonCard({ title, payload, emptyHint }: { title: string; payload?: unknown; emptyHint: string }) {
   return (
     <Card>
@@ -699,11 +875,13 @@ function NewRunDialog({
   pending: boolean;
   onSubmit: (v: Record<string, unknown>) => void;
 }) {
-  const [strategy, setStrategy] = React.useState(catalog[0]?.name ?? "directional");
+  // Sim strategies (scalp) have their own pages and don't run as agent graphs.
+  const choices = React.useMemo(() => catalog.filter((s) => s.name !== "scalp"), [catalog]);
+  const [strategy, setStrategy] = React.useState(choices[0]?.name ?? "directional");
   const [prompt,   setPrompt]   = React.useState("");
   React.useEffect(() => {
-    if (catalog.length && !strategy) setStrategy(catalog[0].name);
-  }, [catalog, strategy]);
+    if (choices.length && !choices.some((s) => s.name === strategy)) setStrategy(choices[0].name);
+  }, [choices, strategy]);
 
   return (
     <DialogContent className="w-[min(92vw,520px)]">
@@ -727,7 +905,7 @@ function NewRunDialog({
         <div>
           <label className="text-body-sm text-fg mb-1.5 inline-block">Strategy</label>
           <div className="grid grid-cols-1 gap-1.5">
-            {catalog.map((s) => (
+            {choices.map((s) => (
               <label
                 key={s.name}
                 className={cn(
@@ -798,7 +976,7 @@ function RunStatusPill({ status }: { status: AgentRun["status"] }) {
   return <Badge tone={map.tone} dot>{map.label}</Badge>;
 }
 
-function RunDot({ status }: { status: AgentRun["status"] }) {
+function RunDot({ status }: { status: AgentRunStatus }) {
   const color = {
     queued:    "bg-fg-subtle",
     running:   "bg-info animate-pulse motion-reduce:animate-none",
@@ -807,4 +985,107 @@ function RunDot({ status }: { status: AgentRun["status"] }) {
     cancelled: "bg-fg-subtle",
   }[status];
   return <span aria-hidden className={cn("h-2 w-2 rounded-full shrink-0", color)} />;
+}
+
+/* ---------- runs list: cursor, grouping, row, filters ---------- */
+/** Pull the opaque `cursor` token out of a DRF next/previous link so we can
+ *  re-request the relative endpoint (keeps everything behind the dev proxy). */
+function cursorOf(url: string | null): string | null {
+  if (!url) return null;
+  try { return new URL(url, window.location.origin).searchParams.get("cursor"); }
+  catch { return null; }
+}
+
+function dateGroup(iso: string): string {
+  const day = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const diff = Math.round((day(new Date()) - day(new Date(iso))) / 86_400_000);
+  if (diff <= 0) return "Today";
+  if (diff === 1) return "Yesterday";
+  if (diff < 7) return "Earlier this week";
+  if (diff < 30) return "Earlier this month";
+  return "Older";
+}
+
+type RunListItem = { type: "header"; label: string } | { type: "run"; run: AgentRunSummary };
+function groupRuns(runs: AgentRunSummary[]): RunListItem[] {
+  const out: RunListItem[] = [];
+  let last = "";
+  for (const run of runs) {
+    const g = dateGroup(run.created_at);
+    if (g !== last) { out.push({ type: "header", label: g }); last = g; }
+    out.push({ type: "run", run });
+  }
+  return out;
+}
+
+function RunRow({ run, selected, onClick }: { run: AgentRunSummary; selected: boolean; onClick: () => void }) {
+  const pnl = run.summary?.realized_pnl_inr ?? run.summary?.total_pnl_inr;
+  return (
+    <button
+      onClick={onClick}
+      className={cn(
+        "w-full text-left px-4 py-2.5 flex items-center gap-2.5 hover:bg-surface-2",
+        selected && "bg-surface-2 border-l-2 border-l-accent",
+      )}
+    >
+      <RunDot status={run.status} />
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2">
+          <span className="text-body-sm text-fg truncate">{run.strategy_name}</span>
+          <span className="text-caption text-fg-subtle">v{run.strategy_version}</span>
+          {pnl != null && (
+            <span className={cn("ml-auto text-caption font-mono shrink-0", pnl >= 0 ? "text-pnl-up" : "text-pnl-down")}>
+              {fmtInr(pnl)}
+            </span>
+          )}
+        </div>
+        <div className="text-caption text-fg-subtle mt-0.5 font-mono flex items-center gap-1.5 min-w-0">
+          <span className="truncate">{run.id.slice(0, 8)}</span>
+          <span>·</span>
+          <span className="shrink-0">{fmtRel(run.created_at)} ago</span>
+          {run.summary?.trades != null && (<><span>·</span><span className="shrink-0">{run.summary.trades} trades</span></>)}
+        </div>
+      </div>
+    </button>
+  );
+}
+
+const STATUS_FILTERS: (AgentRunStatus | "")[] = ["", "running", "succeeded", "failed", "cancelled"];
+
+function RunFilters({
+  catalog, strategy, onStrategy, status, onStatus,
+}: {
+  catalog: StrategySchema[];
+  strategy: string;
+  onStrategy: (v: string) => void;
+  status: AgentRunStatus | "";
+  onStatus: (v: AgentRunStatus | "") => void;
+}) {
+  return (
+    <div className="px-3 py-2 border-b border-border space-y-2 bg-surface/40">
+      <select
+        value={strategy}
+        onChange={(e) => onStrategy(e.target.value)}
+        className="w-full h-8 rounded-sm border border-border bg-surface px-2 text-body-sm text-fg outline-none focus:border-border-strong"
+      >
+        <option value="">All strategies</option>
+        {catalog.map((s) => <option key={s.name} value={s.name}>{s.name}</option>)}
+      </select>
+      <div className="flex flex-wrap gap-1">
+        {STATUS_FILTERS.map((s) => (
+          <button
+            key={s || "all"}
+            type="button"
+            onClick={() => onStatus(s)}
+            className={cn(
+              "px-2 py-0.5 rounded-full text-caption border capitalize transition-colors",
+              status === s ? "bg-accent/15 text-accent border-accent/40" : "border-border text-fg-subtle hover:text-fg",
+            )}
+          >
+            {s || "all"}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
 }

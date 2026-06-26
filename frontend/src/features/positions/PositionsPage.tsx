@@ -216,8 +216,8 @@ export function PositionsPage() {
       ),
     },
     {
-      key: "exit_reason", header: "Exit reason",
-      render: (t) => <span className="text-body-sm text-fg-muted">{t.exit_reason || "—"}</span>,
+      key: "close_reason", header: "Exit reason",
+      render: (t) => <span className="text-body-sm text-fg-muted">{t.close_reason || "—"}</span>,
     },
   ];
 

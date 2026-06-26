@@ -213,12 +213,49 @@ class IntradayCycleAdapter:
                     "phase": sig.phase.value,
                     "rsi": sig.rsi,
                     "trend": sig.trend.value,
+                    # Unrounded entry/risk so with_rr() can reproduce the target
+                    # for other R:R values without re-running the scan.
+                    "_entry_raw": sig.entry_raw,
+                    "_risk_raw": sig.risk_raw,
                 },
             )
             by_ts.setdefault(sig.timestamp, []).append(entry)
 
         self._cache[symbol] = by_ts
         return by_ts
+
+    def with_rr(self, rr: float) -> "IntradayCycleAdapter":
+        """Cheap R:R variant of a precomputed adapter.
+
+        Setups, stops and risk depend on (timeframe, sl_atr_mult) but NOT on
+        R:R — only each signal's target does (target = entry ± risk × rr). So a
+        grid search over R:R can run the expensive precompute (indicators +
+        bar-walk) ONCE per sl_atr and reuse it here, rescaling targets from the
+        unrounded entry/risk stashed at precompute time so the result is
+        bit-identical to a fresh precompute(min_rr=rr)."""
+        from dataclasses import replace
+
+        clone = IntradayCycleAdapter(sl_atr_mult=self.sl_atr_mult, min_rr=rr)
+        new_cache: Dict[str, Dict[str, List[EntrySignal]]] = {}
+        for symbol, by_ts in self._cache.items():
+            rebuilt: Dict[str, List[EntrySignal]] = {}
+            for ts, sigs in by_ts.items():
+                out = []
+                for s in sigs:
+                    risk_raw = s.metadata.get("_risk_raw", 0.0)
+                    if risk_raw and risk_raw > 0:
+                        entry_raw = s.metadata.get("_entry_raw", s.entry_price)
+                        if s.side == TradeSide.BUY:
+                            target = round(entry_raw + risk_raw * rr, 2)
+                        else:
+                            target = round(entry_raw - risk_raw * rr, 2)
+                        out.append(replace(s, target=target))
+                    else:
+                        out.append(s)
+                rebuilt[ts] = out
+            new_cache[symbol] = rebuilt
+        clone._cache = new_cache
+        return clone
 
     def detect(
         self, symbol: str, bars: List[Bar], bar_index: int, context: dict,

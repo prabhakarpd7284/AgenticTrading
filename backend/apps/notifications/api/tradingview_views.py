@@ -614,6 +614,79 @@ def _group_signals(qs, by: str) -> list[dict]:
     return rows
 
 
+# ── Pine Script generator ────────────────────────────────────────────────
+
+class PineScriptStrategiesView(APIView):
+    """List the screener strategies that can be exported as Pine Script.
+
+    Returns a bare (un-enveloped) list of the *enabled* strategies — the two
+    disabled ones (BB Fade After Momentum, Morning Range Breakout) are filtered
+    out since they have no tradeable conditions to translate.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @extend_schema(responses=OpenApiTypes.OBJECT)
+    def get(self, request):
+        # Lazy import — a module-top import of STRATEGIES drags
+        # trading.utils.indicators + agents_core contracts via the screener
+        # package __init__ (circular/heavy-import risk).
+        from apps.notifications.services.pinescript import list_pine_strategies
+        return Response(list_pine_strategies())
+
+
+class PineScriptView(APIView):
+    """Generate a Pine v5 indicator for one enabled screener strategy.
+
+    Query: ?strategy=<slug> [&link=<uuid>]. When ``link`` resolves to a
+    tenant-owned TradingViewLink, that link's webhook URL is emitted as a
+    comment header (we never embed another tenant's secret).
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @extend_schema(
+        parameters=[
+            OpenApiParameter("strategy", OpenApiTypes.STR, OpenApiParameter.QUERY,
+                             required=True, description="Strategy slug (e.g. breakout-long)."),
+            OpenApiParameter("link", OpenApiTypes.UUID, OpenApiParameter.QUERY,
+                             required=False, description="Tenant-owned link whose webhook URL to embed."),
+        ],
+        responses=OpenApiTypes.OBJECT,
+    )
+    def get(self, request):
+        from apps.notifications.services.pinescript import (
+            find_enabled_strategy, generate_pine,
+        )
+
+        key = (request.query_params.get("strategy") or "").strip()
+        if not key:
+            return Response({"detail": "strategy is required"},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        strat = find_enabled_strategy(key)
+        if strat is None:
+            return Response(
+                {"detail": f"unknown or disabled strategy: {key!r}"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        webhook_url = ""
+        link_id = request.query_params.get("link")
+        if link_id:
+            link = (TradingViewLink.objects
+                    .filter(tenant=request.tenant, owner=request.user, pk=link_id)
+                    .first())
+            if link is not None:
+                path = f"/api/v1/webhooks/tradingview/{link.webhook_secret}/"
+                webhook_url = request.build_absolute_uri(path)
+
+        return Response({
+            "strategy": key,
+            "code": generate_pine(strat, webhook_url=webhook_url),
+        })
+
+
 # ── Watchlist kinds metadata ────────────────────────────────────────────
 
 class WatchlistKindsView(APIView):

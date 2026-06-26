@@ -134,6 +134,38 @@ class TestTradingViewLinkCRUD:
         names = [row["display_name"] for row in resp.json()["results"]]
         assert names == ["mine"]
 
+    def test_can_bind_same_tenant_portfolio(self, auth_client, owner, paper_portfolio):
+        link = TradingViewLink.objects.create(
+            tenant=owner.memberships.first().tenant,
+            owner=owner,
+            display_name="bind ok",
+        )
+        resp = auth_client.patch(
+            f"/api/v1/notifications/tradingview/{link.id}/",
+            {"portfolio": str(paper_portfolio.id)},
+            format="json",
+        )
+        assert resp.status_code == 200, resp.content
+        link.refresh_from_db()
+        assert link.portfolio_id == paper_portfolio.id
+
+    def test_cannot_bind_cross_tenant_portfolio(self, auth_client, owner, two_tenants):
+        """Autofire routes trades into the bound portfolio — binding one from
+        another tenant would cross the book boundary. Must 400."""
+        link = TradingViewLink.objects.create(
+            tenant=owner.memberships.first().tenant,
+            owner=owner,
+            display_name="bind cross",
+        )
+        resp = auth_client.patch(
+            f"/api/v1/notifications/tradingview/{link.id}/",
+            {"portfolio": str(two_tenants.portfolio_b.id)},
+            format="json",
+        )
+        assert resp.status_code == 400
+        # Errors are wrapped in an RFC 7807 problem doc → field lives under `detail`.
+        assert "portfolio" in resp.json()["detail"]
+
 
 # ── Webhook receiver ────────────────────────────────────────────────────
 

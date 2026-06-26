@@ -32,6 +32,8 @@ from typing import Any, Callable
 
 from django.conf import settings
 from django.db.models import Count, Sum, F
+from drf_spectacular.types import OpenApiTypes
+from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -134,6 +136,7 @@ def _legs_by_role(pos: OptionsPosition) -> dict[str, OptionsLeg | None]:
 
 # ── Portfolio + combined P&L ──────────────────────────────────────────
 
+@extend_schema(responses=OpenApiTypes.OBJECT)
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 @_with_legacy
@@ -203,6 +206,7 @@ def portfolio(request):
 
 # ── Open positions (equity + options) ─────────────────────────────────
 
+@extend_schema(responses=OpenApiTypes.OBJECT)
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 @_with_legacy
@@ -268,6 +272,15 @@ def positions(request):
 
 # ── Trade journal ─────────────────────────────────────────────────────
 
+@extend_schema(
+    parameters=[
+        OpenApiParameter("limit", OpenApiTypes.INT, OpenApiParameter.QUERY,
+                         required=False, description="Max rows (default 50, cap 500)."),
+        OpenApiParameter("symbol", OpenApiTypes.STR, OpenApiParameter.QUERY,
+                         required=False, description="Filter to one symbol."),
+    ],
+    responses=OpenApiTypes.OBJECT,
+)
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 @_with_legacy
@@ -293,10 +306,16 @@ def trades(request):
             "quantity": t.quantity,
             "fill_price": float(t.fill_price) if t.fill_price else None,
             "fill_quantity": t.fill_quantity,
+            "exit_price": float(t.exit_price) if t.exit_price is not None else None,
+            "exit_quantity": t.exit_quantity,
+            "closed_at": t.closed_at.isoformat() if t.closed_at else None,
+            "close_reason": t.close_reason,
             "pnl": float(t.realized_pnl) if t.realized_pnl is not None else None,
             "pnl_percent": float(t.pnl_percent) if t.pnl_percent is not None else None,
             "confidence": float(t.confidence),
             "reasoning": t.reasoning,
+            # Drives the chart modal's candle interval (swing → daily, else 5m).
+            "source": "swing" if (t.reasoning or "").startswith("[Swing") else "intraday",
             "risk_approved": t.risk_approved,
             "risk_reason": t.risk_reason,
             "order_id": str(t.primary_order_id) if t.primary_order_id else "",
@@ -307,6 +326,13 @@ def trades(request):
 
 # ── Straddle / options position history ───────────────────────────────
 
+@extend_schema(
+    parameters=[
+        OpenApiParameter("status", OpenApiTypes.STR, OpenApiParameter.QUERY,
+                         required=False, description="Filter by OptionsPosition status."),
+    ],
+    responses=OpenApiTypes.OBJECT,
+)
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 @_with_legacy
@@ -387,6 +413,13 @@ def _format_event_detail(e: Event) -> str:
     return e.text or e.type
 
 
+@extend_schema(
+    parameters=[
+        OpenApiParameter("limit", OpenApiTypes.INT, OpenApiParameter.QUERY,
+                         required=False, description="Max rows (default 25, cap 200)."),
+    ],
+    responses=OpenApiTypes.OBJECT,
+)
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 @_with_legacy
@@ -480,6 +513,7 @@ def _risk_status(r: dict) -> str:
     return "GREEN"
 
 
+@extend_schema(responses=OpenApiTypes.OBJECT)
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 @_with_legacy
@@ -489,6 +523,7 @@ def risk(request):
     return Response(r)
 
 
+@extend_schema(responses=OpenApiTypes.OBJECT)
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 @_with_legacy
@@ -544,6 +579,13 @@ def alerts(request):
 
 # ── Journal analytics ─────────────────────────────────────────────────
 
+@extend_schema(
+    parameters=[
+        OpenApiParameter("days", OpenApiTypes.INT, OpenApiParameter.QUERY,
+                         required=False, description="Lookback window (default 30, cap 365)."),
+    ],
+    responses=OpenApiTypes.OBJECT,
+)
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 @_with_legacy
@@ -605,6 +647,7 @@ def analytics(request):
 
 # ── Exposure breakdown ────────────────────────────────────────────────
 
+@extend_schema(responses=OpenApiTypes.OBJECT)
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 @_with_legacy
@@ -677,6 +720,7 @@ def _is_market_open_simple() -> bool:
     return dt_time(9, 15) <= now.time() <= dt_time(15, 30)
 
 
+@extend_schema(responses=OpenApiTypes.OBJECT)
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 @_with_legacy
@@ -731,6 +775,7 @@ def system(request):
     })
 
 
+@extend_schema(request=None, responses=OpenApiTypes.OBJECT)
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
 @_with_legacy
@@ -740,6 +785,7 @@ def pause_ai(request):
     return Response({"ai_paused": True})
 
 
+@extend_schema(request=None, responses=OpenApiTypes.OBJECT)
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
 @_with_legacy
@@ -751,6 +797,7 @@ def resume_ai(request):
 
 # ── Strategy library (now from KnowledgeDoc) ──────────────────────────
 
+@extend_schema(responses=OpenApiTypes.OBJECT)
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 @_with_legacy
@@ -769,6 +816,7 @@ def strategies(request):
 
 # ── Watchlist ─────────────────────────────────────────────────────────
 
+@extend_schema(responses=OpenApiTypes.OBJECT)
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 @_with_legacy
@@ -795,6 +843,30 @@ def watchlist(request):
 # rather than going through the StrategyRun framework — Phase 3 follow-up
 # will route this through the workflow runtime once the framework is wired.
 
+@extend_schema(
+    parameters=[
+        OpenApiParameter("strike", OpenApiTypes.INT, OpenApiParameter.QUERY,
+                         required=True, description="Option strike (required, > 0)."),
+        OpenApiParameter("type", OpenApiTypes.STR, OpenApiParameter.QUERY,
+                         required=False, enum=["CE", "PE"], description="Option type (default CE)."),
+        OpenApiParameter("underlying", OpenApiTypes.STR, OpenApiParameter.QUERY,
+                         required=False, description="NIFTY | BANKNIFTY | SENSEX (default NIFTY)."),
+        OpenApiParameter("interval", OpenApiTypes.STR, OpenApiParameter.QUERY,
+                         required=False, description="Candle interval (default FIVE_MINUTE)."),
+        OpenApiParameter("dry_run", OpenApiTypes.BOOL, OpenApiParameter.QUERY,
+                         required=False, description="Run on synthetic sample candles."),
+        OpenApiParameter("expiry", OpenApiTypes.STR, OpenApiParameter.QUERY,
+                         required=False, description="Angel-format expiry; resolved if omitted."),
+        OpenApiParameter("date", OpenApiTypes.DATE, OpenApiParameter.QUERY,
+                         required=False, description="Session date for candles (default last weekday)."),
+        OpenApiParameter("lot_size", OpenApiTypes.INT, OpenApiParameter.QUERY, required=False),
+        OpenApiParameter("capital", OpenApiTypes.NUMBER, OpenApiParameter.QUERY, required=False),
+        OpenApiParameter("risk_pct", OpenApiTypes.NUMBER, OpenApiParameter.QUERY, required=False),
+        OpenApiParameter("profit_risk", OpenApiTypes.NUMBER, OpenApiParameter.QUERY, required=False),
+        OpenApiParameter("max_pyramids", OpenApiTypes.INT, OpenApiParameter.QUERY, required=False),
+    ],
+    responses=OpenApiTypes.OBJECT,
+)
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 @_with_legacy
@@ -884,6 +956,19 @@ def pyramid(request):
         d -= td(days=1)
 
     if not candles:
+        # Distinguish "broker temporarily rate-limited" from "no such data".
+        # During an Angel cooldown the breaker short-circuits fetch_candles, so
+        # an empty result here usually means the broker is paused, not that the
+        # option/data is missing — surface that (503) so the UI can say "retry
+        # or use Sample Data" instead of a misleading 404 "not found".
+        cooldown_ms = broker.breaker_remaining_ms()
+        if cooldown_ms > 0:
+            return Response(
+                {"error": f"Broker rate-limit cooldown — live option data paused "
+                          f"for ~{cooldown_ms // 1000}s. Tick 'Sample Data' to run "
+                          f"offline, or retry shortly."},
+                status=503,
+            )
         return Response({"error": f"No option candles found for {underlying} {strike} {opt_type} (exp {expiry_str})"}, status=404)
 
     symbol_label = f"{underlying} {strike} {opt_type} (exp {expiry_str})"

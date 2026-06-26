@@ -33,14 +33,58 @@ class AgentRunSerializer(serializers.ModelSerializer):
                             "strategy_version"]
 
 
+# A handful of KPI keys worth surfacing in the run list (across strategies).
+_SUMMARY_KEYS = ("realized_pnl_inr", "trades", "won", "total_pnl_inr", "roi_pct", "peak_lots")
+
+
+class AgentRunListSerializer(serializers.ModelSerializer):
+    """Light row for the runs list — NO config/result blobs (those can be huge,
+    e.g. a scalp run's full decision log). A small `summary` is derived from the
+    result KPIs so the list stays scannable without shipping the whole payload."""
+    summary = serializers.SerializerMethodField()
+
+    class Meta:
+        model = AgentRun
+        fields = ["id", "strategy_name", "strategy_version", "status",
+                  "created_at", "started_at", "completed_at", "summary"]
+
+    def get_summary(self, obj):
+        result = obj.result if isinstance(obj.result, dict) else {}
+        kpis = result.get("kpis")
+        if isinstance(kpis, dict):
+            out = {k: kpis[k] for k in _SUMMARY_KEYS if k in kpis}
+            return out or None
+        return None
+
+
 class AgentRunViewSet(mixins.CreateModelMixin,
                       mixins.ListModelMixin,
                       mixins.RetrieveModelMixin,
                       viewsets.GenericViewSet):
     serializer_class = AgentRunSerializer
 
+    def get_serializer_class(self):
+        # List ships the light row; retrieve/create ship the full record.
+        return AgentRunListSerializer if self.action == "list" else AgentRunSerializer
+
     def get_queryset(self):
-        return AgentRun.objects.filter(tenant=self.request.tenant)
+        qs = AgentRun.objects.filter(tenant=self.request.tenant)
+        # Optional filters (cursor pagination already orders by -created_at; the
+        # tenant+status / tenant+strategy_name indexes back these filters).
+        strategy = self.request.query_params.get("strategy")
+        run_status = self.request.query_params.get("status")
+        if strategy:
+            qs = qs.filter(strategy_name=strategy)
+        if run_status:
+            qs = qs.filter(status=run_status)
+        if self.action == "list":
+            # Don't drag config/error over the wire for the list; result is kept
+            # only to derive the small `summary` (retrieve loads everything).
+            qs = qs.only(
+                "id", "tenant_id", "strategy_name", "strategy_version", "status",
+                "result", "created_at", "started_at", "completed_at",
+            )
+        return qs
 
     def create(self, request, *args, **kwargs):
         ser = self.get_serializer(data=request.data)

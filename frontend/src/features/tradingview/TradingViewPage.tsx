@@ -45,6 +45,7 @@ import {
   useAddSymbolsToWatchlist, useCreateTradingViewLink, useCreateWatchlist,
   useDeleteTradingViewLink, useDeleteWatchlist,
   useGroupedSignals, useGroupedSignalsDetail,
+  usePineScript, usePineStrategies, usePortfolios,
   useRefreshWatchlist, useRemoveSymbolsFromWatchlist,
   useRotateTradingViewSecret, useTradingViewLinks, useTradingViewRecent,
   useUpdateTradingViewLink, useUpdateWatchlist,
@@ -65,6 +66,17 @@ export function TradingViewPage() {
   const [newWatchlistOpen, setNewWatchlistOpen] = React.useState(false);
   const [newLinkOpen, setNewLinkOpen] = React.useState(false);
 
+  // Signal-feed filters live here (not inside MainPane) so the drill-in sheet
+  // can reuse the *exact* group-by / window / source the operator is looking
+  // at. Otherwise clicking a row under the Strategy / Source / Day tabs would
+  // query by=symbol with that row's key and return wrong or empty detail.
+  const [groupBy, setGroupBy] = React.useState<SignalGroupBy>("symbol");
+  const [days, setDays] = React.useState(7);
+  const [source, setSource] = React.useState<string>("");
+
+  const symbolFilter =
+    watchlistFilter === WATCHLIST_FILTER_ALL ? undefined : watchlistFilter;
+
   return (
     <div className="grid grid-cols-[260px_1fr] min-h-[calc(100vh-3.5rem)]">
       <SidebarPane
@@ -77,8 +89,13 @@ export function TradingViewPage() {
       />
 
       <MainPane
-        watchlistFilter={watchlistFilter === WATCHLIST_FILTER_ALL ? undefined : watchlistFilter}
-        groupBy={undefined}    /* MainPane owns its own group/window state */
+        watchlistFilter={symbolFilter}
+        groupBy={groupBy}
+        onGroupByChange={setGroupBy}
+        days={days}
+        onDaysChange={setDays}
+        source={source}
+        onSourceChange={setSource}
         onRowDrill={setDrillKey}
       />
 
@@ -95,7 +112,10 @@ export function TradingViewPage() {
       />
       <SignalDrillSheet
         drillKey={drillKey}
-        watchlistFilter={watchlistFilter === WATCHLIST_FILTER_ALL ? undefined : watchlistFilter}
+        by={groupBy}
+        days={days}
+        source={source}
+        watchlistFilter={symbolFilter}
         onClose={() => setDrillKey(undefined)}
       />
     </div>
@@ -301,16 +321,21 @@ const GROUP_BY_OPTIONS: { key: SignalGroupBy; label: string }[] = [
 ];
 
 function MainPane({
-  watchlistFilter, onRowDrill,
+  watchlistFilter,
+  groupBy, onGroupByChange,
+  days, onDaysChange,
+  source, onSourceChange,
+  onRowDrill,
 }: {
   watchlistFilter: string | undefined;
-  groupBy?: SignalGroupBy;
+  groupBy: SignalGroupBy;
+  onGroupByChange: (v: SignalGroupBy) => void;
+  days: number;
+  onDaysChange: (v: number) => void;
+  source: string;
+  onSourceChange: (v: string) => void;
   onRowDrill: (key: string) => void;
 }) {
-  const [groupBy, setGroupBy] = React.useState<SignalGroupBy>("symbol");
-  const [days, setDays] = React.useState(7);
-  const [source, setSource] = React.useState<string>("");
-
   const { data, isLoading, dataUpdatedAt } = useGroupedSignals({
     by: groupBy,
     days,
@@ -337,7 +362,7 @@ function MainPane({
           />
           <select
             value={days}
-            onChange={(e) => setDays(Number(e.target.value))}
+            onChange={(e) => onDaysChange(Number(e.target.value))}
             aria-label="Time window"
             className="h-8 rounded-xs bg-surface border border-border px-2 text-body-sm"
           >
@@ -348,7 +373,7 @@ function MainPane({
           </select>
           <select
             value={source}
-            onChange={(e) => setSource(e.target.value)}
+            onChange={(e) => onSourceChange(e.target.value)}
             aria-label="Source"
             className="h-8 rounded-xs bg-surface border border-border px-2 text-body-sm"
           >
@@ -361,7 +386,7 @@ function MainPane({
         </div>
       </header>
 
-      <Tabs value={groupBy} onValueChange={(v) => setGroupBy(v as SignalGroupBy)}>
+      <Tabs value={groupBy} onValueChange={(v) => onGroupByChange(v as SignalGroupBy)}>
         <TabsList className="px-5 mt-3">
           {GROUP_BY_OPTIONS.map((opt) => (
             <TabsTrigger key={opt.key} value={opt.key}>{opt.label}</TabsTrigger>
@@ -461,19 +486,23 @@ function formatDayLabel(iso: string): string {
 /* =================================================================== */
 
 function SignalDrillSheet({
-  drillKey, watchlistFilter, onClose,
+  drillKey, by, days, source, watchlistFilter, onClose,
 }: {
   drillKey: string | undefined;
+  by: SignalGroupBy;
+  days: number;
+  source: string;
   watchlistFilter: string | undefined;
   onClose: () => void;
 }) {
-  // Match the MainPane's filter state for consistency. In a more rigorous
-  // design we'd lift this state to TradingViewPage and pass it through —
-  // here we just default to "symbol / 7d" matching the table's defaults.
+  // Mirror the feed's exact filters (lifted to TradingViewPage) so the raw
+  // rows shown here are the ones that aggregated into the clicked bucket —
+  // same group-by dimension, window, source, and watchlist gate.
   const { data, isLoading, isError } = useGroupedSignalsDetail({
-    by: "symbol",
+    by,
     key: drillKey,
-    days: 7,
+    days,
+    source: source || undefined,
     watchlist: watchlistFilter,
   });
   const open = drillKey != null;
@@ -483,7 +512,9 @@ function SignalDrillSheet({
       <SheetContent>
         <SheetHeader>
           <SheetTitle>
-            {drillKey ? drillKey : "Signal detail"}
+            {drillKey
+              ? (by === "day" ? formatDayLabel(drillKey) : drillKey)
+              : "Signal detail"}
           </SheetTitle>
         </SheetHeader>
         <SheetBody>
@@ -539,6 +570,7 @@ function LinkSettingsSheet({
   const rotate = useRotateTradingViewSecret();
   const remove = useDeleteTradingViewLink();
   const { data: watchlists = [] } = useWatchlists();
+  const { data: portfolios = [] } = usePortfolios();
   const { data: recent = [] } = useTradingViewRecent(linkId);
 
   const [draft, setDraft] = React.useState<TradingViewLink | undefined>(link);
@@ -650,6 +682,31 @@ function LinkSettingsSheet({
               />
               {draft.autofire_enabled && (
                 <div className="mt-3 space-y-3">
+                  {/* Portfolio is mandatory for autofire — fire_workflow()
+                      silently skips with reason="no_portfolio" when it's
+                      unset, so surface a warning rather than letting the
+                      operator think autofire is armed when it isn't. */}
+                  <div>
+                    <div className="text-body-sm text-fg mb-1">Portfolio</div>
+                    <select
+                      value={draft.portfolio || ""}
+                      onChange={(e) => patch({ portfolio: e.target.value || null })}
+                      className="h-9 w-full rounded-xs bg-surface border border-border px-2 text-body-sm"
+                    >
+                      <option value="">Select a portfolio…</option>
+                      {portfolios.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name} · {p.mode}
+                        </option>
+                      ))}
+                    </select>
+                    {!draft.portfolio && (
+                      <div role="alert" className="flex items-start gap-2 text-caption text-warn mt-2">
+                        <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" aria-hidden />
+                        <span>Autofire won't fire until a portfolio is selected.</span>
+                      </div>
+                    )}
+                  </div>
                   <Input
                     label="Strategy name"
                     hint="One of: directional, short_straddle, pyramid, ..."
@@ -702,6 +759,10 @@ function LinkSettingsSheet({
                 </ul>
               )}
             </CollapsibleSection>
+
+            {/* Pine Script export — generate a TradingView indicator from one of
+                our screener strategies, pre-wired to this link's webhook. */}
+            <PineScriptSection linkId={draft.id} />
           </div>
         </SheetBody>
 
@@ -717,6 +778,74 @@ function LinkSettingsSheet({
         </SheetFooter>
       </SheetContent>
     </Sheet>
+  );
+}
+
+function PineScriptSection({ linkId }: { linkId: string }) {
+  const [open, setOpen] = React.useState(false);
+  const { data: strategies = [] } = usePineStrategies();
+  const [strategy, setStrategy] = React.useState<string>("");
+
+  // Default to the first strategy once the list resolves.
+  React.useEffect(() => {
+    if (!strategy && strategies.length) setStrategy(strategies[0].key);
+  }, [strategies, strategy]);
+
+  // Only generate while the section is expanded — keeps the network quiet
+  // for operators who never open it.
+  const { data, isFetching } = usePineScript(open ? strategy : undefined, linkId);
+
+  const onCopy = async () => {
+    if (!data?.code) return;
+    await navigator.clipboard.writeText(data.code);
+    toast.success("Pine Script copied");
+  };
+
+  return (
+    <CollapsibleSection
+      title="Pine Script"
+      statusBadge={<Badge tone="brand">{strategies.length}</Badge>}
+      open={open}
+      onOpenChange={setOpen}
+    >
+      <p className="text-caption text-fg-subtle mb-2">
+        Export a screener strategy as a TradingView indicator. Paste it into the
+        Pine editor, add it to a chart, then create an alert on{" "}
+        <span className="text-fg-muted">“Any alert() function call”</span> with{" "}
+        <span className="text-fg-muted">Once Per Bar Close</span> and this link’s
+        webhook URL — alerts feed straight back into AlphaDesk.
+      </p>
+      <select
+        value={strategy}
+        onChange={(e) => setStrategy(e.target.value)}
+        aria-label="Strategy to export"
+        className="h-9 w-full rounded-xs bg-surface border border-border px-2 text-body-sm mb-2"
+      >
+        {strategies.map((s) => (
+          <option key={s.key} value={s.key}>{s.label} · {s.side}</option>
+        ))}
+      </select>
+      {data?.code ? (
+        <div className="space-y-2">
+          <div className="flex justify-end">
+            <Button
+              size="sm" variant="secondary"
+              onClick={onCopy}
+              leading={<Copy className="h-3.5 w-3.5" />}
+            >
+              Copy
+            </Button>
+          </div>
+          <pre className="max-h-72 overflow-auto rounded-sm border border-border bg-surface-2 p-3 text-caption font-mono whitespace-pre">
+            {data.code}
+          </pre>
+        </div>
+      ) : (
+        <p className="text-caption text-fg-subtle">
+          {isFetching ? "Generating…" : "Select a strategy to generate Pine Script."}
+        </p>
+      )}
+    </CollapsibleSection>
   );
 }
 

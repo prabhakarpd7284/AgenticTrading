@@ -4,6 +4,7 @@
 #
 #   :8000   Django ASGI         (Daphne — REST + WebSocket + broker WS)
 #   :5173   Vite (React SPA)
+#   :5555   Flower              (Celery monitoring dashboard)
 #   —       Celery worker       (order outbox, agent runs, snapshots)
 #   —       Celery beat         (periodic broker refresh, outbox poll, etc)
 #
@@ -14,6 +15,7 @@
 #     bash scripts/dev_up.sh                 # start everything
 #     bash scripts/dev_up.sh --no-front      # backend + worker + beat only
 #     bash scripts/dev_up.sh --no-celery     # web + ui only (no async tasks)
+#     bash scripts/dev_up.sh --no-flower     # skip the Flower dashboard
 #     bash scripts/dev_up.sh --no-verify     # skip post-launch port-bind check
 #
 # GUARANTEES (idempotent restart):
@@ -42,11 +44,13 @@ VENV_CELERY="$BACKEND_DIR/.venv/bin/celery"
 # --- flags -----------------------------------------------------------------
 WITH_FRONT=1
 WITH_CELERY=1
+WITH_FLOWER=1
 WITH_VERIFY=1
 for arg in "$@"; do
     case "$arg" in
         --no-front)  WITH_FRONT=0 ;;
         --no-celery) WITH_CELERY=0 ;;
+        --no-flower) WITH_FLOWER=0 ;;
         --no-verify) WITH_VERIFY=0 ;;
         *) echo "unknown flag: $arg" >&2; exit 2 ;;
     esac
@@ -192,19 +196,23 @@ echo "[reset] clearing prior instances"
 stop_pid logs/web.pid     "web"
 stop_pid logs/celery.pid  "celery worker"
 stop_pid logs/beat.pid    "celery beat"
+stop_pid logs/flower.pid  "flower"
 stop_pid logs/vite.pid    "vite"
 
 kill_by_name "celery -A config worker" "celery worker"
 kill_by_name "celery -A config beat"   "celery beat"
+kill_by_name "celery -A config flower" "flower"
 
 # A previous run may have started Django via runserver (older versions of
 # this script) or daphne (current). Either way, anything bound to :8000
-# blocks us. Same for vite on :5173.
+# blocks us. Same for vite on :5173 and flower on :5555.
 kill_port 8000 "web"
 kill_port 5173 "vite"
+kill_port 5555 "flower"
 
 wait_port_free 8000 "web" || exit 1
 wait_port_free 5173 "vite" || exit 1
+wait_port_free 5555 "flower" || exit 1
 
 # --- Django ASGI on :8000 -------------------------------------------------
 # Daphne is the ASGI server — `runserver` is WSGI and would silently
@@ -240,7 +248,7 @@ fi
 
 # --- Celery worker --------------------------------------------------------
 if [[ "$WITH_CELERY" == "1" ]]; then
-    echo "[2/4] starting Celery worker"
+    echo "[2/5] starting Celery worker"
     # NOTE on -Q: three tasks declare custom queues:
     #   apps.agents_core.tasks.run.execute_run     → "agents"
     #   apps.trading.tasks.outbox.process_outbox   → "orders"
@@ -259,7 +267,7 @@ if [[ "$WITH_CELERY" == "1" ]]; then
         echo $! >"$ROOT/logs/celery.pid"
     )
 
-    echo "[3/4] starting Celery beat"
+    echo "[3/5] starting Celery beat"
     # Beat schedules periodic tasks: broker refresh (30s), order outbox poll
     # (1s), portfolio snapshots (60s), agent-run expiration (5min), broker
     # snapshot prune (6h). Without beat, no periodic tasks fire — the UI
@@ -271,13 +279,38 @@ if [[ "$WITH_CELERY" == "1" ]]; then
             >"$ROOT/logs/beat.log" 2>&1 &
         echo $! >"$ROOT/logs/beat.pid"
     )
+
+    # --- Flower dashboard on :5555 ----------------------------------------
+    # Reuses the Celery app (`-A config`) so it reads the same broker the
+    # worker/beat use (redis://localhost:6380/0 from settings). Read-only
+    # monitoring; safe to skip with --no-flower.
+    if [[ "$WITH_FLOWER" == "1" ]]; then
+        echo "[4/5] starting Flower       → http://localhost:5555"
+        (
+            cd "$BACKEND_DIR"
+            DJANGO_SETTINGS_MODULE=config.settings.dev \
+                "$VENV_CELERY" -A config flower --address=0.0.0.0 --port=5555 \
+                >"$ROOT/logs/flower.log" 2>&1 &
+            echo $! >"$ROOT/logs/flower.pid"
+        )
+        if [[ "$WITH_VERIFY" == "1" ]]; then
+            # Flower is non-critical, so a slow/failed bind is a WARN, not fatal.
+            if ! wait_port_listen 5555 "flower" "$ROOT/logs/flower.log" 20; then
+                echo "WARN: Flower didn't come up — worker/beat are fine, dashboard won't load." >&2
+            else
+                echo "       flower is live on :5555"
+            fi
+        fi
+    else
+        echo "[4/5] skipping Flower (--no-flower)"
+    fi
 else
-    echo "[2-3/4] skipping Celery worker + beat (--no-celery)"
+    echo "[2-4/5] skipping Celery worker + beat + flower (--no-celery)"
 fi
 
 # --- Vite on :5173 --------------------------------------------------------
 if [[ "$WITH_FRONT" == "1" ]]; then
-    echo "[4/4] starting Vite         → http://localhost:5173"
+    echo "[5/5] starting Vite         → http://localhost:5173"
     (
         cd "$FRONTEND_DIR"
         npm run dev >"$ROOT/logs/vite.log" 2>&1 &
@@ -293,12 +326,14 @@ if [[ "$WITH_FRONT" == "1" ]]; then
         fi
     fi
 else
-    echo "[4/4] skipping Vite (--no-front)"
+    echo "[5/5] skipping Vite (--no-front)"
 fi
 
 echo
 echo "All processes started.  Tail logs with:"
-echo "    tail -f logs/web.log logs/celery.log logs/beat.log logs/vite.log"
+echo "    tail -f logs/web.log logs/celery.log logs/beat.log logs/flower.log logs/vite.log"
+echo
+echo "Celery dashboard (Flower):  http://localhost:5555"
 echo
 echo "Stop everything with:"
 echo "    bash scripts/dev_down.sh"

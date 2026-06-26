@@ -54,3 +54,6 @@ celerybeat-schedule*
 *.log
 backend/fyersApi.log
 backend/fyersRequests.log
+
+# Database dumps (transfer out-of-band, not via git)
+dumps/

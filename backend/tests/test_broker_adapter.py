@@ -26,6 +26,19 @@ def test_ensure_exercises_time_without_nameerror():
     assert a._ensure() is True
 
 
+def test_candle_endpoint_uses_wider_throttle_gap():
+    """getCandleData is rate-tight (Angel ~3/s), so the candle gap must be
+    wider than the global gap — that headroom is what keeps backtest/bootstrap
+    bursts from tripping the breaker. Guards the two-tier config from regressing
+    back to a single global gap."""
+    from trading.services.data_service import BrokerClient
+
+    bc = BrokerClient.get_instance()
+    assert bc._candle_min_interval >= bc._min_interval
+    # _throttle only ever widens, never narrows below the global floor.
+    assert max(bc._min_interval, bc._candle_min_interval) == bc._candle_min_interval
+
+
 def test_throttled_short_circuits_while_breaker_open():
     """When the shared breaker is open, _throttled must fast-fail with
     BrokerRateLimited and never invoke the wrapped call (no network hit)."""
@@ -66,5 +79,45 @@ def test_breaker_half_open_allows_single_probe_then_closes():
         assert bc.breaker_gate() == "open"    # probe already taken → others wait
         bc.reset_breaker()                    # probe succeeded → resume traffic
         assert bc.breaker_gate() == "closed"
+    finally:
+        bc.reset_breaker()
+
+
+def test_await_breaker_clears_once_cooldown_elapses():
+    """A batch/historical caller (backtest) must WAIT out an open breaker
+    rather than fail-fast — otherwise the whole run silently returns 0 candles.
+    Once the cooldown has elapsed, await_breaker resolves to 'probe'/'closed'."""
+    from trading.services.data_service import BrokerClient, _get_redis_for_throttle
+
+    bc = BrokerClient.get_instance()
+    bc.reset_breaker()
+    r = _get_redis_for_throttle()
+    if r is None:
+        return  # Redis-less env: can't simulate elapsed cooldown without sleeping
+    try:
+        bc.trip_breaker()
+        assert bc.breaker_gate() == "open"
+        # Simulate the cooldown having elapsed without sleeping, then prove the
+        # batch caller is let through (wins the half-open probe).
+        import time as _t
+        r.set(bc._REDIS_BREAKER_KEY, int(_t.time() * 1000) - 1000)
+        r.delete(bc._REDIS_BREAKER_PROBE_KEY)
+        assert bc.await_breaker(max_wait=2.0) in ("probe", "closed")
+    finally:
+        bc.reset_breaker()
+
+
+def test_await_breaker_gives_up_after_max_wait():
+    """await_breaker is BOUNDED — a hard ban that never clears within max_wait
+    returns 'open' so the caller gives up instead of hanging forever."""
+    from trading.services.data_service import BrokerClient
+
+    bc = BrokerClient.get_instance()
+    bc.reset_breaker()
+    try:
+        bc.trip_breaker()                     # ~5s cooldown, well past max_wait
+        t0 = time.monotonic()
+        assert bc.await_breaker(max_wait=0.2) == "open"
+        assert time.monotonic() - t0 < 2.0    # returned promptly, didn't hang
     finally:
         bc.reset_breaker()

@@ -4,6 +4,8 @@ from rest_framework.routers import DefaultRouter
 from apps.notifications.api.tradingview_views import (
     GroupedSignalsDetailView,
     GroupedSignalsView,
+    PineScriptStrategiesView,
+    PineScriptView,
     TradingViewLinkViewSet,
 )
 from apps.notifications.api.views import AlertViewSet
@@ -30,5 +32,19 @@ urlpatterns = [
         "tradingview/signals/detail/",
         GroupedSignalsDetailView.as_view(),
         name="tradingview-grouped-signals-detail",
+    ),
+    # Pine Script generator. Standalone paths (not router actions) — safe from
+    # the TradingViewLinkViewSet detail route because its lookup_value_regex
+    # only matches UUID-shaped segments, so "pine"/"pine-strategies" never read
+    # as a link pk.
+    path(
+        "tradingview/pine-strategies/",
+        PineScriptStrategiesView.as_view(),
+        name="tradingview-pine-strategies",
+    ),
+    path(
+        "tradingview/pine/",
+        PineScriptView.as_view(),
+        name="tradingview-pine",
     ),
 ]
