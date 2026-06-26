@@ -22,7 +22,6 @@ from django.db import models
 
 from apps.common.tenancy import TenantModel
 
-
 # ════════════════════════════════════════════════════════════════════
 # Portfolio  (was apps.portfolio)
 # ════════════════════════════════════════════════════════════════════
@@ -137,6 +136,16 @@ class Order(TenantModel):
         indexes = [
             models.Index(fields=["tenant", "status", "-created_at"]),
             models.Index(fields=["tenant", "portfolio", "-created_at"]),
+        ]
+        constraints = [
+            # Idempotency: at most one order per (tenant, key) for non-empty
+            # keys. The DB constraint — not a SELECT-then-INSERT — is what makes
+            # two concurrent same-key POSTs collapse to a single order.
+            models.UniqueConstraint(
+                fields=["tenant", "idempotency_key"],
+                condition=~models.Q(idempotency_key=""),
+                name="uniq_order_tenant_idempotency_key",
+            ),
         ]
 
 

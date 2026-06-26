@@ -318,6 +318,12 @@ ALPHADESK = {
     "MAX_RISK_PER_TRADE_PCT": env.float("MAX_RISK_PER_TRADE_PCT", default=1.0),
     "MAX_DAILY_LOSS_PCT": env.float("MAX_DAILY_LOSS_PCT", default=3.0),
     "MAX_POSITION_SIZE_PCT": env.float("MAX_POSITION_SIZE_PCT", default=10.0),
+    # Absolute order backstops — NOT normal sizing limits (those are the % of
+    # capital above). These bound a malformed or hostile order regardless of
+    # the client-supplied price, so a tiny-price + huge-qty MARKET order can't
+    # slip under the % caps and then fill large.
+    "MAX_ORDER_QTY": env.int("MAX_ORDER_QTY", default=100_000),
+    "MAX_ORDER_NOTIONAL": env.float("MAX_ORDER_NOTIONAL", default=10_000_000.0),
     "LLM_MODEL": env("LLM_MODEL", default="claude-sonnet-4-6"),
     "ANTHROPIC_API_KEY": env("ANTHROPIC_API_KEY", default=""),
     "STRATEGY_REGISTRY_AUTOLOAD": True,

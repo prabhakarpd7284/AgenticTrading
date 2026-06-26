@@ -7,10 +7,16 @@ the rest of the codebase never touches the SDK response envelope directly.
 """
 from __future__ import annotations
 
+import concurrent.futures
+
 from .adapter import _raise_if_error
 
 # Fyers max span per request: 100 days for minutes, ~30 trading days for seconds.
 SECONDS_RESOLUTIONS = {"5S", "10S", "15S", "30S", "45S"}
+
+# The Fyers SDK exposes no timeout knob and can hang on a stalled connection.
+# Bound it via a worker thread so the caller is never blocked indefinitely.
+_HISTORY_TIMEOUT = 20
 
 
 def fetch_history(api, symbol: str, resolution: str = "5S", range_from: str = "",
@@ -28,7 +34,14 @@ def fetch_history(api, symbol: str, resolution: str = "5S", range_from: str = ""
         "range_to": range_to,
         "cont_flag": str(cont_flag),
     }
-    resp = api.history(data=data)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+        future = ex.submit(api.history, data=data)
+        try:
+            resp = future.result(timeout=_HISTORY_TIMEOUT)
+        except concurrent.futures.TimeoutError as exc:
+            raise RuntimeError(
+                f"Fyers history timed out after {_HISTORY_TIMEOUT}s for {symbol}"
+            ) from exc
     _raise_if_error(resp, "history")
     candles = (resp or {}).get("candles") or []
     if not isinstance(candles, list):

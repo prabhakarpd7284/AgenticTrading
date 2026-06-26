@@ -228,7 +228,8 @@ class PipelineStatusView(APIView):
 
         # ── Resolve which day we're viewing ───────────────────────────
         date_options = list(
-            Signal.objects.values_list("signal_date", flat=True)
+            Signal.objects.filter(tenant=request.tenant)
+            .values_list("signal_date", flat=True)
             .distinct().order_by("-signal_date")[:30]
         )
         raw = request.query_params.get("date")
@@ -247,7 +248,7 @@ class PipelineStatusView(APIView):
 
         # ── Signals for the selected day ──────────────────────────────
         sig_rows = list(
-            Signal.objects.filter(signal_date=sel_date)
+            Signal.objects.filter(tenant=request.tenant, signal_date=sel_date)
             .order_by("-signal_time")
             .values(
                 "id", "symbol", "side", "source", "strategy",
@@ -375,7 +376,9 @@ class PipelineStatusView(APIView):
 
         # Enrichment backlog — un-enriched signals across *all* dates, so
         # the UI can offer a one-click backfill.
-        unenriched_total = Signal.objects.filter(eod_price__isnull=True).count()
+        unenriched_total = Signal.objects.filter(
+            tenant=request.tenant, eod_price__isnull=True
+        ).count()
 
         from apps.system.services.flags import is_auto_execute_enabled
         _tid = getattr(getattr(request, "tenant", None), "id", None)

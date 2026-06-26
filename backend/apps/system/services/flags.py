@@ -38,6 +38,13 @@ def is_kill_switch_on(tenant_id: Any = None) -> bool:
     return bool(_truthy(get_flag("kill_switch", tenant_id, default=False)))
 
 
+def is_live_trading_enabled(tenant_id: Any = None) -> bool:
+    """True only if the operator has explicitly opted this tenant into LIVE
+    (real-money) order placement. Off by default — 'live must be deliberate'.
+    Checked together with settings.TRADING_MODE=='live' on the order path."""
+    return bool(_truthy(get_flag("live_trading_enabled", tenant_id, default=False)))
+
+
 # Auto-derive intraday trades: OFF by default so the beat pipeline stays
 # scan-only (its documented invariant) until an operator opts in from the UI.
 AUTO_EXECUTE_KEY = "auto_execute_enabled"

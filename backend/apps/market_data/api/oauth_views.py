@@ -221,27 +221,40 @@ def oauth_start(request: Request, broker_name: str):
 def oauth_callback(request: Request, broker_name: str):
     """Public endpoint hit by the broker's redirect.
 
-    Zerodha Kite's OAuth strips unknown query parameters, so the state token
-    we set in the login URL doesn't come back. Fallback: pick the single most
-    recent unresolved PendingOAuth for this broker. Single-user local-dev
-    behaviour; for prod with multiple operators the start endpoint should
-    use Kite's ``redirect_params`` to round-trip the state.
+    Security: a returned ``state`` must match a pending handshake exactly — a
+    provided-but-unknown state is treated as forged/expired and rejected (it
+    never falls back to another tenant's pending row). Some brokers (Kite) strip
+    the state param on redirect; only then do we fall back, and ONLY when a
+    single unresolved handshake exists for this broker system-wide — if multiple
+    logins are in flight we refuse, so a callback can never bind to the wrong
+    tenant under concurrency.
     """
     state = request.query_params.get("state")
     pending = None
     if state:
-        pending = PendingOAuth.objects.filter(state=state).first()
-    if pending is None:
-        pending = (
-            PendingOAuth.objects
-            .filter(broker_name=broker_name)
-            .order_by("-created_at")
-            .first()
+        # Exact match only, scoped to the broker. A provided-but-unknown state
+        # is forged/expired — fail rather than silently grab someone else's row.
+        pending = PendingOAuth.objects.filter(
+            state=state, broker_name=broker_name
+        ).first()
+        if pending is None:
+            return _error_redirect(request, broker_name, "invalid or expired state")
+    else:
+        # No state echoed back (Kite strips it). Fall back ONLY when the choice
+        # is unambiguous — exactly one pending handshake for this broker. More
+        # than one ⇒ concurrent logins ⇒ refuse rather than risk cross-tenant
+        # token binding.
+        candidates = list(
+            PendingOAuth.objects.filter(broker_name=broker_name).order_by("-created_at")[:2]
         )
+        if len(candidates) > 1:
+            return _error_redirect(
+                request, broker_name,
+                "ambiguous callback — another login is in progress; please retry",
+            )
+        pending = candidates[0] if candidates else None
     if not pending:
         return _error_redirect(request, broker_name, "no pending handshake found")
-    if pending.broker_name != broker_name:
-        return _error_redirect(request, broker_name, "broker mismatch on callback")
 
     if timezone.now() - pending.created_at > timedelta(minutes=PENDING_TTL_MINUTES):
         pending.delete()

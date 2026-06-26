@@ -17,6 +17,7 @@ apps.core (formerly apps.common/middleware).
 """
 from __future__ import annotations
 
+from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncJsonWebsocketConsumer
 
 
@@ -65,10 +66,30 @@ class RunTimelineConsumer(AsyncJsonWebsocketConsumer):
 
         self.run_id = str(self.scope["url_route"]["kwargs"]["run_id"])
         self.tenant_id = str(tenant.id)
-        self.group = f"runs.{self.run_id}"
+        # Authorization: the run MUST belong to the authed tenant. Without this,
+        # any user could subscribe to runs.<victim_run_id> and read another
+        # tenant's full event stream (text, payload, trade_id, order_id).
+        if not await self._run_belongs_to_tenant(tenant.id, self.run_id):
+            await self.close(code=4403)
+            return
+        # Tenant-namespaced group — defence in depth so a run_id can never cross
+        # tenants even if the broadcaster published to the wrong namespace.
+        self.group = f"runs.{self.tenant_id}.{self.run_id}"
         await self.channel_layer.group_add(self.group, self.channel_name)
         subprotocol = "jwt" if "jwt" in (self.scope.get("subprotocols") or []) else None
         await self.accept(subprotocol=subprotocol)
+
+    @staticmethod
+    @database_sync_to_async
+    def _run_belongs_to_tenant(tenant_id, run_id) -> bool:
+        from django.core.exceptions import ValidationError
+
+        from apps.agents_core.models import AgentRun
+
+        try:
+            return AgentRun.objects.filter(tenant_id=tenant_id, pk=run_id).exists()
+        except (ValueError, ValidationError):  # run_id not a valid UUID
+            return False
 
     async def disconnect(self, code: int) -> None:
         if hasattr(self, "group"):

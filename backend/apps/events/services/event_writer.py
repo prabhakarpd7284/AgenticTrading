@@ -101,9 +101,13 @@ def _broadcast(event: Event) -> None:
     try:
         # System-wide firehose for the Now activity feed
         async_to_sync(layer.group_send)(f"events.{event.tenant_id}", body)
-        # Per-run timeline (only if this event belongs to a workflow run)
+        # Per-run timeline (only if this event belongs to a workflow run).
+        # Tenant-namespaced — RunTimelineConsumer joins runs.<tenant>.<run> only
+        # after verifying the run belongs to that tenant.
         if event.workflow_run_id:
-            async_to_sync(layer.group_send)(f"runs.{event.workflow_run_id}", body)
+            async_to_sync(layer.group_send)(
+                f"runs.{event.tenant_id}.{event.workflow_run_id}", body
+            )
     except Exception as e:  # noqa: BLE001
         log.warning("event.broadcast_failed", event_id=event.id, error=str(e))
 

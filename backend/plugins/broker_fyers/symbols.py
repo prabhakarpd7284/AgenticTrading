@@ -5,22 +5,39 @@ documented `-300 Invalid symbol` errors for the weekly encoding). The robust
 path is to resolve the exact tradeable ticker from Fyers' published symbol-master
 CSVs, matching by (underlying, expiry, strike, CE/PE).
 
-The CSVs are public (no auth) and refreshed daily; we disk-cache them. Column
-layout is matched heuristically (ticker via regex, strike/opt-type/expiry by
-value) so the resolver survives minor column-order drift in the master file.
+The CSVs are public (no auth) and refreshed daily; we disk-cache them. Matching
+pins the known columns (ticker col9, expiry-epoch col8, strike col15, opt col16)
+with a regex heuristic only as a fallback for column drift, and asserts the match
+is unique — so a stray cell equal to the strike can never resolve a wrong contract.
 """
 from __future__ import annotations
 
 import csv
 import os
 import re
+import shutil
 import time
 import urllib.request
 from datetime import date, datetime
 from pathlib import Path
 
-from .adapter import logger
 from plugins.strategy_scalp.timeutil import IST
+
+from .adapter import logger
+
+# Pinned Fyers FO symbol-master columns (0-indexed) — verified against the live
+# NSE_FO.csv / BSE_FO.csv layout. Matching by column (not "any cell equals the
+# value") stops a stray cell — lot size, freeze qty, the col14 token — from
+# being mistaken for the strike/expiry and resolving the WRONG contract.
+_COL_EXPIRY_EPOCH = 8
+_COL_TICKER = 9
+_COL_STRIKE = 15
+_COL_OPT = 16
+# Plausible option-expiry epoch window (2020-09 .. 2033-05) so a 15-digit
+# fytoken can never be parsed as an expiry date.
+_EPOCH_MIN, _EPOCH_MAX = 1_600_000_000, 2_000_000_000
+# Bounded download — a stalled public.fyers.in must fail, not hang forever.
+_DOWNLOAD_TIMEOUT = 15
 
 # Public Fyers symbol masters (no auth required).
 MASTER_URLS = {
@@ -64,15 +81,11 @@ def list_expiries(underlying: str) -> list[date]:
         ticker = _find_ticker(cells)
         if not ticker or _ticker_root(ticker) != u:
             continue
-        for c in cells:
-            c = c.strip()
-            # bound to plausible epoch range (2020-09 .. 2033-05) so option
-            # expiry (col ~8) is picked but the 15-digit fytoken/scrip cols aren't.
-            if c.isdigit() and 1_600_000_000 <= int(c) <= 2_000_000_000:
-                try:
-                    exps.add(datetime.fromtimestamp(int(c), IST).date())
-                except (ValueError, OSError, OverflowError):
-                    continue
+        if _row_opt(cells) not in ("CE", "PE"):  # options only, not futures
+            continue
+        d = _row_expiry(cells)
+        if d is not None:
+            exps.add(d)
     return sorted(exps)
 
 
@@ -95,53 +108,72 @@ def resolve_option_symbol(underlying: str, expiry: date, strike: int, opt_type: 
     exch = _EXCHANGE.get(u, "NSE")
     rows = _load_master(exch)
     strike_f = float(strike)
+    matches: list[str] = []
     for cells in rows:
         ticker = _find_ticker(cells)
-        if not ticker or not ticker.upper().endswith(opt):
+        if not ticker or _ticker_root(ticker) != u:
             continue
-        if _ticker_root(ticker) != u:
+        if _row_opt(cells) != opt:
             continue
-        if not _row_has_strike(cells, strike_f):
+        s = _row_strike(cells)
+        if s is None or abs(s - strike_f) >= 1e-6:
             continue
-        if not _row_has_expiry(cells, expiry):
+        if _row_expiry(cells) != expiry:
             continue
-        return ticker
-    raise LookupError(
-        f"Fyers symbol not found for {u} {strike}{opt} exp {expiry.isoformat()} "
-        f"(searched {len(rows)} {exch} rows — is the expiry a real contract?)"
-    )
+        matches.append(ticker)
+    uniq = sorted(set(matches))
+    if not uniq:
+        raise LookupError(
+            f"Fyers symbol not found for {u} {strike}{opt} exp {expiry.isoformat()} "
+            f"(searched {len(rows)} {exch} rows — is the expiry a real contract?)"
+        )
+    if len(uniq) > 1:
+        # Refuse to guess — never silently fetch/trade the wrong contract.
+        raise LookupError(
+            f"Ambiguous Fyers match for {u} {strike}{opt} exp {expiry.isoformat()}: "
+            f"{uniq[:5]} — refusing to resolve"
+        )
+    return uniq[0]
 
 
 # ── internals ──────────────────────────────────────────────────────────
 def _find_ticker(cells: list[str]) -> str | None:
+    # Pinned column first; heuristic scan only as a fallback for column drift.
+    if len(cells) > _COL_TICKER:
+        c = cells[_COL_TICKER].strip()
+        if _TICKER_RE.match(c.upper()):
+            return c
     for c in cells:
         if _TICKER_RE.match(c.strip().upper()):
             return c.strip()
     return None
 
 
-def _row_has_strike(cells: list[str], strike: float) -> bool:
-    for c in cells:
+def _row_strike(cells: list[str]) -> float | None:
+    """The contract strike from the pinned column (None if unavailable)."""
+    if len(cells) > _COL_STRIKE:
         try:
-            if abs(float(c) - strike) < 1e-6:
-                return True
+            return float(cells[_COL_STRIKE])
         except (TypeError, ValueError):
-            continue
-    return False
+            return None
+    return None
 
 
-def _row_has_expiry(cells: list[str], expiry: date) -> bool:
-    for c in cells:
-        c = c.strip()
-        if not c.isdigit() or len(c) < 10:
-            continue
-        try:
-            d = datetime.fromtimestamp(int(c), IST).date()
-        except (ValueError, OSError, OverflowError):
-            continue
-        if d == expiry:
-            return True
-    return False
+def _row_opt(cells: list[str]) -> str:
+    """Pinned option type — CE / PE (XX for futures)."""
+    return cells[_COL_OPT].strip().upper() if len(cells) > _COL_OPT else ""
+
+
+def _row_expiry(cells: list[str]) -> date | None:
+    """Parsed expiry from the pinned epoch column, bounded to a plausible range."""
+    if len(cells) > _COL_EXPIRY_EPOCH:
+        c = cells[_COL_EXPIRY_EPOCH].strip()
+        if c.isdigit() and _EPOCH_MIN <= int(c) <= _EPOCH_MAX:
+            try:
+                return datetime.fromtimestamp(int(c), IST).date()
+            except (ValueError, OSError, OverflowError):
+                return None
+    return None
 
 
 # In-process memo of the parsed CSV rows, keyed by exchange + file mtime so a
@@ -170,5 +202,9 @@ def _download(exchange: str, path: Path) -> None:
     _CACHE_DIR.mkdir(parents=True, exist_ok=True)
     logger.info("fyers.symbols.download exchange=%s url=%s", exchange, url)
     tmp = path.with_suffix(".tmp")
-    urllib.request.urlretrieve(url, tmp)  # noqa: S310 — fixed https Fyers host
+    # Bounded — a stalled host raises socket.timeout instead of hanging the
+    # worker thread forever (urlretrieve has no timeout knob).
+    with urllib.request.urlopen(url, timeout=_DOWNLOAD_TIMEOUT) as resp:  # noqa: S310
+        with tmp.open("wb") as fh:
+            shutil.copyfileobj(resp, fh)
     tmp.replace(path)
