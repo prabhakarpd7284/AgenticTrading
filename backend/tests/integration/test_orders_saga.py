@@ -8,7 +8,6 @@ configured per test (happy-path / raise / count calls).
 """
 from __future__ import annotations
 
-from decimal import Decimal
 from unittest.mock import patch
 
 import pytest
@@ -16,8 +15,7 @@ from django.utils import timezone
 
 from apps.trading.models import Order, OutboxEvent
 from apps.trading.services.order_saga import MAX_ATTEMPTS, OrderSaga
-from tests.factories import OrderFactory, OutboxEventFactory, PortfolioFactory
-
+from tests.factories import OrderFactory, OutboxEventFactory
 
 pytestmark = pytest.mark.django_db
 
@@ -164,3 +162,40 @@ def test_place_order_dedupes_on_idempotency_key(tenant, paper_portfolio, owner):
         tenant=tenant, idempotency_key=key,
     ).count() == 1
     assert OutboxEvent.objects.count() == 1
+
+
+# ---------------------------------------------------------------------------
+# Exactly-once claim — the atomic CAS (PENDING -> IN_FLIGHT) means a concurrent
+# re-process of the same row never double-places at the broker.
+# ---------------------------------------------------------------------------
+def test_saga_skips_already_claimed_event(tenant, paper_portfolio, owner):
+    order = OrderFactory(tenant=tenant, portfolio=paper_portfolio, created_by=owner)
+    event = OutboxEventFactory(order=order, status=OutboxEvent.Status.IN_FLIGHT)
+    broker = _HappyBroker()
+
+    with _with_broker(broker):
+        OrderSaga().handle(event)
+
+    assert broker.calls == []  # non-PENDING ⇒ never claimed ⇒ broker untouched
+    event.refresh_from_db()
+    assert event.status == OutboxEvent.Status.IN_FLIGHT
+
+
+def test_saga_places_pending_event_exactly_once_under_double_processing(tenant, paper_portfolio, owner):
+    order = OrderFactory(tenant=tenant, portfolio=paper_portfolio, created_by=owner,
+                         status=Order.Status.QUEUED)
+    event = OutboxEventFactory(order=order, status=OutboxEvent.Status.PENDING)
+    broker = _HappyBroker()
+    # Two workers each fetched the same PENDING row (the SKIP-LOCKED lock is
+    # released before the broker call) and both run handle().
+    e1 = OutboxEvent.objects.get(pk=event.pk)
+    e2 = OutboxEvent.objects.get(pk=event.pk)
+
+    with _with_broker(broker):
+        OrderSaga().handle(e1)
+        OrderSaga().handle(e2)
+
+    assert len(broker.calls) == 1  # the CAS claim lets exactly one win
+    event.refresh_from_db()
+    assert event.status == OutboxEvent.Status.SUCCEEDED
+    assert event.attempts == 1

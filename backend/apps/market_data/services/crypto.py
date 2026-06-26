@@ -16,11 +16,22 @@ from typing import Any
 from cryptography.fernet import Fernet, InvalidToken
 from django.conf import settings
 
+_INSECURE_DEFAULT = "insecure-dev-key-change-me"
+
 
 def _derive_key() -> bytes:
-    secret = settings.SECRET_KEY
+    # Prefer a dedicated broker-encryption key so credential-at-rest and JWT
+    # signing keys can be rotated independently; fall back to SECRET_KEY.
+    secret = getattr(settings, "BROKER_ENCRYPTION_KEY", "") or settings.SECRET_KEY
     if not secret:
-        raise RuntimeError("DJANGO_SECRET_KEY is empty — refusing to derive crypto key")
+        raise RuntimeError("No BROKER_ENCRYPTION_KEY / DJANGO_SECRET_KEY — refusing to derive crypto key")
+    # Never encrypt real broker credentials under the public dev default outside
+    # local dev — it would make exfiltrated blobs trivially decryptable.
+    if secret == _INSECURE_DEFAULT and not settings.DEBUG:
+        raise RuntimeError(
+            "Refusing to encrypt broker credentials with the insecure default key. "
+            "Set DJANGO_SECRET_KEY (or BROKER_ENCRYPTION_KEY)."
+        )
     digest = hashlib.sha256(secret.encode("utf-8")).digest()
     return base64.urlsafe_b64encode(digest)
 

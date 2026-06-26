@@ -32,10 +32,28 @@ from django.conf import settings
 from apps.system.services.ops_runner import validate_command
 
 
-def _is_owner(user, tenant) -> bool:
-    if user is None or getattr(user, "is_anonymous", True) or tenant is None:
-        return False
-    return user.memberships.filter(tenant=tenant, role="owner", is_active=True).exists()
+def _can_use_ops(user) -> bool:
+    """The ops console runs arbitrary management commands as the server OS user,
+    so it is gated on `is_superuser` (a real platform-admin flag) — NOT tenant
+    'owner'. Every self-service signup owns their personal tenant, so an owner
+    gate exposed remote code execution to any registered user."""
+    return (
+        user is not None
+        and not getattr(user, "is_anonymous", True)
+        and getattr(user, "is_superuser", False)
+    )
+
+
+# Management-command args that allow code execution / settings hijack — refused.
+_DISALLOWED_ARGS = ("-c", "--command", "--settings", "--pythonpath", "--python")
+
+
+def _bad_arg(args) -> str | None:
+    for a in (str(x).strip() for x in args):
+        for p in _DISALLOWED_ARGS:
+            if a == p or a.startswith(p + "="):
+                return a
+    return None
 
 
 class OpsConsumer(AsyncJsonWebsocketConsumer):
@@ -43,8 +61,10 @@ class OpsConsumer(AsyncJsonWebsocketConsumer):
 
     async def connect(self) -> None:
         user = self.scope.get("user")
-        tenant = self.scope.get("tenant")
-        if not await sync_to_async(_is_owner, thread_sensitive=True)(user, tenant):
+        if not getattr(settings, "OPS_CONSOLE_ENABLED", settings.DEBUG):
+            await self.close(code=4403)
+            return
+        if not await sync_to_async(_can_use_ops, thread_sensitive=True)(user):
             await self.close(code=4403)
             return
 
@@ -91,6 +111,11 @@ class OpsConsumer(AsyncJsonWebsocketConsumer):
             command = validate_command(command)
         except ValueError as exc:
             await self.send_json({"type": "error", "detail": str(exc)})
+            return
+
+        bad = _bad_arg(raw_args)
+        if bad is not None:
+            await self.send_json({"type": "error", "detail": f"disallowed argument: {bad}"})
             return
 
         manage_py = Path(settings.BASE_DIR) / "manage.py"

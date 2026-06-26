@@ -4,6 +4,7 @@ from __future__ import annotations
 from datetime import timedelta
 
 from django.db import transaction
+from django.db.models import F
 from django.utils import timezone
 
 from apps.agents_core.registry import broker_registry
@@ -15,10 +16,20 @@ MAX_ATTEMPTS = 5
 
 class OrderSaga:
     def handle(self, event: OutboxEvent) -> None:
+        # Atomically CLAIM the event: PENDING -> IN_FLIGHT in a single UPDATE.
+        # Two concurrent `process_outbox` runs can both SELECT the same PENDING
+        # row (the SKIP-LOCKED lock is released when its txn commits, before the
+        # broker call), so the claim — not the lock — is what guarantees exactly
+        # one placement. The loser's UPDATE matches 0 rows (status is no longer
+        # PENDING) and bails, so the broker is never hit twice. Terminal events
+        # (succeeded/dlq) also match 0 rows and are skipped.
+        claimed = OutboxEvent.objects.filter(
+            pk=event.pk, status=OutboxEvent.Status.PENDING,
+        ).update(status=OutboxEvent.Status.IN_FLIGHT, attempts=F("attempts") + 1)
+        if not claimed:
+            return
+        event.refresh_from_db(fields=["status", "attempts", "last_error", "next_run_at"])
         order = event.order
-        event.status = OutboxEvent.Status.IN_FLIGHT
-        event.attempts += 1
-        event.save(update_fields=["status", "attempts"])
 
         try:
             broker_name = "paper" if order.portfolio.mode == "paper" else order.broker_link.broker_name

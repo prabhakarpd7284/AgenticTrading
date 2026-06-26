@@ -26,6 +26,9 @@ _HIDDEN: set[str] = {
     "compilemessages", "makemessages",
     "remove_stale_contenttypes",
     "changepassword",
+    # Code-execution / data-exfiltration vectors — never runnable from the
+    # browser console (`shell -c '...'`, `dbshell`, `loaddata`, `dumpdata`).
+    "shell", "dbshell", "loaddata", "dumpdata",
 }
 
 # Commands we still expose but flag with a "dangerous" badge in the UI.

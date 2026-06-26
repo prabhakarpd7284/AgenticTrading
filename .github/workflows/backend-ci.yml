@@ -61,6 +61,15 @@ jobs:
           cache: "pip"
           cache-dependency-path: backend/requirements/dev.txt
 
+      # Drift gate: the prod image is built from uv.lock, so the lock MUST stay
+      # in sync with pyproject. This is what caught (and now prevents) the
+      # missing-broker-SDK regression in the container.
+      - name: Lockfile in sync with pyproject
+        working-directory: backend
+        run: |
+          pip install --no-cache-dir uv
+          uv lock --check
+
       - name: Install
         working-directory: backend
         run: |
@@ -169,6 +178,38 @@ jobs:
         with:
           role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
+
+      # Run migrations FIRST, on the freshly-built image, as a one-off Fargate
+      # task — before any service rolls onto the new code. The api task def
+      # already carries DATABASE_URL + the app image (:latest, just pushed);
+      # we only override its command. Network config is read off the live api
+      # service so we don't have to hardcode subnet/SG ids. A non-zero exit
+      # aborts the deploy (fail closed — never roll code onto an un-migrated DB).
+      - name: Run database migrations
+        run: |
+          set -euo pipefail
+          CLUSTER=alphadesk-prod
+          NETCFG=$(aws ecs describe-services \
+            --cluster "$CLUSTER" --services "$CLUSTER-api" \
+            --query 'services[0].networkConfiguration' --output json --region "$AWS_REGION")
+          TASK_ARN=$(aws ecs run-task \
+            --cluster "$CLUSTER" \
+            --task-definition "$CLUSTER-api" \
+            --launch-type FARGATE \
+            --network-configuration "$NETCFG" \
+            --overrides '{"containerOverrides":[{"name":"api","command":["python","manage.py","migrate","--noinput"]}]}' \
+            --query 'tasks[0].taskArn' --output text --region "$AWS_REGION")
+          echo "migration task: $TASK_ARN"
+          aws ecs wait tasks-stopped --cluster "$CLUSTER" --tasks "$TASK_ARN" --region "$AWS_REGION"
+          EXIT=$(aws ecs describe-tasks --cluster "$CLUSTER" --tasks "$TASK_ARN" \
+            --query "tasks[0].containers[?name=='api'].exitCode | [0]" --output text --region "$AWS_REGION")
+          echo "migration exit code: $EXIT"
+          if [ "$EXIT" != "0" ]; then
+            echo "::error::Database migration failed (exit=$EXIT) — aborting deploy"
+            aws ecs describe-tasks --cluster "$CLUSTER" --tasks "$TASK_ARN" \
+              --query 'tasks[0].stoppedReason' --output text --region "$AWS_REGION" || true
+            exit 1
+          fi
 
       - name: Roll ECS services
         run: |

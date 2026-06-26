@@ -3,6 +3,7 @@ from drf_spectacular.utils import (
     OpenApiParameter, extend_schema, extend_schema_view,
 )
 from rest_framework import serializers, viewsets
+from rest_framework.exceptions import PermissionDenied
 
 from apps.common.pagination import CursorPagination
 from apps.tenants.models import Membership, Tenant
@@ -41,6 +42,10 @@ class MembershipSerializer(serializers.ModelSerializer):
     class Meta:
         model = Membership
         fields = ["id", "user", "tenant", "role", "is_active", "invited_at"]
+        # `tenant` is NEVER client-settable — the view forces it to the caller's
+        # own tenant on create. Otherwise a user could POST a membership into
+        # any tenant (with role=owner) and escalate cross-tenant.
+        read_only_fields = ["id", "tenant", "invited_at"]
 
 
 @_uuid_detail_schema
@@ -63,3 +68,29 @@ class MembershipViewSet(viewsets.ModelViewSet):
         if tenant is None:
             return Membership.objects.none()
         return Membership.objects.filter(tenant=tenant).order_by("-invited_at")
+
+    # ── write authorization ──────────────────────────────────────────────
+    # Reads are tenant-scoped via get_queryset; writes additionally require the
+    # caller to be an owner/admin of their OWN tenant. This blocks both the
+    # cross-tenant escalation (create) and in-tenant self-escalation (viewer
+    # PATCHing their own role upward).
+    def _assert_admin(self):
+        tenant = getattr(self.request, "tenant", None)
+        is_admin = tenant is not None and Membership.objects.filter(
+            tenant=tenant, user=self.request.user, is_active=True,
+            role__in=[Membership.Role.OWNER, Membership.Role.ADMIN],
+        ).exists()
+        if not is_admin:
+            raise PermissionDenied("Only a tenant owner/admin can manage memberships.")
+
+    def perform_create(self, serializer):
+        self._assert_admin()
+        serializer.save(tenant=self.request.tenant)
+
+    def perform_update(self, serializer):
+        self._assert_admin()
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        self._assert_admin()
+        instance.delete()

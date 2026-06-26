@@ -34,6 +34,11 @@ ALLOWED_HOSTS = env("ALLOWED_HOSTS")
 
 TRADING_MODE = env("TRADING_MODE", default="paper")  # paper | live | halt
 
+# The /ws/ops/ developer console runs arbitrary management commands as the
+# server user — superuser-only AND off unless explicitly enabled. Defaults to
+# DEBUG so it's available in local dev but disabled in prod unless opted in.
+OPS_CONSOLE_ENABLED = env.bool("OPS_CONSOLE_ENABLED", default=DEBUG)
+
 # Applications ---------------------------------------------------------
 # `daphne` must come BEFORE django.contrib.staticfiles so Django's `runserver`
 # delegates WebSocket upgrades to Daphne (ASGI) while keeping HTTP on WSGI.
