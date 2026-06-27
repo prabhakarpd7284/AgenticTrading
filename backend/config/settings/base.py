@@ -334,6 +334,12 @@ ALPHADESK = {
     "MAX_RISK_PER_TRADE_PCT": env.float("MAX_RISK_PER_TRADE_PCT", default=1.0),
     "MAX_DAILY_LOSS_PCT": env.float("MAX_DAILY_LOSS_PCT", default=3.0),
     "MAX_POSITION_SIZE_PCT": env.float("MAX_POSITION_SIZE_PCT", default=10.0),
+    # Risk-gate thresholds the RiskEngine reads from here. Without these keys the
+    # engine's .get(..., default) fell back to hardcoded values and silently
+    # ignored the documented env overrides.
+    "MIN_RISK_REWARD_RATIO": env.float("MIN_RISK_REWARD_RATIO", default=1.5),
+    "MIN_CONFIDENCE": env.float("MIN_CONFIDENCE", default=0.55),
+    "MAX_OPEN_POSITIONS": env.int("MAX_OPEN_POSITIONS", default=3),
     # Absolute order backstops — NOT normal sizing limits (those are the % of
     # capital above). These bound a malformed or hostile order regardless of
     # the client-supplied price, so a tiny-price + huge-qty MARKET order can't

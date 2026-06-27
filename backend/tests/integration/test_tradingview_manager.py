@@ -197,7 +197,11 @@ class TestGroupedSignalsDetail:
         ]
         for sym, side, strat, src, ts in seed:
             Signal.objects.create(
-                tenant=tenant, symbol=sym, signal_date=ts.date(), signal_time=ts,
+                # Date all three on `now`'s day (the test asserts "fired today").
+                # Using ts.date() made it flaky: `now - 3h` crosses the UTC
+                # midnight in the 00:00–03:00 UTC window, dating signals to
+                # "yesterday" so the by=day key matched 0 rows.
+                tenant=tenant, symbol=sym, signal_date=now.date(), signal_time=ts,
                 source=src, strategy=strat, side=side,
                 entry_price=100.0, stoploss=0.0, target=0.0,
             )

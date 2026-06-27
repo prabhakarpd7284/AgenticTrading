@@ -15,6 +15,7 @@ from uuid import UUID
 import structlog
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
+from django.db import transaction
 from django.utils import timezone
 
 from apps.events.models import Event
@@ -50,23 +51,27 @@ def emit(
       - `runs.{workflow_run_id}` — per-run timeline (only if workflow_run set)
     """
     try:
-        event = Event.objects.create(
-            tenant=tenant,
-            ts=ts or timezone.now(),
-            type=type,
-            severity=severity,
-            actor_kind=actor_kind,
-            actor_user=actor_user,
-            workflow_run=workflow_run,
-            step_name=step_name,
-            trade_id=trade_id,
-            order=order,
-            signal_id=signal_id,
-            payload=payload or {},
-            text=text,
-            ip=ip,
-            request_id=request_id,
-        )
+        # Savepoint so a failed insert (e.g. a constraint error) rolls back just
+        # this row — without the savepoint the broken transaction state would
+        # poison the CALLER's transaction even though we swallow the exception.
+        with transaction.atomic():
+            event = Event.objects.create(
+                tenant=tenant,
+                ts=ts or timezone.now(),
+                type=type,
+                severity=severity,
+                actor_kind=actor_kind,
+                actor_user=actor_user,
+                workflow_run=workflow_run,
+                step_name=step_name,
+                trade_id=trade_id,
+                order=order,
+                signal_id=signal_id,
+                payload=payload or {},
+                text=text,
+                ip=ip,
+                request_id=request_id,
+            )
     except Exception as e:  # noqa: BLE001
         log.warning("event.persist_failed", type=type, error=str(e))
         return None

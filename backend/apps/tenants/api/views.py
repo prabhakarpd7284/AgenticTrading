@@ -55,6 +55,25 @@ class TenantViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         return Tenant.objects.filter(memberships__user=self.request.user).distinct()
 
+    # Reads are scoped to the caller's tenants; mutating or deleting a tenant
+    # requires OWNER. Without this any member (even a viewer) could PUT/PATCH or
+    # DELETE their own tenant.
+    def _assert_owner(self, tenant):
+        is_owner = Membership.objects.filter(
+            tenant=tenant, user=self.request.user, is_active=True,
+            role=Membership.Role.OWNER,
+        ).exists()
+        if not is_owner:
+            raise PermissionDenied("Only a tenant owner can modify or delete the tenant.")
+
+    def perform_update(self, serializer):
+        self._assert_owner(serializer.instance)
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        self._assert_owner(instance)
+        instance.delete()
+
 
 @_uuid_detail_schema
 class MembershipViewSet(viewsets.ModelViewSet):

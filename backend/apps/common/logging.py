@@ -14,19 +14,30 @@ from datetime import datetime, timezone
 # on the logzero logger (see install_credential_redaction below + the
 # apps.common AppConfig.ready hook). ~30 of our own modules also log via
 # logzero, so we REDACT in place and RETURN TRUE rather than dropping records.
+# Broker credential field names across Angel (clientcode/totp/jwtToken/...),
+# Fyers (access_token/auth_code/app_id/secret_key) and Zerodha/Kite
+# (access_token/api_key/api_secret/request_token).
+_SECRET_FIELDS = (
+    r"password|totp|clientcode|jwtToken|refreshToken|feedToken"
+    r"|access_token|refresh_token|auth_code|api_key|api_secret|request_token"
+    r"|app_id|appId|appIdHash|secret_key"
+)
 _SECRET_DETECT = re.compile(
-    r"X-PrivateKey|Bearer\s+[A-Za-z0-9._\-]{8,}"
-    r"|'(?:password|totp|clientcode)'\s*:|jwtToken|refreshToken|feedToken",
+    rf"X-PrivateKey|Bearer\s+[A-Za-z0-9._\-]{{8,}}|(?:{_SECRET_FIELDS})",
     re.IGNORECASE,
 )
 _REDACTORS = [
     (re.compile(r"(X-PrivateKey'?\s*:\s*'?)[^',}\s]+", re.IGNORECASE), r"\1[REDACTED]"),
     (re.compile(r"(Bearer\s+)[A-Za-z0-9._\-]+", re.IGNORECASE), r"\1[REDACTED]"),
+    # JSON / dict field form: 'key': 'value' or "key": "value"
     (
-        re.compile(
-            r"('(?:password|totp|clientcode|jwtToken|refreshToken|feedToken)'\s*:\s*')[^']*",
-            re.IGNORECASE,
-        ),
+        re.compile(rf"(['\"](?:{_SECRET_FIELDS})['\"]\s*:\s*['\"])[^'\"]*", re.IGNORECASE),
+        r"\1[REDACTED]",
+    ),
+    # URL / form-encoded form: key=value — OAuth callbacks echo tokens in the
+    # query string (auth_code, request_token, access_token).
+    (
+        re.compile(rf"((?:{_SECRET_FIELDS})=)[^&\s'\"]+", re.IGNORECASE),
         r"\1[REDACTED]",
     ),
 ]

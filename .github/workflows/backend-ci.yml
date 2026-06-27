@@ -97,6 +97,17 @@ jobs:
           DJANGO_SECRET_KEY: ci-test-key
         run: python manage.py check
 
+      # Fail the build if a model change has no committed migration — otherwise
+      # the drift silently masks the next real schema change. (#29)
+      - name: No missing migrations
+        working-directory: backend
+        env:
+          DJANGO_SETTINGS_MODULE: config.settings.test
+          DATABASE_URL: postgres://alphadesk:alphadesk@localhost:5432/alphadesk_test
+          REDIS_URL: redis://localhost:6379/0
+          DJANGO_SECRET_KEY: ci-test-key
+        run: python manage.py makemigrations --check --dry-run
+
       - name: Migrations
         working-directory: backend
         env:

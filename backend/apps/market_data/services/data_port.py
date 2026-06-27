@@ -37,7 +37,7 @@ class DefaultMarketData:
         self.tenant_id = tenant_id
 
     def ltp(self, symbol: str) -> float:
-        # 1. Redis LTP key populated by the tick ingestor (when running).
+        # 1. Shared Redis LTP key (canonical key: ltp:<symbol>).
         from django.core.cache import cache
         v = cache.get(f"ltp:{symbol}")
         if v is not None:
@@ -56,7 +56,13 @@ class DefaultMarketData:
             broker = BrokerClient.get_instance()
             broker.ensure_login()
             data = broker.ltp("NSE", symbol, token)
-            return float(data.get("ltp") or 0.0)
+            val = float(data.get("ltp") or 0.0)
+            # Self-populate the fast path on the canonical key so the next read
+            # (any process) hits the shared cache instead of the broker again —
+            # the writer/reader key mismatch meant it never did.
+            if val > 0:
+                cache.set(f"ltp:{symbol}", val, 5)
+            return val
         except Exception as exc:  # noqa: BLE001 — non-blocking
             log.warning("ltp broker fallback failed for %s: %s", symbol, exc)
             return 0.0
