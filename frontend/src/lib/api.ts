@@ -41,7 +41,12 @@ function isPaginatedEnvelope(body: unknown): body is { results: unknown[] } {
     body !== null &&
     Array.isArray((body as { results?: unknown }).results) &&
     "next" in body &&
-    "previous" in body
+    "previous" in body &&
+    // Only unwrap CURSOR envelopes ({next, previous, results}). A count-based
+    // ({count, next, previous, results}) body is consumed WHOLE by its typed
+    // hook (useTrades / useOptionsPositions read `.count` / `.results`);
+    // unwrapping it to a bare array silently emptied those tables.
+    !("count" in body)
   );
 }
 
@@ -62,9 +67,12 @@ function attachResponse(client: AxiosInstance) {
       const original = err.config as AxiosRequestConfig & { _retried?: boolean };
       if (err.response?.status === 401 && !original._retried) {
         original._retried = true;
-        if (!refreshing) refreshing = refresh();
+        // Only the creator of the in-flight refresh resets it (via finally);
+        // awaiters just await the same promise. Resetting in every awaiter let a
+        // later awaiter clobber a second concurrent refresh → duplicate
+        // /auth/token/refresh/ → rotate+blacklist 401 → spurious mid-session logout.
+        if (!refreshing) refreshing = refresh().finally(() => { refreshing = null; });
         const newToken = await refreshing;
-        refreshing = null;
         if (newToken) {
           original.headers = { ...(original.headers ?? {}), Authorization: `Bearer ${newToken}` };
           return client.request(original);

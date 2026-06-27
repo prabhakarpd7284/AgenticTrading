@@ -40,6 +40,15 @@ const mockRuns: AgentRun[] = [
 vi.mock("@/lib/api", () => ({
   api: {
     get: vi.fn((url: string) => {
+      // Run-detail endpoint returns a SINGLE run object; the timeline-hydration
+      // (/steps) and the run LIST return arrays. (The page was redesigned to
+      // fetch a typed detail — the old mock returned the array for all three.)
+      if (url.includes(mockRuns[0].id) && url.includes("/steps")) {
+        return Promise.resolve({ data: [] });
+      }
+      if (url.includes(mockRuns[0].id)) {
+        return Promise.resolve({ data: mockRuns[0] });
+      }
       if (url.startsWith("/agents/runs")) {
         return Promise.resolve({ data: mockRuns });
       }

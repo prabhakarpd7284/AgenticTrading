@@ -77,12 +77,24 @@ export function AgentConsolePage() {
       }),
     initialPageParam: "" as string,
     getNextPageParam: (last) => cursorOf(last.next) ?? undefined,
-    refetchInterval: 8_000,
+    // No blanket refetchInterval — it refetched EVERY accumulated cursor page
+    // each tick (N requests + duplicate-key risk) and, on /agents, a newer run
+    // reaching the top flipped the auto-selection out from under the operator.
+    // Live updates for the selected run come over the WS; the list refreshes on
+    // window focus / navigation.
   });
   const runs = React.useMemo(
     () => runsQuery.data?.pages.flatMap((p) => p.results) ?? [],
     [runsQuery.data],
   );
+
+  // Pin the auto-selection to the URL so a list refresh can't yank the operator
+  // off the run they're watching. (#39)
+  React.useEffect(() => {
+    if (!runId && runs[0]?.id) {
+      nav(`/agents/${runs[0].id}`, { replace: true });
+    }
+  }, [runId, runs, nav]);
 
   // Legacy audit feed — shown below v2 runs so the console has real content on
   // day one (the legacy DB has AuditLog rows from the Streamlit-era pipelines).
@@ -975,7 +987,8 @@ function RunStatusPill({ status }: { status: AgentRun["status"] }) {
     succeeded: { tone: "success" as const, label: "Succeeded" },
     failed:    { tone: "danger" as const,  label: "Failed" },
     cancelled: { tone: "neutral" as const, label: "Cancelled" },
-  }[status];
+    // Fallback: an unexpected status must not crash the whole console render.
+  }[status] ?? { tone: "neutral" as const, label: String(status ?? "—") };
   return <Badge tone={map.tone} dot>{map.label}</Badge>;
 }
 

@@ -24,6 +24,7 @@ import { OpsPage } from "@/features/ops/OpsPage";
 import { PipelinePage } from "@/features/pipeline/PipelinePage";
 import { OnboardingPage } from "@/features/auth/OnboardingPage";
 import { RequireAuth } from "./guards";
+import { RouteError } from "./RouteError";
 
 export const router = createBrowserRouter([
   { path: "/login", element: <LoginPage /> },
@@ -32,6 +33,9 @@ export const router = createBrowserRouter([
   {
     path: "/",
     element: <RequireAuth><AppShell /></RequireAuth>,
+    // Any uncaught render error in a child route lands here instead of blanking
+    // the whole SPA.
+    errorElement: <RouteError />,
     children: [
       // "What's Happening Today" is the trader's first read — Stage 1+2
       // of The Cascade — so it replaces the generic dashboard as the

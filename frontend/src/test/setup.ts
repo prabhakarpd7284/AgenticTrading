@@ -73,6 +73,19 @@ if (!Element.prototype.scrollIntoView) {
   Element.prototype.scrollIntoView = vi.fn();
 }
 
+// --- Pointer capture -----------------------------------------------------
+// Radix primitives (Select, Dropdown, Slider) call these during pointer-driven
+// open/close. jsdom doesn't implement them, so the panel never opened in tests.
+if (!Element.prototype.hasPointerCapture) {
+  Element.prototype.hasPointerCapture = vi.fn(() => false);
+}
+if (!Element.prototype.setPointerCapture) {
+  Element.prototype.setPointerCapture = vi.fn();
+}
+if (!Element.prototype.releasePointerCapture) {
+  Element.prototype.releasePointerCapture = vi.fn();
+}
+
 // --- clean up React Testing Library after every test --------------------
 afterEach(() => {
   cleanup();

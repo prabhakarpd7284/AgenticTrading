@@ -40,6 +40,7 @@ export function useScalpSession() {
 
   // Tier A refs
   const wsRef = React.useRef<ReturnType<typeof connect> | null>(null);
+  const connIdRef = React.useRef(0);        // bumped per connect() — stale socket callbacks bail
   const startedRef = React.useRef(false);   // sent {op:start} once — a reconnect must NOT restart the sim
   const endedRef = React.useRef(false);     // done/stopped — ignore any late/buffered frames
   const markersRef = React.useRef<Marker[]>([]);
@@ -186,14 +187,20 @@ export function useScalpSession() {
     setLog([]); setDecisions([]); setPosition(null); setPressure(null); setProfile(null); setKpis(null);
     setStatus("connecting");
     wsRef.current?.close();
+    // Tag this connection. The previous socket's onClose closure shares these
+    // refs; a stale close landing after the new onOpen would otherwise take the
+    // "dropped mid-sim" branch and flip this fresh session to error.
+    const myConnId = ++connIdRef.current;
     wsRef.current = connect(`/ws/scalp/${runId}/`, onMessage, {
       onOpen: () => {
+        if (connIdRef.current !== myConnId) return;   // superseded by a newer connect
         setConnState("live");
         // Start the replay exactly once. A reconnect must NOT re-send start —
         // that would replay the whole sim from scratch ("keeps running").
         if (!startedRef.current) { startedRef.current = true; send({ op: "start" }); }
       },
       onClose: (ev) => {
+        if (connIdRef.current !== myConnId) return;   // stale close from an old socket
         if (endedRef.current) return;   // clean finish — leave the pill as-is
         if (ev.code === 4401 || ev.code === 4403) { setConnState("closed_auth"); return; }
         if (startedRef.current) {
@@ -234,6 +241,8 @@ export function useScalpSession() {
   return { chartRef, status, connState, speed, source, info, position, pressure, profile, kpis, log, decisions, annotations, controls };
 }
 
+const MAX_MARKERS = 600;
+
 function pushMarker(ref: React.MutableRefObject<Marker[]>, bucketEpoch: number, d: DecisionMsg) {
   const time = Math.floor(bucketEpoch) + 5.5 * 3600;   // candle-bar time + IST offset
   let m: Marker;
@@ -245,5 +254,10 @@ function pushMarker(ref: React.MutableRefObject<Marker[]>, bucketEpoch: number, 
     m = { time, position: "aboveBar", color: DOWN, shape: "arrowDown", text: d.action === "add" ? "+" : "Short" };
   }
   ref.current.push(m);
-  ref.current.sort((a, b) => a.time - b.time);
+  // Decisions arrive in candle-time order, so the array stays sorted on push —
+  // no O(n log n) re-sort per decision. Cap it so a long sim can't grow the
+  // array (and the per-decision setMarkers payload) without bound.
+  if (ref.current.length > MAX_MARKERS) {
+    ref.current.splice(0, ref.current.length - MAX_MARKERS);
+  }
 }
