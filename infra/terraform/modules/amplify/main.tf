@@ -50,10 +50,14 @@ applications:
       phases:
         preBuild:
           commands:
-            - npm ci
+            # The frontend ships ONLY pnpm-lock.yaml (no package-lock.json), so
+            # `npm ci` fails. Use the lockfile's package manager via corepack.
+            - corepack enable
+            - corepack prepare pnpm@9 --activate
+            - pnpm install --frozen-lockfile
         build:
           commands:
-            - npm run build
+            - pnpm build
       artifacts:
         baseDirectory: dist
         files:
@@ -61,6 +65,7 @@ applications:
       cache:
         paths:
           - node_modules/**/*
+          - .pnpm-store/**/*
 YAML
 
   custom_rule {

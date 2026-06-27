@@ -120,9 +120,13 @@ module "amplify" {
   repository_url   = var.repository_url
   branch           = "develop"
   github_token_arn = var.github_token_arn
+  # Names MUST match what the bundle reads (src/lib/api.ts: VITE_API_URL,
+  # src/lib/ws.ts: VITE_WS_URL). The old *_BASE_URL names were ignored, so the
+  # build fell back to a relative /api and window.origin → broken in prod.
   vite_env = {
-    VITE_API_BASE_URL = "https://${module.alb.alb_dns_name}"
-    VITE_WS_BASE_URL  = "wss://${module.alb.alb_dns_name}"
+    VITE_API_URL     = "https://${module.alb.alb_dns_name}"
+    VITE_WS_URL      = "wss://${module.alb.alb_dns_name}"
+    VITE_MONTHLY_LIVE = "1"
   }
 }
 

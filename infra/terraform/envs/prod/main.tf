@@ -124,9 +124,13 @@ module "amplify" {
   repository_url   = var.repository_url
   branch           = "main"
   github_token_arn = var.github_token_arn
+  # Names MUST match what the bundle reads (src/lib/api.ts: VITE_API_URL,
+  # src/lib/ws.ts: VITE_WS_URL). Replace the example.com placeholder with the
+  # real backend hostname before applying.
   vite_env = {
-    VITE_API_BASE_URL = "https://api.alphadesk.example.com"
-    VITE_WS_BASE_URL  = "wss://api.alphadesk.example.com"
+    VITE_API_URL      = "https://api.alphadesk.example.com"
+    VITE_WS_URL       = "wss://api.alphadesk.example.com"
+    VITE_MONTHLY_LIVE = "1"
   }
 }
 
