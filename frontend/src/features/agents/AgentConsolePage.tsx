@@ -21,6 +21,9 @@ import type { KpiSummary } from "./agentConsole.utils";
  *  up to 30s). "closed_auth" is terminal — server rejected the JWT and the
  *  lib stops retrying. "live" means the socket is open right now. */
 type WsState = "connecting" | "live" | "reconnecting" | "closed_auth";
+/** Shape of a @RiskGuard `result` event payload (typed so a backend drift in
+ *  the `approved`/`reason` fields surfaces at compile time). */
+type RiskResultPayload = { approved?: boolean; reason?: string };
 
 /** Cap on retained events in the stream. Token-streaming workflows can fire
  *  thousands of events over a long run; rendering all of them re-runs every
@@ -453,14 +456,16 @@ function RunDetail({
           calls so far, time elapsed since the first event. */}
       <KpiStrip kpis={kpis} />
 
-      {/* Risk breach banner */}
-      {riskEvt && (riskEvt.payload as any)?.approved === false && (
+      {/* Risk breach banner. Typed (not `as any`) so a backend payload-shape
+          drift surfaces at compile time — otherwise a blocked trade whose
+          `approved` field moved/renamed would silently look approved. */}
+      {riskEvt && (riskEvt.payload as RiskResultPayload)?.approved === false && (
         <div role="alert" className="mx-5 mt-3 rounded-md border border-danger/40 bg-pnl-down/5 p-4 flex gap-3 items-start">
           <AlertTriangle className="h-5 w-5 text-danger shrink-0 mt-0.5" aria-hidden />
           <div className="flex-1">
             <div className="text-body-sm font-semibold text-fg">@RiskGuard blocked this plan</div>
             <p className="text-body-sm text-fg-muted mt-0.5">
-              {(riskEvt.payload as any)?.reason ??
+              {(riskEvt.payload as RiskResultPayload)?.reason ??
                 "The plan violates a deterministic risk rule. No trade was placed."}
             </p>
           </div>

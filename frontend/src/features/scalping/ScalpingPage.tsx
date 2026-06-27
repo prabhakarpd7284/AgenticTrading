@@ -42,7 +42,9 @@ function StrikeStepper({ value, step, onChange }: { value: number; step: number;
 }
 
 function DateStepper({ value, onChange }: { value: string; onChange: (v: string) => void }) {
-  const today = new Date().toISOString().slice(0, 10);
+  // IST calendar date — a plain UTC date blocks selecting the current IST day
+  // between 00:00 and 05:30 IST (when UTC is still on the previous date).
+  const today = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
   const step = (dir: number) => {
     if (!value) return;
     const d = new Date(`${value}T00:00:00`);

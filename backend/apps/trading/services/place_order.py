@@ -97,7 +97,10 @@ class PlaceOrder:
             stop_loss=float(draft.sl or 0),
             target=float(draft.tp or 0),
             quantity=int(draft.qty),
-            confidence=0.55,  # Manual / API orders default to threshold; agents pass real value
+            # Human-initiated orders carry full conviction — don't gate them on
+            # the AI-confidence criterion. (0.55 == MIN_CONFIDENCE meant raising
+            # the threshold silently rejected every UI order.) (#48)
+            confidence=1.0 if draft.origin in _MANUAL_ORIGINS else 0.55,
         )
         decision = self.risk.validate(trade_draft, portfolio_id=portfolio.id)
         if not decision.approved:

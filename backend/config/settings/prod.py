@@ -31,4 +31,6 @@ sentry_sdk.init(
     traces_sample_rate=0.1,
     send_default_pii=False,
     environment=env("SENTRY_ENV", default="prod"),
+    # Tie errors to the deployed commit (set SENTRY_RELEASE=<sha> at deploy).
+    release=env("SENTRY_RELEASE", default="") or None,
 )

@@ -50,9 +50,12 @@ class BrokerMonitorView(APIView):
         # Per-link health (tenant-scoped) + latest snapshot status.
         links: list = []
         tenant = getattr(request, "tenant", None)
-        qs = BrokerLink.objects.all()
-        if tenant is not None:
-            qs = qs.filter(tenant=tenant)
+        # No tenant ⇒ no links. Never fall back to ALL tenants' broker links.
+        qs = (
+            BrokerLink.objects.filter(tenant=tenant)
+            if tenant is not None
+            else BrokerLink.objects.none()
+        )
         for link in qs.exclude(status=BrokerLink.Status.DISABLED):
             snap = (
                 BrokerPositionSnapshot.objects.filter(link=link)
