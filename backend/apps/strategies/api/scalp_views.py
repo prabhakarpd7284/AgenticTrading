@@ -18,6 +18,18 @@ from apps.agents_core.models import AgentRun
 from apps.agents_core.registry import strategy_registry
 
 
+def _with_schema_defaults(params: dict | None, config: dict) -> dict:
+    """Fill in the top-level JSONSchema defaults the client omitted, so the
+    persisted run config is complete and reproducible — and key fields like
+    `mode` / `place_orders` are never left ambiguous on the stored run."""
+    props = (params or {}).get("properties", {})
+    merged = dict(config)
+    for key, spec in props.items():
+        if key not in merged and isinstance(spec, dict) and "default" in spec:
+            merged[key] = spec["default"]
+    return merged
+
+
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
 def create_scalp_run(request):
@@ -27,6 +39,10 @@ def create_scalp_run(request):
     except (KeyError, LookupError):
         return Response({"detail": "scalp strategy not registered"},
                         status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    # Persist defaults so the stored run config is complete (not just whatever
+    # the client happened to send).
+    config = _with_schema_defaults(strat.schema().params, config)
 
     errors = sorted(Draft7Validator(strat.schema().params or {}).iter_errors(config),
                     key=lambda e: e.path)

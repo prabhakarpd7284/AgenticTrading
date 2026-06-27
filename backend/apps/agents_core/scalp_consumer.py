@@ -162,6 +162,19 @@ class ScalpSimConsumer(AsyncJsonWebsocketConsumer):
         await self._set_status("running")
         await self.send_json({"type": "started", "source": "fyers-live", "symbol": fyers_symbol,
                               "place_orders": self._place_orders, "portfolio_mode": self._portfolio_mode})
+        # Make the advisory-only degrade explicit: orders are only placed when
+        # place_orders is on AND the portfolio is paper (never live money). If
+        # the operator asked for placement on a non-paper portfolio, say so
+        # loudly rather than silently running advisory-only.
+        if self._place_orders and self._portfolio_mode != "paper":
+            await self.send_json({
+                "type": "warn",
+                "detail": (
+                    f"Order placement requested, but this portfolio is "
+                    f"'{self._portfolio_mode}', not paper — live-money placement is not "
+                    "enabled here. Decisions are ADVISORY ONLY; no orders will be placed."
+                ),
+            })
 
         loop = asyncio.get_running_loop()
         self.controller = LiveScalpController(

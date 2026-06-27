@@ -41,8 +41,8 @@ def test_paper_chain_basic_shape(chain):
         assert r.ce.opt == "CE" and r.pe.opt == "PE"
         # Greeks present
         assert r.pe.iv > 0
-        assert r.pe.delta < 0  # put delta is negative
-        assert r.ce.delta > 0
+        assert r.pe.delta <= 0  # put delta is non-positive ([-1, 0]); ~0 for deep-OTM near expiry
+        assert r.ce.delta >= 0  # call delta is non-negative ([0, 1])
         assert r.pe.theta != 0
         # Bid < LTP < Ask
         assert r.ce.bid <= r.ce.ltp <= r.ce.ask

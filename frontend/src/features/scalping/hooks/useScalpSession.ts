@@ -49,6 +49,7 @@ export function useScalpSession() {
   // the candle series' time slots and can't distort the chart.
   const slRef = React.useRef(0);
   const sideRef = React.useRef("FLAT");
+  const lotSizeRef = React.useRef(0);   // captured from position frames → live per-tick INR P&L
   const lastTrailBucketRef = React.useRef<number | null>(null);
   const lastCandleEpochRef = React.useRef(0);   // session-anchored bucket of the current candle
   const pendingRef = React.useRef<{
@@ -91,7 +92,22 @@ export function useScalpSession() {
         setInfo({ date: msg.date as string, expiry: msg.expiry as string });
         break;
       case "tick":
-        if (p.position) { p.position = { ...p.position, ltp: msg.ltp as number }; p.dirty = true; }
+        if (p.position) {
+          // Recompute Unrealized from the live tick instead of waiting for the
+          // next (throttled) `position` frame — otherwise P&L visibly lags the
+          // price on fast moves. pts = dir·(ltp−avg)·lots; INR via captured lot size.
+          const pos = p.position;
+          const ltp = msg.ltp as number;
+          const dir = pos.side === "LONG" ? 1 : pos.side === "SHORT" ? -1 : 0;
+          const pts = dir * (ltp - pos.avg) * pos.lots;
+          p.position = {
+            ...pos,
+            ltp,
+            unrealized_pts: pts,
+            unrealized_inr: lotSizeRef.current ? pts * lotSizeRef.current : pos.unrealized_inr,
+          };
+          p.dirty = true;
+        }
         break;
       case "candle": {
         const epoch = msg.epoch as number;
@@ -120,6 +136,10 @@ export function useScalpSession() {
         break;
       case "position":
         p.position = msg as unknown as PositionState;
+        // Capture lot size (inr/pts) so per-tick recompute can render live INR.
+        if ((msg.unrealized_pts as number)) {
+          lotSizeRef.current = (msg.unrealized_inr as number) / (msg.unrealized_pts as number);
+        }
         p.dirty = true;
         slRef.current = (msg.sl as number) || 0;
         sideRef.current = (msg.side as string) || "FLAT";

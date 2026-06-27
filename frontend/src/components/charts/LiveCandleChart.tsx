@@ -20,6 +20,7 @@ import {
   type SeriesMarker,
   type Time,
   type UTCTimestamp,
+  type WhitespaceData,
 } from "lightweight-charts";
 
 // IST is a fixed +5:30; lightweight-charts renders UTCTimestamps as UTC, so we
@@ -89,8 +90,10 @@ export const LiveCandleChart = React.forwardRef<LiveCandleHandle, { className?: 
         if (price > 0) trailRef.current?.update({ time, value: price });
       },
       breakTrailSL(time) {
-        // whitespace point ends the segment so the line doesn't span flat gaps
-        trailRef.current?.update({ time } as never);
+        // A whitespace point (time only, no value) ends the line segment so it
+        // doesn't span flat gaps. lightweight-charts v4 accepts WhitespaceData
+        // via series.update — typed (not `as never`) so a shape drift is caught.
+        trailRef.current?.update({ time } as WhitespaceData<Time>);
       },
       reset() {
         seriesRef.current?.setData([]);

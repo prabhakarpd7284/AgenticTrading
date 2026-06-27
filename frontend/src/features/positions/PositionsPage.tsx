@@ -46,6 +46,11 @@ export function PositionsPage() {
   // decision, so we drop the map on disconnect rather than silently keeping
   // old values around.
   const [wsLive, setWsLive] = React.useState(false);
+  // Re-subscribe when the SET of symbols changes, not just the count — swapping
+  // one open symbol for another (same count) must still re-subscribe the ticks.
+  // Sorted so the key is order-independent (the subscription is set-based): a
+  // backend row-order change can't churn it into a re-subscribe storm.
+  const equitySymbolsKey = equityOpen.map((p) => p.symbol).sort().join(",");
   React.useEffect(() => {
     if (equityOpen.length === 0) return;
     const ws = connect(
@@ -70,7 +75,8 @@ export function PositionsPage() {
       },
     );
     return () => ws.close();
-  }, [equityOpen.length]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [equitySymbolsKey]);
 
   const equityRows: EnrichedEquity[] = React.useMemo(
     () =>
