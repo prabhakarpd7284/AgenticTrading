@@ -96,11 +96,18 @@ class ScalpSimConsumer(AsyncJsonWebsocketConsumer):
 
         try:
             engine, session, tpb, dsec, source, meta = await sync_to_async(build_session)(config, self.tenant)
-        except Exception as exc:  # live fetch failed → fall back to the sample
+        except Exception as exc:  # noqa: BLE001 — data fetch failed
+            # Never silently present synthetic data as real. Fall back to the
+            # sample ONLY when the caller explicitly asked for dry_run; otherwise
+            # surface the failure so misleading KPIs can't slip past a reviewer.
+            if not config.get("dry_run"):
+                await self.send_json({"type": "error", "detail": f"Fyers data unavailable: {exc}"})
+                return
             await self.send_json({"type": "warn", "detail": f"Fyers data unavailable ({exc}); using sample."})
             try:
                 engine, session, tpb, dsec, source, meta = await sync_to_async(build_session)(
                     {**config, "dry_run": True}, None)
+                source = "sample (fallback)"
             except Exception as exc2:  # noqa: BLE001
                 await self.send_json({"type": "error", "detail": f"could not build session: {exc2}"})
                 return

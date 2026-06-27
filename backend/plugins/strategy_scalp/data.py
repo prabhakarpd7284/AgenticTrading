@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
 from datetime import datetime
 from pathlib import Path
 
@@ -41,7 +42,12 @@ def _cache_get(symbol: str, day: str, resolution: str):
 def _cache_put(symbol: str, day: str, resolution: str, raw: list) -> None:
     try:
         _CANDLE_CACHE.mkdir(parents=True, exist_ok=True)
-        _cache_path(symbol, day, resolution).write_text(json.dumps(raw))
+        p = _cache_path(symbol, day, resolution)
+        # Write to a unique temp then atomically replace — a concurrent reader
+        # never sees a torn/half-written JSON file (which forced a refetch).
+        tmp = p.with_suffix(f".{os.getpid()}.{threading.get_ident()}.tmp")
+        tmp.write_text(json.dumps(raw))
+        tmp.replace(p)
     except OSError as e:
         logger.debug("scalp.candle_cache.write_failed: %s", e)
 

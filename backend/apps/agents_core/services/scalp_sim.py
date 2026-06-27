@@ -11,10 +11,17 @@ live Fyers feed later by swapping the tick source for the controller's session.
 from __future__ import annotations
 
 import asyncio
+import time
 from collections import deque
 from typing import Awaitable, Callable
 
 from plugins.strategy_scalp.timeutil import decision_bucket, iso_from_epoch
+
+# Animation frames (tick / forming candle / pressure) are coalesced to at most
+# one per type per this interval — a wall-clock cap so a fast (speed 64) replay
+# can't flood a slow client with ~18k×3 frames. Decisions/exits/candle-closes
+# are never coalesced.
+_ANIM_MIN_INTERVAL = 0.05  # 20 fps
 
 
 def _clamp(x: float, lo: float, hi: float) -> float:
@@ -134,19 +141,24 @@ class ScalpPlaybackController:
         self._seq = 0
         self._run = asyncio.Event()
         self._run.set()                        # set = playing, clear = paused
+        self._paused_intent = False            # operator pressed pause (vs woken to apply a manual)
         self._step_remaining = 0
+        self._last_anim: dict[str, float] = {}   # per-type last-emit clock for coalescing
         self._manual: deque[tuple[str, dict]] = deque()
         self._annotations: list[dict] = []
         self._stopped = False
         # forming 10m candle (tick-derived) for a smoothly animating chart
         self._forming_bucket: int | None = None
+        self._forming_bucket_emitted: int | None = None   # last bucket we emitted a forming frame for
         self._forming: dict | None = None
 
     # ── control (called from the consumer's receive_json) ──────────────
     def control(self, op: str, payload: dict) -> None:
         if op == "pause":
+            self._paused_intent = True
             self._run.clear()
         elif op == "resume":
+            self._paused_intent = False
             self._run.set()
         elif op == "speed":
             self.speed = _clamp(float(payload.get("value", self.speed)), 0.25, 64.0)
@@ -181,13 +193,21 @@ class ScalpPlaybackController:
 
             await self._drain_manual()
 
+            # A manual_order/adjust_sl woke the loop to apply promptly. If the
+            # operator is still paused (and not stepping), re-pause instead of
+            # running the sim to completion behind a 'paused' UI.
+            if self._paused_intent and self._step_remaining <= 0:
+                self._run.clear()
+                continue
+
             kind, item = self.session[self.cursor]
             if kind == "candle":
                 for ev in self.engine.on_candle_close(item):
                     await self._emit_event(ev)
             else:
                 await self._update_forming(item)
-                await self._emit("tick", {"ts": item.ts, "ltp": round(item.ltp, 2)})
+                if self._anim_due("tick"):
+                    await self._emit("tick", {"ts": item.ts, "ltp": round(item.ltp, 2)})
                 for ev in self.engine.feed_tick(item):
                     await self._emit_event(ev)
                 if self._step_remaining > 0:
@@ -218,7 +238,19 @@ class ScalpPlaybackController:
             for ev in evs:
                 await self._emit_event(ev)
 
+    def _anim_due(self, type_: str) -> bool:
+        """True if enough wall-clock has passed to emit another `type_` frame."""
+        now = time.monotonic()
+        if now - self._last_anim.get(type_, 0.0) >= _ANIM_MIN_INTERVAL:
+            self._last_anim[type_] = now
+            return True
+        return False
+
     async def _emit_event(self, ev) -> None:
+        # Pressure frames carry the full bin profile — coalesce them; everything
+        # else (decision/exit/position/…) is sparse + critical, never dropped.
+        if ev.type == "pressure" and not self._anim_due("pressure"):
+            return
         # Engine events carry their own ts — markers/log on the client need it.
         await self._emit(ev.type, {**ev.payload, "ts": ev.ts})
 
@@ -233,11 +265,16 @@ class ScalpPlaybackController:
             f["l"] = min(f["l"], tick.ltp)
             f["c"] = tick.ltp
         f = self._forming
-        await self._emit("candle", {
-            "t": iso_from_epoch(b), "epoch": b, "forming": True,
-            "o": round(f["o"], 2), "h": round(f["h"], 2), "l": round(f["l"], 2), "c": round(f["c"], 2),
-            "bias": self.engine.st.bias,
-        })
+        # Always update the forming bar above; coalesce only the emit so the
+        # client still animates smoothly without a per-tick frame flood. A new
+        # bucket forces a frame so a bar boundary is never skipped.
+        if b != self._forming_bucket_emitted or self._anim_due("candle"):
+            self._forming_bucket_emitted = b
+            await self._emit("candle", {
+                "t": iso_from_epoch(b), "epoch": b, "forming": True,
+                "o": round(f["o"], 2), "h": round(f["h"], 2), "l": round(f["l"], 2), "c": round(f["c"], 2),
+                "bias": self.engine.st.bias,
+            })
 
     async def _emit(self, type_: str, payload: dict) -> None:
         self._seq += 1
@@ -298,9 +335,15 @@ class LiveScalpController:
 
     def push_tick(self, raw: dict) -> None:
         """Called from the Fyers socket thread — schedule onto the loop thread."""
-        if self._stopped or self.loop is None:
+        loop = self.loop   # capture once — avoid a null-between-check-and-use race
+        if self._stopped or loop is None:
             return
-        self.loop.call_soon_threadsafe(self._enqueue, raw)
+        try:
+            loop.call_soon_threadsafe(self._enqueue, raw)
+        except RuntimeError:
+            # The loop is closing/closed (a late tick from the reconnecting Fyers
+            # socket thread after teardown). Drop it rather than crash the thread.
+            pass
 
     def _enqueue(self, raw) -> None:
         try:
@@ -340,6 +383,9 @@ class LiveScalpController:
                     await self._emit_event(ev)
                     if ev.type == "decision" and self.on_decision:
                         await self.on_decision(ev.payload)
+        # Stop scheduling onto this loop — it's about to tear down; any late tick
+        # from the socket thread now short-circuits in push_tick.
+        self.loop = None
         return await self._finish()
 
     # shared-shape helpers (mirror ScalpPlaybackController)

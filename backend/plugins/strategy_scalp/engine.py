@@ -150,7 +150,8 @@ class ScalpResult:
     exit_price: float = 0.0
     exit_time: str = ""
     exit_reason: str = ""
-    realized_pnl: float = 0.0           # points (Σ per-unit P&L × lots, both sides)
+    realized_pnl: float = 0.0           # points — CLOSED round-trips only
+    open_unrealized: float = 0.0        # points — mark-to-market of an open position at end
     peak_unrealized: float = 0.0
     peak_lots: int = 0
     trades: int = 0                     # closed round-trips
@@ -537,7 +538,8 @@ class ScalpEngine:
             exit_price=(self._last_exit or {}).get("price", 0.0),
             exit_time=(self._last_exit or {}).get("t", ""),
             exit_reason=(self._last_exit or {}).get("reason", ""),
-            realized_pnl=self._realized + open_unreal,
+            realized_pnl=self._realized,        # closed round-trips only
+            open_unrealized=open_unreal,        # open MTM kept separate
             peak_unrealized=self._peak_unrealized, peak_lots=st.peak_lots,
             trades=self._trades, lot_size=self.cfg.lot_size,
             open_side=st.side, open_lots=st.lots, log=list(self.log),
@@ -549,6 +551,8 @@ class ScalpEngine:
         return {
             "realized_pnl_pts": round(res.realized_pnl, 2),
             "realized_pnl_inr": round(res.realized_inr, 0),
+            "open_unrealized_pts": round(res.open_unrealized, 2),
+            "open_unrealized_inr": round(res.open_unrealized * res.lot_size, 0),
             "peak_unrealized_pts": round(res.peak_unrealized, 2),
             "peak_unrealized_inr": round(res.peak_unrealized * res.lot_size, 0),
             "trades": res.trades,
@@ -557,5 +561,5 @@ class ScalpEngine:
             "open_side": res.open_side,
             "open_lots": res.open_lots,
             "lot_size": res.lot_size,
-            "won": res.realized_pnl > 0,
+            "won": res.realized_pnl > 0,   # based on CLOSED P&L only
         }

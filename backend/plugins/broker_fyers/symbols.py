@@ -16,6 +16,7 @@ import csv
 import os
 import re
 import shutil
+import threading
 import time
 import urllib.request
 from datetime import date, datetime
@@ -195,16 +196,31 @@ def _load_master(exchange: str) -> list[list[str]]:
     return rows
 
 
+_DOWNLOAD_LOCKS: dict[str, threading.Lock] = {}
+_LOCKS_GUARD = threading.Lock()
+
+
 def _download(exchange: str, path: Path) -> None:
     url = MASTER_URLS.get(exchange)
     if not url:
         raise ValueError(f"no symbol master for exchange {exchange}")
-    _CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    logger.info("fyers.symbols.download exchange=%s url=%s", exchange, url)
-    tmp = path.with_suffix(".tmp")
-    # Bounded — a stalled host raises socket.timeout instead of hanging the
-    # worker thread forever (urlretrieve has no timeout knob).
-    with urllib.request.urlopen(url, timeout=_DOWNLOAD_TIMEOUT) as resp:  # noqa: S310
-        with tmp.open("wb") as fh:
-            shutil.copyfileobj(resp, fh)
-    tmp.replace(path)
+    with _LOCKS_GUARD:
+        lock = _DOWNLOAD_LOCKS.setdefault(exchange, threading.Lock())
+    with lock:
+        # Another thread may have refreshed the file while we waited on the lock.
+        if path.exists() and (time.time() - path.stat().st_mtime) <= _MAX_AGE_SECS:
+            return
+        _CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        logger.info("fyers.symbols.download exchange=%s url=%s", exchange, url)
+        # Unique temp per writer (pid + thread id) so concurrent downloads —
+        # across threads OR processes — never interleave bytes into one file;
+        # os.replace() then installs it atomically. Bounded timeout so a stalled
+        # host raises instead of hanging the worker thread forever.
+        tmp = path.with_suffix(f".{os.getpid()}.{threading.get_ident()}.tmp")
+        try:
+            with urllib.request.urlopen(url, timeout=_DOWNLOAD_TIMEOUT) as resp:  # noqa: S310
+                with tmp.open("wb") as fh:
+                    shutil.copyfileobj(resp, fh)
+            tmp.replace(path)
+        finally:
+            tmp.unlink(missing_ok=True)
