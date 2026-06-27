@@ -4,16 +4,16 @@ name: deploy-ec2
 # Use this until we cut over to Stage-2 (ECS + Amplify).
 
 on:
+  # Manual-only. ECS (backend-ci `deploy` job) is the auto path on main; the EC2
+  # host must NOT also auto-deploy the same commit — two live prod targets means
+  # double broker logins, duplicate beat schedules and competing order workers
+  # (split-brain). Trigger by hand only when intentionally using the stage-1 host.
   workflow_dispatch:
     inputs:
       ref:
         description: "Git ref to deploy"
         required: true
         default: "main"
-  workflow_run:
-    workflows: ["backend-ci", "frontend-ci"]
-    types: [completed]
-    branches: [main]
 
 permissions:
   contents: read

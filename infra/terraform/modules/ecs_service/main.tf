@@ -147,15 +147,18 @@ resource "aws_cloudwatch_log_group" "lg" {
 
 # ----- helper: container definition factory -----
 locals {
+  # `health` is the container healthCheck command (empty ⇒ no probe). Web tasks
+  # curl the liveness route; workers ping themselves via Celery so a wedged
+  # worker is detected and recycled. beat has no reliable in-container probe.
   def = {
-    api    = { cmd = ["gunicorn","config.wsgi:application","--bind","0.0.0.0:8000","--workers","3","--timeout","60"],    image = var.backend_image, expose = true  }
-    ws     = { cmd = ["daphne","-b","0.0.0.0","-p","8000","config.asgi:application"],                                      image = var.backend_image, expose = true  }
+    api    = { cmd = ["gunicorn","config.wsgi:application","--bind","0.0.0.0:8000","--workers","3","--timeout","60"],    image = var.backend_image, expose = true,  health = ["CMD-SHELL","curl -fsS http://localhost:8000/healthz/live || exit 1"] }
+    ws     = { cmd = ["daphne","-b","0.0.0.0","-p","8000","config.asgi:application"],                                      image = var.backend_image, expose = true,  health = ["CMD-SHELL","curl -fsS http://localhost:8000/healthz/live || exit 1"] }
     # Order placement runs on its OWN service so a multi-minute backtest can
     # never block `process_outbox`. orders ONLY here; never on the general pool.
-    "worker-orders" = { cmd = ["celery","-A","config","worker","-Q","orders","-l","info","--concurrency","4"],            image = var.worker_image,  expose = false }
+    "worker-orders" = { cmd = ["celery","-A","config","worker","-Q","orders","-l","info","--concurrency","4"],            image = var.worker_image,  expose = false, health = ["CMD-SHELL","celery -A config inspect ping -t 6 || exit 1"] }
     # General pool — the long/heavy jobs. Deliberately does NOT consume `orders`.
-    worker = { cmd = ["celery","-A","config","worker","-Q","default,agents,backtests","-l","info"],                       image = var.worker_image,  expose = false }
-    beat   = { cmd = ["celery","-A","config","beat","-l","info"],                                                          image = var.worker_image,  expose = false }
+    worker = { cmd = ["celery","-A","config","worker","-Q","default,agents,backtests","-l","info"],                       image = var.worker_image,  expose = false, health = ["CMD-SHELL","celery -A config inspect ping -t 6 || exit 1"] }
+    beat   = { cmd = ["celery","-A","config","beat","-l","info"],                                                          image = var.worker_image,  expose = false, health = [] }
   }
 }
 
@@ -169,23 +172,36 @@ resource "aws_ecs_task_definition" "td" {
   execution_role_arn       = aws_iam_role.task_exec.arn
   task_role_arn            = aws_iam_role.task.arn
 
-  container_definitions = jsonencode([{
-    name         = each.key
-    image        = each.value.image
-    essential    = true
-    command      = each.value.cmd
-    portMappings = each.value.expose ? [{ containerPort = 8000, protocol = "tcp" }] : []
-    environment  = local.env_list
-    secrets      = local.secret_list
-    logConfiguration = {
-      logDriver = "awslogs"
-      options = {
-        awslogs-group         = aws_cloudwatch_log_group.lg[each.key].name
-        awslogs-region        = data.aws_region.current.name
-        awslogs-stream-prefix = each.key
-      }
-    }
-  }])
+  container_definitions = jsonencode([
+    merge(
+      {
+        name         = each.key
+        image        = each.value.image
+        essential    = true
+        command      = each.value.cmd
+        portMappings = each.value.expose ? [{ containerPort = 8000, protocol = "tcp" }] : []
+        environment  = local.env_list
+        secrets      = local.secret_list
+        logConfiguration = {
+          logDriver = "awslogs"
+          options = {
+            awslogs-group         = aws_cloudwatch_log_group.lg[each.key].name
+            awslogs-region        = data.aws_region.current.name
+            awslogs-stream-prefix = each.key
+          }
+        }
+      },
+      length(each.value.health) > 0 ? {
+        healthCheck = {
+          command     = each.value.health
+          interval    = 30
+          timeout     = 6
+          retries     = 3
+          startPeriod = 30
+        }
+      } : {},
+    )
+  ])
   tags = local.tags
 }
 
@@ -207,6 +223,8 @@ resource "aws_ecs_service" "api" {
     container_name   = "api"
     container_port   = 8000
   }
+  # Give a slow-booting task time to pass the ALB check before it's culled.
+  health_check_grace_period_seconds  = 60
   deployment_minimum_healthy_percent = 50
   deployment_maximum_percent         = 200
   tags = local.tags
@@ -227,6 +245,7 @@ resource "aws_ecs_service" "ws" {
     container_name   = "ws"
     container_port   = 8000
   }
+  health_check_grace_period_seconds = 60
   tags = local.tags
 }
 

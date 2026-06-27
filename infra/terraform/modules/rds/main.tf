@@ -76,6 +76,11 @@ resource "aws_db_parameter_group" "pg16_vec" {
     value        = "pg_stat_statements"
     apply_method = "pending-reboot"
   }
+  # Reject non-TLS connections — the app connects with sslmode=require.
+  parameter {
+    name  = "rds.force_ssl"
+    value = "1"
+  }
   tags = local.tags
 }
 

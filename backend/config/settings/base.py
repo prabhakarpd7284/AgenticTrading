@@ -115,6 +115,15 @@ WSGI_APPLICATION = "config.wsgi.application"
 DATABASES = {
     "default": env.db_url("DATABASE_URL", default="sqlite:///db.sqlite3"),
 }
+# Reuse connections across requests/tasks instead of connect+close every time
+# (the DB-churn the audit flagged). 0 in tests keeps each test isolated.
+DATABASES["default"]["CONN_MAX_AGE"] = env.int("DB_CONN_MAX_AGE", default=60)
+if str(DATABASES["default"].get("ENGINE", "")).endswith("postgresql"):
+    # Require TLS to Postgres in prod (RDS enforces rds.force_ssl=1). Local dev
+    # PG has no certs, so default to 'prefer'; set DB_SSLMODE=require in prod.
+    DATABASES["default"].setdefault("OPTIONS", {})["sslmode"] = env(
+        "DB_SSLMODE", default="prefer"
+    )
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # Auth -----------------------------------------------------------------
