@@ -92,9 +92,6 @@ export function AgentConsolePage() {
   /* ---------- selected run: light row + full detail ---------- */
   const selectedId = runId ?? runs[0]?.id;
   const selectedRow = runs.find((r) => r.id === selectedId);
-  // Sim runs (scalp) carry their data in config/result and never emit agent
-  // events — skip the agent WS + the event-stream chrome for them.
-  const selectedIsSim = isSimRun(selectedRow);
 
   const detailQuery = useQuery({
     queryKey: ["agent-run", selectedId],
@@ -102,6 +99,12 @@ export function AgentConsolePage() {
     enabled: !!selectedId,
   });
   const detail = detailQuery.data;
+  // Sim runs (scalp) carry their data in config/result and never emit agent
+  // events — skip the agent WS + the event-stream chrome for them. Prefer the
+  // fetched `detail`: `selectedRow` is undefined for a deep-linked run that
+  // isn't in the loaded list pages, which would otherwise mis-render a scalp
+  // run as an agent run and hang on /ws/agents/<id>/ forever.
+  const selectedIsSim = isSimRun(detail ?? selectedRow);
 
   /* ---------- event stream (agent runs only) ---------- */
   const [events, setEvents] = React.useState<AgentEvent[]>([]);

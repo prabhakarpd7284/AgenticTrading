@@ -213,7 +213,7 @@ jobs:
 
       - name: Roll ECS services
         run: |
-          for svc in api ws worker beat; do
+          for svc in api ws worker worker-orders beat; do
             aws ecs update-service \
               --cluster alphadesk-prod \
               --service alphadesk-prod-$svc \
@@ -223,7 +223,7 @@ jobs:
 
       - name: Wait for stable
         run: |
-          for svc in api ws worker beat; do
+          for svc in api ws worker worker-orders beat; do
             aws ecs wait services-stable \
               --cluster alphadesk-prod \
               --services alphadesk-prod-$svc \

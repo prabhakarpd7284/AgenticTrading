@@ -44,9 +44,13 @@ export function connect(path: string, onMessage: WSHandler, opts: Options = {}) 
   let ws: WebSocket | null = null;
   let retries = 0;
   let pingTimer: number | undefined;
+  let reconnectTimer: number | undefined;
   let closed = false;
 
   const open = () => {
+    // A teardown (navigation/unmount) can race a scheduled reconnect — if we've
+    // already been closed, drop it rather than spawning a zombie socket + ping.
+    if (closed) return;
     const token = useAuthStore.getState().accessToken;
     // Browsers accept subprotocols made up of token characters only —
     // JWTs qualify (they're base64url-encoded).  We pass ["jwt", <jwt>]
@@ -80,7 +84,7 @@ export function connect(path: string, onMessage: WSHandler, opts: Options = {}) 
         return;
       }
       const backoff = Math.min(1000 * 2 ** retries++, 30_000);
-      setTimeout(open, backoff);
+      reconnectTimer = window.setTimeout(open, backoff);
     };
     ws.onerror = (e) => opts.onError?.(e);
   };
@@ -92,6 +96,8 @@ export function connect(path: string, onMessage: WSHandler, opts: Options = {}) 
     },
     close() {
       closed = true;
+      window.clearTimeout(reconnectTimer);
+      window.clearInterval(pingTimer);
       ws?.close();
     },
   };

@@ -31,5 +31,11 @@ DATABASES = {
 CHANNEL_LAYERS = {
     "default": {"BACKEND": "channels.layers.InMemoryChannelLayer"},
 }
+# Tests need no live Redis — an in-process cache is correct here (each test runs
+# in one process, so the cross-process caveat that drives the prod RedisCache
+# doesn't apply).
+CACHES = {
+    "default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"},
+}
 CELERY_TASK_ALWAYS_EAGER = True
 CELERY_TASK_EAGER_PROPAGATES = True

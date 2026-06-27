@@ -40,8 +40,12 @@ frontend/tsconfig.tsbuildinfo
 # Sources are .ts/.tsx only.
 frontend/src/**/*.js
 
-# ── Infra (local terraform state, etc.) ──
-infra/*
+# ── Infra: track the IaC source, ignore only state + per-env secrets ──
+infra/**/.terraform/
+infra/**/*.tfstate
+infra/**/*.tfstate.*
+infra/**/*.tfvars
+infra/**/.terraform.lock.hcl
 
 # ── Editor / OS ──
 .DS_Store

@@ -175,6 +175,22 @@ CHANNEL_LAYERS = {
     },
 }
 
+# Cache ----------------------------------------------------------------
+# A SHARED cache is a correctness requirement, not an optimisation. The default
+# LocMemCache is per-process, so across web + worker + beat:
+#   * DRF throttle counters multiply by worker count (~24× the configured rate);
+#   * RiskEngine's regime gate reads `market:pulse:v1` written by another
+#     process — an invisible miss makes the gate silently no-op;
+#   * `ltp:` / pulse keys are never shared and vanish on restart.
+# Django 5's built-in RedisCache uses redis-py (already a dependency). Tests
+# override this with LocMemCache so they need no live Redis.
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.redis.RedisCache",
+        "LOCATION": env("CACHE_URL", default=REDIS_URL),
+    },
+}
+
 # Celery ---------------------------------------------------------------
 from celery.schedules import crontab  # noqa: E402
 
