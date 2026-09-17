@@ -15,7 +15,11 @@ frontend can drive it with a few `socket.send(JSON.stringify(...))` calls.
 Closing the socket also kills the subprocess — the consumer's
 `disconnect()` sends SIGTERM, escalates to SIGKILL after 3s grace.
 
-Auth: owner-only. Same JWT subprotocol mechanism as the other consumers.
+Auth: same JWT subprotocol mechanism as the other consumers, then the
+two-tier policy in apps.system.services.ops_access — platform admins get
+every visible command, tenant owners get the product commands the UI
+embeds. Anything else is refused with an explicit `error` frame rather
+than a silent handshake rejection.
 """
 from __future__ import annotations
 
@@ -29,19 +33,8 @@ from asgiref.sync import sync_to_async
 from channels.generic.websocket import AsyncJsonWebsocketConsumer
 from django.conf import settings
 
+from apps.system.services.ops_access import can_run, console_enabled, ops_tier
 from apps.system.services.ops_runner import validate_command
-
-
-def _can_use_ops(user) -> bool:
-    """The ops console runs arbitrary management commands as the server OS user,
-    so it is gated on `is_superuser` (a real platform-admin flag) — NOT tenant
-    'owner'. Every self-service signup owns their personal tenant, so an owner
-    gate exposed remote code execution to any registered user."""
-    return (
-        user is not None
-        and not getattr(user, "is_anonymous", True)
-        and getattr(user, "is_superuser", False)
-    )
 
 
 # Management-command args that allow code execution / settings hijack — refused.
@@ -59,12 +52,24 @@ def _bad_arg(args) -> str | None:
 class OpsConsumer(AsyncJsonWebsocketConsumer):
     """One subprocess per connection. Disconnect = SIGTERM (then SIGKILL)."""
 
+    # Class-level defaults so a rejected handshake (which still routes through
+    # disconnect()) never hits an unset attribute.
+    _proc: asyncio.subprocess.Process | None = None
+    _reader_task: asyncio.Task | None = None
+    _tier: str | None = None
+
     async def connect(self) -> None:
         user = self.scope.get("user")
-        if not getattr(settings, "OPS_CONSOLE_ENABLED", settings.DEBUG):
+        tenant = self.scope.get("tenant")
+        if not console_enabled():
             await self.close(code=4403)
             return
-        if not await sync_to_async(_can_use_ops, thread_sensitive=True)(user):
+        # Tier decides *which* commands may run, not whether the socket opens —
+        # accepting first lets us send a readable {"type": "error"} frame
+        # instead of a pre-accept reject, which browsers surface as a bare
+        # close-1006 with no reason (the old "✗ websocket error" spam).
+        self._tier = await sync_to_async(ops_tier, thread_sensitive=True)(user, tenant)
+        if self._tier is None:
             await self.close(code=4403)
             return
 
@@ -111,6 +116,17 @@ class OpsConsumer(AsyncJsonWebsocketConsumer):
             command = validate_command(command)
         except ValueError as exc:
             await self.send_json({"type": "error", "detail": str(exc)})
+            return
+
+        if not can_run(self._tier, command):
+            await self.send_json({
+                "type": "error",
+                "detail": (
+                    f"{command!r} is platform-admin only. Your account can run the "
+                    "product commands embedded in the app (plan/scan/enrich/backtest), "
+                    "but not arbitrary management commands."
+                ),
+            })
             return
 
         bad = _bad_arg(raw_args)

@@ -19,7 +19,7 @@ from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.system.api.views import OwnerOnly
+from apps.common.permissions import OwnerOnly
 from apps.system.models import PipelineRun
 
 # Static catalog — the runnable pipeline stages, in daily order.

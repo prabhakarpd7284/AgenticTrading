@@ -62,11 +62,15 @@ export function OpRunPanel(props: OpRunPanelProps) {
   const [lines, setLines] = React.useState<LogLine[]>([]);
   const [helpOpen, setHelpOpen] = React.useState(false);
   const wsRef = React.useRef<ReturnType<typeof connect> | null>(null);
+  // Per-run bookkeeping, so the close handler knows whether the socket died
+  // on us or we tore it down on purpose.
+  const runRef = React.useRef({ sawStart: false, finished: true });
   const logEnd = React.useRef<HTMLDivElement | null>(null);
 
   React.useEffect(() => {
     // Cleanup on unmount — close the WS, which triggers server-side SIGTERM.
     return () => {
+      runRef.current.finished = true;
       wsRef.current?.close();
       wsRef.current = null;
     };
@@ -82,10 +86,30 @@ export function OpRunPanel(props: OpRunPanelProps) {
     queryFn: () => api.get(`/ops/commands/${command}/help/`).then((r) => r.data),
   });
 
+  /** A failed handshake looks identical to a dead backend in the browser
+   *  (both are close-1006, no reason). Ask the REST surface — which shares
+   *  the ops tier policy with the consumer — what actually went wrong. */
+  const diagnose = async (): Promise<string> => {
+    try {
+      await api.get("/ops/commands/");
+      return "ops channel refused the connection — is the backend still running?";
+    } catch (err) {
+      const st = (err as { response?: { status?: number } }).response?.status;
+      if (st === 401) return "session expired — sign in again to run commands.";
+      if (st === 403) {
+        return "your account isn't allowed to run ops commands (owner or platform-admin only, and the console must be enabled).";
+      }
+      return "could not reach the backend on :8000.";
+    }
+  };
+
   const start = () => {
     if (status === "running") return;
     setLines([]);
     setStatus("running");
+    const run = runRef.current;
+    run.sawStart = false;
+    run.finished = false;
     const ws = connect("/ws/ops/", (msg) => {
       const m = msg as {
         type: string; line?: string; detail?: string;
@@ -94,12 +118,14 @@ export function OpRunPanel(props: OpRunPanelProps) {
       if (m.type === "log" && typeof m.line === "string") {
         setLines((prev) => [...prev, { kind: "log", text: m.line! }]);
       } else if (m.type === "started") {
+        run.sawStart = true;
         setLines((prev) => [
           ...prev,
           { kind: "info", text: `▶ pid=${m.pid}  argv=${(m.argv ?? []).join(" ")}` },
         ]);
       } else if (m.type === "done") {
         const ok = m.exit_code === 0;
+        run.finished = true;
         setStatus(ok ? "done" : "error");
         setLines((prev) => [...prev, { kind: "done", text: `── exit ${m.exit_code} ──` }]);
         wsRef.current?.close();
@@ -107,21 +133,42 @@ export function OpRunPanel(props: OpRunPanelProps) {
         if (ok) onSuccess?.();
         else onError?.(`exit ${m.exit_code}`);
       } else if (m.type === "error") {
+        run.finished = true;
         setStatus("error");
         setLines((prev) => [...prev, { kind: "error", text: `✗ ${m.detail}` }]);
         onError?.(m.detail ?? "unknown error");
       } else if (m.type === "stopped") {
+        run.finished = true;
         setStatus("done");
         setLines((prev) => [...prev, { kind: "info", text: "── stopped ──" }]);
       }
     }, {
+      // One-shot: no auto-reconnect. `onOpen` fires the run, so a silent
+      // reconnect would re-execute the command — and a rejected handshake
+      // would retry forever, which is what produced the old wall of
+      // "✗ websocket error" lines.
+      reconnect: false,
       onOpen: () => {
         wsRef.current?.send({ type: "start", command, args });
       },
-      onError: () => {
+      // The browser gives no usable detail on `error` — it always fires a
+      // `close` right after, so report there once, with a real reason.
+      onClose: (_ev, { everOpened }) => {
+        if (run.finished) return;
+        if (!everOpened) {
+          void diagnose().then((why) => {
+            setStatus("error");
+            setLines((prev) => [...prev, { kind: "error", text: `✗ ${why}` }]);
+            onError?.(why);
+          });
+          return;
+        }
+        const why = run.sawStart
+          ? "connection lost — the run was terminated"
+          : "connection closed before the run started";
         setStatus("error");
-        setLines((prev) => [...prev, { kind: "error", text: "✗ websocket error" }]);
-        onError?.("websocket error");
+        setLines((prev) => [...prev, { kind: "error", text: `✗ ${why}` }]);
+        onError?.(why);
       },
     });
     wsRef.current = ws;

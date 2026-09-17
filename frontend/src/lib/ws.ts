@@ -23,10 +23,23 @@ import { useAuthStore } from "@/stores/auth";
 export type WSMessage = Record<string, unknown>;
 export type WSHandler = (msg: WSMessage) => void;
 
+interface CloseInfo {
+  /** True once the socket has reached OPEN at least once. A close with
+   *  `everOpened: false` means the *handshake* failed — server down, or a
+   *  pre-accept reject (Channels `close()` before `accept()`), which the
+   *  browser always reports as code 1006 with no reason string. */
+  everOpened: boolean;
+}
+
 interface Options {
   onOpen?: () => void;
-  onClose?: (ev: CloseEvent) => void;
+  onClose?: (ev: CloseEvent, info: CloseInfo) => void;
   onError?: (ev: Event) => void;
+  /** Auto-reconnect with backoff. Default true. Set false for one-shot
+   *  sockets whose `onOpen` has a side effect — the ops console re-sends
+   *  its `start` frame on open, so a silent reconnect would re-run the
+   *  subprocess (and a rejected handshake would retry forever). */
+  reconnect?: boolean;
 }
 
 function resolveBase(): string {
@@ -46,6 +59,7 @@ export function connect(path: string, onMessage: WSHandler, opts: Options = {}) 
   let pingTimer: number | undefined;
   let reconnectTimer: number | undefined;
   let closed = false;
+  let everOpened = false;
 
   const open = () => {
     // A teardown (navigation/unmount) can race a scheduled reconnect — if we've
@@ -61,6 +75,7 @@ export function connect(path: string, onMessage: WSHandler, opts: Options = {}) 
 
     ws.onopen = () => {
       retries = 0;
+      everOpened = true;
       pingTimer = window.setInterval(() => {
         if (ws?.readyState === 1) ws.send(JSON.stringify({ op: "ping" }));
       }, 30_000);
@@ -75,10 +90,17 @@ export function connect(path: string, onMessage: WSHandler, opts: Options = {}) 
     };
     ws.onclose = (ev) => {
       window.clearInterval(pingTimer);
-      opts.onClose?.(ev);
+      opts.onClose?.(ev, { everOpened });
       if (closed) return;
+      if (opts.reconnect === false) {
+        closed = true;
+        return;
+      }
       // Auth failures shouldn't trigger infinite reconnects — they need
-      // a fresh token from the auth store.
+      // a fresh token from the auth store.  Note a server that closes
+      // *before* accepting can't deliver its code: the browser sees a
+      // failed handshake and reports 1006, so callers that care about
+      // rejection must look at `everOpened`, not the code.
       if (ev.code === 4401 || ev.code === 4403) {
         closed = true;
         return;
