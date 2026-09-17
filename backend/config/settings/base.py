@@ -261,6 +261,29 @@ CELERY_BEAT_SCHEDULE = {
         "schedule": 300.0,
         "options": {"expires": 600},
     },
+    # Paper fill simulation — resting orders fill, open trades close on
+    # their stop/target, intraday squares off at 15:30. Without this the
+    # paper book never moves past "sent" and produces no P&L to learn from.
+    # DB + Redis only, so the short interval costs no broker calls.
+    "process-paper-fills": {
+        "task": "apps.trading.tasks.paper_fills.process_paper_fills",
+        "schedule": 10.0,
+        "options": {"expires": 30},
+    },
+    # Stale-INTRADAY sweep. An INTRADAY trade left FILLED/SENT by a dead
+    # session counts forever toward open_positions, and RiskEngine then
+    # rejects every new order ("Max open positions reached"). Ten such rows
+    # from Mar/May 2026 blocked all order placement until 2026-09-09.
+    # Premarket run is the important one: it clears wreckage from sessions
+    # that died while the worker was down, before the trading day starts.
+    "premarket-reconcile-stale-intraday": {
+        "task": "apps.trading.tasks.reconcile.reconcile_stale_intraday",
+        "schedule": crontab(hour=8, minute=10, day_of_week="mon-fri"),
+    },
+    "eod-reconcile-stale-intraday": {
+        "task": "apps.trading.tasks.reconcile.reconcile_stale_intraday",
+        "schedule": crontab(hour=15, minute=45, day_of_week="mon-fri"),
+    },
     # ── Daily trading pipeline ────────────────────────────────────────
     # Three crontab tasks (IST) make AlphaDesk produce data on its own
     # every trading day. Each task self-skips on weekends / NSE holidays
