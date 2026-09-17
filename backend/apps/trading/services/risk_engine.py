@@ -295,7 +295,7 @@ class RiskEngine:
         rr = reward_per_share / risk_per_share if risk_per_share > 0 else 0
         min_rr = float(self.limits.get("MIN_RISK_REWARD_RATIO", 1.5))
         criteria["rr"] = {"ratio": round(rr, 2), "min_required": min_rr}
-        if rr < min_rr:
+        if self._rr_below_minimum(rr, min_rr):
             return RiskDecision(
                 approved=False,
                 reason=f"Risk:Reward ratio {rr:.2f} below minimum {min_rr}",
@@ -339,6 +339,23 @@ class RiskEngine:
         return RiskDecision(approved=True, reason="Approved", criteria=criteria)
 
     # ── Internals ──
+
+    @staticmethod
+    def _rr_below_minimum(rr: float, min_rr: float) -> bool:
+        """Judge Risk:Reward at the precision the engine reports it.
+
+        `rr` is a ratio of prices that arrive already rounded to 2dp from the
+        scanners, so a signal *constructed* for exactly 1.5 computes as
+        1.4999... — either from float representation or from the producer's
+        own rounding. Comparing the raw float while reporting `round(rr, 2)`
+        produced "Risk:Reward ratio 1.50 below minimum 1.5" and rejected every
+        swing_v2 signal, since that scanner targets exactly 1.5.
+
+        Deciding on the reported value keeps the message honest and costs at
+        most half a basis point of strictness on a threshold that is itself a
+        judgement call.
+        """
+        return round(rr, 2) < min_rr
 
     def _check_fields(self, d: TradeDraft) -> str:
         if d.quantity <= 0:

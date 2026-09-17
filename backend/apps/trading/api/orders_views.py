@@ -1,3 +1,5 @@
+from typing import get_args
+
 from django.conf import settings
 from rest_framework import serializers, status, viewsets
 from rest_framework.response import Response
@@ -33,17 +35,33 @@ class OrderReadSerializer(serializers.ModelSerializer):
         fields = "__all__"
 
 
+def _draft_choices(field: str) -> list[str]:
+    """Allowed values for an OrderDraft Literal field.
+
+    Derived from the pydantic model rather than retyped here: these two
+    declarations sat out of sync (CharField vs Literal), so any value outside
+    the literal set passed DRF validation and then raised ValidationError
+    inside the view — a 500 on ordinary client input. Reading the annotation
+    keeps them from drifting apart again.
+    """
+    return list(get_args(OrderDraft.model_fields[field].annotation))
+
+
 class OrderCreateSerializer(serializers.Serializer):
     portfolio_id = serializers.UUIDField()
     symbol = serializers.CharField()
-    side = serializers.ChoiceField(choices=["BUY", "SELL"])
+    side = serializers.ChoiceField(choices=_draft_choices("side"))
     qty = serializers.IntegerField(min_value=1, max_value=settings.ALPHADESK["MAX_ORDER_QTY"])
-    order_type = serializers.CharField(default="MARKET")
-    product = serializers.CharField(default="INTRADAY")
+    order_type = serializers.ChoiceField(
+        choices=_draft_choices("order_type"), default="MARKET"
+    )
+    product = serializers.ChoiceField(
+        choices=_draft_choices("product"), default="INTRADAY"
+    )
     price = serializers.FloatField(required=False, allow_null=True)
     sl = serializers.FloatField(required=False, allow_null=True)
     tp = serializers.FloatField(required=False, allow_null=True)
-    origin = serializers.CharField(default="ui")
+    origin = serializers.ChoiceField(choices=_draft_choices("origin"), default="ui")
 
 
 class OrderViewSet(viewsets.ModelViewSet):
