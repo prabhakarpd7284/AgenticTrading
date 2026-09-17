@@ -214,6 +214,30 @@ wait_port_free 8000 "web" || exit 1
 wait_port_free 5173 "vite" || exit 1
 wait_port_free 5555 "flower" || exit 1
 
+# ── housekeeping: stale beat state ────────────────────────────────────────
+# celerybeat-schedule.db persists last_run_at for every crontab entry. After
+# the stack has been down for a while, every daily-pipeline entry (08:20 swing
+# scan over NIFTY 100, 16:00 EOD enrichment, 16:30 trade derivation) reads as
+# overdue and beat fires them ALL at once on startup. That burst blows past
+# Angel One's rate limit, trips the breaker repeatedly, and leaves every
+# BrokerLink stuck in status=errored — which then makes data_port silently
+# fall back to synthesised BSM prices. Observed 2026-09-09: 32 breaker trips
+# in 8 minutes after a boot against 4-week-old beat state.
+#
+# Same-day restarts SHOULD still catch up (a restart at 08:21 ought to run the
+# 08:20 scan), so only clear state that predates today.
+BEAT_DB="$BACKEND_DIR/celerybeat-schedule.db"
+if [[ -f "$BEAT_DB" ]]; then
+    # Compare the file's mtime day against today (BSD stat on macOS, GNU on Linux).
+    beat_day="$(stat -f %Sm -t %Y-%m-%d "$BEAT_DB" 2>/dev/null || stat -c %y "$BEAT_DB" 2>/dev/null | cut -d' ' -f1)"
+    today="$(date +%Y-%m-%d)"
+    if [[ "$beat_day" != "$today" ]]; then
+        echo "[reset] beat state is stale (last written $beat_day) — clearing to"
+        echo "        stop past-due crontabs firing at once and rate-limiting the broker"
+        rm -f "$BEAT_DB"
+    fi
+fi
+
 # --- Django ASGI on :8000 -------------------------------------------------
 # Daphne is the ASGI server — `runserver` is WSGI and would silently
 # break /ws/* WebSockets.

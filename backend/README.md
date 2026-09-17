@@ -9,7 +9,7 @@ Docker; everything else (backend, Celery worker, frontend) runs native.
 ## Local dev
 
 ```bash
-# ── 1. Infra (Postgres :5436, Redis :6379) ──
+# ── 1. Infra (Postgres :5444, Redis :6380) ──
 docker compose -f ../docker-compose.dev.yml up -d
 
 # ── 2. One-time backend setup ──

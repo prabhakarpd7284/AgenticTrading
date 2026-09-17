@@ -63,7 +63,7 @@ cp frontend/.env.example frontend/.env.local
 Defaults work for local dev. Live trading needs `SMARTAPI_*` in `.env`;
 LLM-driven workflows need `ANTHROPIC_API_KEY` in `backend/.env`.
 
-### 2. Infrastructure (Postgres :5436, Redis :6379)
+### 2. Infrastructure (Postgres :5444, Redis :6380)
 
 ```bash
 docker compose -f docker-compose.dev.yml up -d
@@ -152,7 +152,7 @@ canonical fresh-install verification.
 |---|---|---|
 | `dev_up.sh` says "Postgres container 'alphadesk-pg' isn't running" | Step 2 skipped | `docker compose -f docker-compose.dev.yml up -d` |
 | `dev_up.sh` says `.venv/bin/python not found` | Step 3 skipped | `cd backend && uv sync && uv pip install -e .` |
-| `connection refused` on port 5432 | Stale `DATABASE_URL` | Edit `backend/.env` — port is **5436** (compose exposes it that way) |
+| `connection refused` on port 5432 | Stale `DATABASE_URL` | Edit `backend/.env` — port is **5444** (compose exposes it that way) |
 | Frontend 401 errors | JWT expired or not logged in | Sign up at `/signup`, log in at `/login` |
 | `/pyramid` says "No option candles found for SENSEX…" | SmartAPI not logged in | Set valid `SMARTAPI_*` in `.env` or use the page's mock-data toggle |
 
@@ -264,7 +264,7 @@ Single source of truth: [`frontend/src/lib/market-config.ts`](frontend/src/lib/m
    agent runs)
        │
        ▼
-  Postgres (:5436)    Redis (:6379)         ← docker compose -f docker-compose.dev.yml
+  Postgres (:5444)    Redis (:6380)         ← docker compose -f docker-compose.dev.yml
   pgvector for RAG    cache + queue
                       + pub/sub
 ```

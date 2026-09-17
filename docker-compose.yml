@@ -18,7 +18,7 @@ services:
       POSTGRES_USER: alphadesk
       POSTGRES_PASSWORD: alphadesk
       POSTGRES_DB: alphadesk
-    ports: ["5436:5432"]
+    ports: ["5444:5432"]
     volumes: ["pgdata:/var/lib/postgresql/data"]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U alphadesk"]

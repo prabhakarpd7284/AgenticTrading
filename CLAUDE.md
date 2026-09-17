@@ -14,7 +14,7 @@ AlphaDesk — an AI-driven Indian stock market trading system. Three workflows, 
 
 Phase 6 (Apr 2026) retired the legacy `:8001` bridge and SQLite DB — everything is multi-tenant Postgres on `:8000`. Phase 8 (May 2026) removed the Streamlit dashboard (`dashboard.py` / `dashboard_utils/`).
 
-**Stack:** Django 5 · LangGraph · Angel One SmartAPI · Celery · Postgres (`:5436`) · Redis · React/Vite
+**Stack:** Django 5 · LangGraph · Angel One SmartAPI · Celery · Postgres (`:5444`) · Redis · React/Vite
 **Capital default:** 500,000 INR · **Mode default:** paper · **Broker:** Angel One
 
 ---
@@ -54,7 +54,7 @@ AgenticTrading/
 │       │                     swing-scanner, broker, auth
 │       └── lib/              api, ws, market-config, market-pulse, monthly, utils
 │
-├── docker-compose.dev.yml    Postgres :5436 + Redis :6379 (everything else is native)
+├── docker-compose.dev.yml    Postgres :5444 + Redis :6380 (everything else is native)
 ├── scripts/
 │   ├── dev_up.sh             Boots web (Daphne), celery, vite
 │   └── dev_down.sh           Stops web/celery/vite by pidfile
@@ -106,7 +106,7 @@ cp frontend/.env.example frontend/.env.local
 
 ### Start the stack
 ```bash
-# 1. Bring up Postgres :5436 + Redis :6379 (only services in Docker)
+# 1. Bring up Postgres :5444 + Redis :6380 (only services in Docker)
 docker compose -f docker-compose.dev.yml up -d
 
 # 2. Boot the native processes (web :8000 via Daphne, celery worker, vite :5173)
@@ -388,8 +388,8 @@ MAX_POSITION_SIZE_PCT=10.0
 
 # v2 backend (backend/.env)
 DJANGO_SECRET_KEY=...
-DATABASE_URL=postgres://alphadesk:alphadesk@localhost:5436/alphadesk
-REDIS_URL=redis://localhost:6379/0
+DATABASE_URL=postgres://alphadesk:alphadesk@localhost:5444/alphadesk
+REDIS_URL=redis://localhost:6380/0
 ANTHROPIC_API_KEY=...
 
 # Frontend (frontend/.env.local)

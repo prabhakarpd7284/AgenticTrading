@@ -28,7 +28,7 @@ DATABASES = {
         # Postgres in Docker (docker-compose.dev.yml). If DATABASE_URL is
         # unset and Postgres isn't running, Django will fail loudly at
         # connect time — which is what we want, no SQLite fallback.
-        default="postgres://alphadesk:alphadesk@localhost:5436/alphadesk",
+        default="postgres://alphadesk:alphadesk@localhost:5444/alphadesk",
     ),
 }
 
