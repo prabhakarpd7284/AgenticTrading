@@ -82,6 +82,9 @@ class PyramidResult:
     peak_unrealized: float = 0.0
     peak_lots: int = 0
     lot_size: int = 25
+    booked_lots: int = 0          # lots scaled out at the R target
+    booked_price: float = 0.0
+    booked_pnl_points: float = 0.0  # (book price - avg entry) x booked lots
     log: List[str] = field(default_factory=list)
 
     @property
@@ -104,6 +107,16 @@ class PyramidResult:
     @property
     def total_pnl_rupees(self) -> float:
         return self.total_pnl_points * self.lot_size
+
+    @property
+    def total_pnl_points_all(self) -> float:
+        """Points across the booked slice AND the remaining runner.
+
+        `total_pnl_points` only sees the lots still open at exit, so with
+        partial booking enabled it silently under-reports the trade.
+        """
+        runner = (self.exit_price - self.avg_entry) * self.total_lots
+        return self.booked_pnl_points + runner
 
 
 # ──────────────────────────────────────────────
@@ -212,12 +225,19 @@ class PyramidConfig:
     initial_sl_candles: int = 5      # Look back N candles for initial SL (swing low)
     trail_activation_r: float = 1.0  # Start trailing after +1R profit
     max_risk_pct_of_price: float = 0.50  # Max SL distance as % of entry (50% default, options can be wide)
+    # Partial booking. Take `book_fraction` of the position off once price
+    # reaches `book_at_r` x initial risk, and let the rest pyramid/trail.
+    # Measured 2026-09-09: booking the PE leg at 1R made +9,415 vs +1,775
+    # for pure pyramiding. 0.0 disables it, preserving legacy behaviour.
+    book_at_r: float = 0.0
+    book_fraction: float = 0.5
 
 
 def run_pyramid(
     candles: List[Candle],
     symbol: str = "NIFTY_CE",
     config: PyramidConfig = None,
+    start_index: int = 0,
 ) -> PyramidResult:
     """
     Run the pyramiding strategy on a list of candles.
@@ -291,6 +311,39 @@ def run_pyramid(
                 result.exit_time = c.timestamp
                 result.exit_reason = "Trail SL"
                 return result
+
+            # ── Partial booking at an R multiple ──
+            # Deliberately after the stop check: if one bar touches both the
+            # stop and the target we cannot know which came first, so the stop
+            # wins. Booking runs once per trade.
+            if config.book_at_r > 0 and result.booked_lots == 0:
+                risk_0 = entries[0].price - entries[0].sl_at_entry
+                book_target = entries[0].price + config.book_at_r * risk_0
+                if risk_0 > 0 and c.high >= book_target:
+                    book_lots = min(
+                        total_lots, max(1, int(total_lots * config.book_fraction)),
+                    )
+                    result.booked_lots = book_lots
+                    result.booked_price = book_target
+                    result.booked_pnl_points = (book_target - avg) * book_lots
+                    # Remove the booked lots at the running average, so the
+                    # runner keeps the same average entry it always had.
+                    total_cost -= avg * book_lots
+                    total_lots -= book_lots
+                    log.append(
+                        f"[{c.timestamp}] BOOKED {book_lots} lots @ "
+                        f"{book_target:.2f} ({config.book_at_r:.1f}R) | "
+                        f"banked {result.booked_pnl_points:.2f} pts | "
+                        f"runner: {total_lots} lots @ {avg:.2f}"
+                    )
+                    if total_lots == 0:
+                        result.entries = entries
+                        result.total_lots = 0
+                        result.total_cost = 0.0
+                        result.exit_price = book_target
+                        result.exit_time = c.timestamp
+                        result.exit_reason = "Booked at target"
+                        return result
 
             # ── Update trailing SL (only after position is +1R) ──
             old_sl = trail_sl
@@ -379,6 +432,13 @@ def run_pyramid(
                         )
 
         else:
+            # Session re-entry hunts forward from a later bar, but must still
+            # see the whole series above so EMA/RSI keep their warm-up. Slicing
+            # the candle list instead would silently suppress every signal until
+            # the indicators refilled — by which time the move is gone.
+            if idx < start_index:
+                continue
+
             # ── Entry check ──
             entry_signal = (
                 c.close > ema5               # Price above fast EMA
