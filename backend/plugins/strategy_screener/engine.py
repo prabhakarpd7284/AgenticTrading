@@ -203,8 +203,23 @@ class ScreenerEngine:
 
         # Step 3: Seed today's 1m candles if market has started
         if market_has_candles:
+            from apps.market_data.services.local_seed import (
+                local_1m_candles, seeded_enough,
+            )
+
             seeded = 0
+            from_local = 0
             for symbol in self.symbols:
+                # Local store first: one query, no rate limit, and it survives
+                # a mid-session restart — which is exactly when the 98-call
+                # REST path hits Angel's limit and silently seeds nothing.
+                raw_1m = local_1m_candles(symbol)
+                if raw_1m:
+                    self.stores[symbol].seed_from_candles(raw_1m, "1m")
+                    seeded += 1
+                    from_local += 1
+                    continue
+
                 token = ticker_service.get_token(symbol)
                 if not token:
                     continue
@@ -218,7 +233,20 @@ class ScreenerEngine:
                         seeded += 1
                 except Exception as e:
                     logger.debug(f"  {symbol} 1m seed failed: {e}")
-            logger.info(f"  Seeded {seeded}/{len(self.symbols)} with today's 1m candles")
+
+            logger.info(
+                f"  Seeded {seeded}/{len(self.symbols)} with today's 1m candles "
+                f"({from_local} from local store)"
+            )
+            # A blind engine emits nothing, which reads exactly like "no setups
+            # today". Say so loudly rather than letting it look healthy.
+            if not seeded_enough(seeded=seeded, total=len(self.symbols)):
+                logger.warning(
+                    "  BOOTSTRAP DEGRADED — only %s/%s symbols have history. "
+                    "Indicators need 21 bars, so expect no signals for ~20 "
+                    "minutes while the engine warms up from live ticks.",
+                    seeded, len(self.symbols),
+                )
         else:
             logger.info("  Pre-market: today's bars will come from websocket")
 
