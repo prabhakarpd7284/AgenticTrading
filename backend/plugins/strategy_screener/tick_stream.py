@@ -43,6 +43,7 @@ class TickStream:
 
         self._token_to_symbol: Dict[str, str] = {}
         self._symbol_to_token: Dict[str, str] = {}
+        self._token_exchange: Dict[str, str] = {}
 
         # Stats
         self._tick_count = 0
@@ -75,13 +76,31 @@ class TickStream:
         logger.info(f"Tick stream stopped (ticks: {self._tick_count})")
 
     def _resolve_tokens(self):
+        """Resolve every symbol to (token, exchange).
+
+        Tries cash first, then the derivative segments — a universe that mixes
+        equities with option contracts must not assume NSE, or the option
+        tokens subscribe to a segment that never delivers them.
+        """
         from trading.services.ticker_service import ticker_service
+
         for sym in self.symbols:
-            token = ticker_service.get_token(sym)
-            if token:
-                self._token_to_symbol[token] = sym
-                self._symbol_to_token[sym] = token
-        logger.info(f"Resolved {len(self._token_to_symbol)}/{len(self.symbols)} symbols")
+            for exchange in ("NSE", "NFO", "BFO"):
+                token = ticker_service.get_token(sym, exchange)
+                if token:
+                    token = str(token)
+                    self._token_to_symbol[token] = sym
+                    self._symbol_to_token[sym] = token
+                    self._token_exchange[token] = exchange
+                    break
+
+        by_exchange: dict[str, int] = {}
+        for exchange in self._token_exchange.values():
+            by_exchange[exchange] = by_exchange.get(exchange, 0) + 1
+        logger.info(
+            f"Resolved {len(self._token_to_symbol)}/{len(self.symbols)} symbols "
+            f"({by_exchange or 'none'})"
+        )
 
     # ──────────────────────────────────────────────
     # WebSocket V2 (binary protocol, QUOTE mode)
@@ -110,12 +129,18 @@ class TickStream:
             if not all_tokens:
                 return False
 
-            # V2 supports subscribe in batches — one connection handles all
-            # but subscribe call is limited to ~50 tokens per list entry
-            BATCH = 50
-            token_batches = [all_tokens[i:i + BATCH] for i in range(0, len(all_tokens), BATCH)]
+            # One connection handles the whole universe, but each subscribe
+            # call is capped (~50 tokens) AND is per exchange segment: an NFO
+            # option token sent under NSE's exchangeType never ticks.
+            from apps.market_data.services.ws_subscription import subscription_batches
 
-            logger.info(f"WebSocket V2: {len(all_tokens)} symbols, {len(token_batches)} batch(es)")
+            token_batches = subscription_batches(self._token_exchange)
+
+            logger.info(
+                f"WebSocket V2: {len(all_tokens)} symbols, "
+                f"{len(token_batches)} batch(es) across "
+                f"{len({b['exchangeType'] for b in token_batches})} exchange(s)"
+            )
 
             sws = SmartWebSocketV2(
                 auth_token, api_key, client_code, feed_token,
@@ -142,9 +167,11 @@ class TickStream:
             def on_open(wsapp):
                 logger.info("WebSocket V2 connected — subscribing in QUOTE mode")
                 for batch in token_batches:
-                    token_list = [{"exchangeType": 1, "tokens": batch}]
-                    sws.subscribe("screener", 2, token_list)  # mode 2 = QUOTE
-                    logger.info(f"  Subscribed batch of {len(batch)} tokens")
+                    sws.subscribe("screener", 2, [batch])  # mode 2 = QUOTE
+                    logger.info(
+                        f"  Subscribed {len(batch['tokens'])} tokens "
+                        f"(exchangeType {batch['exchangeType']})"
+                    )
 
             def on_error(wsapp, error):
                 self._ws_errors += 1

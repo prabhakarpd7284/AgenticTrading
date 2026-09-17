@@ -198,7 +198,36 @@ def _run_screener_until_close(r) -> dict:
     engine.bootstrap(fetch_candles_fn=True)
     logger.info("pipeline.screener.bootstrapped")
 
-    tick_stream = TickStream(symbols=symbols, on_tick=engine.on_tick, poll_interval=5.0)
+    # Tee every tick to ws/ticks/ so the UI shows live LTP, not just signals.
+    # Tenant is resolved exactly the way Signal.persist does it — ticks and the
+    # signals they produce must land on the same tenant or the UI shows one
+    # without the other.
+    from apps.market_data.services.tick_publisher import tee_to_browser
+    from plugins.strategy_screener.signals import _resolve_default_tenant
+
+    _tenant = _resolve_default_tenant()
+
+    # Stream the ATM option chain alongside the equities. Options are where the
+    # trading happens, but nothing was feeding them: no ltp cache, no candles,
+    # no paper fills. They join the DATA path only — the screener's strategies
+    # are equity setups and would emit nonsense over an option contract.
+    option_symbols = _atm_option_symbols()
+    stream_symbols = list(symbols) + option_symbols
+    logger.info(
+        "pipeline.screener.universe equities=%d options=%d",
+        len(symbols), len(option_symbols),
+    )
+
+    from apps.market_data.services.tick_routing import engine_router
+
+    routed = engine_router(engine.on_tick, symbols)
+    on_tick = tee_to_browser(routed, _tenant.id) if _tenant else routed
+    if _tenant is None:
+        logger.warning("pipeline.screener.no_tenant — browser tick feed disabled")
+
+    tick_stream = TickStream(
+        symbols=stream_symbols, on_tick=on_tick, poll_interval=5.0,
+    )
     tick_stream.start()
     logger.info("pipeline.screener.streaming mode=%s", tick_stream.mode)
 
@@ -215,6 +244,18 @@ def _run_screener_until_close(r) -> dict:
         logger.warning("pipeline.screener.soft_time_limit — stopping early")
     finally:
         tick_stream.stop()
+        # Flush the minute that was still forming when the feed stopped —
+        # otherwise the closing bar of every symbol is silently dropped, which
+        # is exactly the bar an EOD square-off needs to price against.
+        try:
+            aggregator = getattr(on_tick, "aggregator", None)
+            if aggregator is not None:
+                from apps.market_data.services.candle_ingestor import persist_bars
+
+                flushed = persist_bars(aggregator.drain())
+                logger.info("pipeline.screener.candles_flushed n=%s", flushed)
+        except Exception:  # noqa: BLE001
+            logger.warning("pipeline.screener.candle_flush_failed", exc_info=True)
 
     stats = engine.get_stats()
     logger.info(
@@ -418,6 +459,87 @@ def run_eod_enrichment(
             call_command("enrich_signals", date=date)
         else:
             call_command("enrich_signals")
+        # Swing/multi-day sources (StockEdge momentum, …) are excluded from the
+        # intraday pass above and forward-enriched here with daily candles once
+        # their holding window elapses. Non-blocking; safe to run every EOD.
+        try:
+            call_command("enrich_swing_signals")
+        except Exception as exc:  # noqa: BLE001 - never fail the pipeline on this
+            logger.warning("pipeline.swing_enrichment.failed error=%s", exc)
         run.summary = {"ok": True, "mode": mode}
     logger.info("pipeline.eod_enrichment.done mode=%s", mode)
     return {"ok": True, "mode": mode}
+
+
+# ─── Option chain for the live stream ─────────────────────────────────
+
+# Underlyings whose ATM chain joins the tick stream, and how many strikes
+# either side of ATM. Kept small: every contract is a websocket subscription
+# and Angel caps tokens per connection.
+STREAM_OPTION_UNDERLYINGS = ("NIFTY",)
+STREAM_OPTION_WIDTH = 3
+
+
+def _atm_option_symbols() -> list[str]:
+    """ATM option contracts to stream for today's expiry.
+
+    Returns [] on any failure — options are an addition to the equity stream,
+    so a resolution problem must degrade to "equities only" rather than take
+    down the whole session.
+    """
+    from apps.market_data.services.option_universe import (
+        chain_contracts, chain_is_healthy, strikes_around,
+    )
+    from trading.utils.expiry_utils import iso_to_angel_long, next_expiry_date
+
+    out: list[str] = []
+    for underlying in STREAM_OPTION_UNDERLYINGS:
+        try:
+            expiry = next_expiry_date(underlying)
+            if not expiry:
+                logger.warning("pipeline.screener.no_expiry underlying=%s", underlying)
+                continue
+
+            from trading.services.data_service import BrokerClient
+
+            spot = BrokerClient.get_instance().ltp(
+                "NSE", underlying, _INDEX_TOKENS[underlying],
+            )["ltp"]
+
+            contracts = chain_contracts(
+                underlying, spot, iso_to_angel_long(expiry.isoformat()),
+                width=STREAM_OPTION_WIDTH,
+            )
+            out.extend(c["symbol"] for c in contracts)
+            expected = len(strikes_around(underlying, spot, STREAM_OPTION_WIDTH))
+            logger.info(
+                "pipeline.screener.option_chain underlying=%s spot=%.2f "
+                "expiry=%s contracts=%d",
+                underlying, spot, expiry, len(contracts),
+            )
+            # An empty or thin chain means the resolution failed (expiry
+            # format, stale master). Streaming equities-only while logging
+            # success is how options stayed invisible in the first place.
+            if not chain_is_healthy(
+                contracts=contracts, expected_strikes=expected,
+            ):
+                logger.error(
+                    "pipeline.screener.option_chain_EMPTY underlying=%s "
+                    "expiry=%s resolved=%d expected>=%d — options will NOT "
+                    "be streamed this session",
+                    underlying, expiry, len(contracts), expected,
+                )
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "pipeline.screener.option_chain_failed underlying=%s",
+                underlying, exc_info=True,
+            )
+    return out
+
+
+# Index spot tokens. Not hardcoded elsewhere — see CLAUDE.md invariant #8.
+_INDEX_TOKENS = {
+    "NIFTY": "99926000",
+    "BANKNIFTY": "99926009",
+    "SENSEX": "99919000",
+}
