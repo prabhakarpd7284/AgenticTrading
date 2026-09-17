@@ -10,8 +10,11 @@ Computes everything the LLM needs to make a management decision:
 - Risk flags (underwater, stop triggered, expiry-day)
 - Human-readable summary text injected into the straddle prompt
 """
+import re
 from datetime import date, datetime
 from typing import List, Optional
+
+from trading.utils.expiry_utils import days_to_expiry as _days_to_expiry_util, iso_to_angel_long
 
 from .state import StraddleAnalysis, ExpiryScenario
 
@@ -50,13 +53,24 @@ def _approx_delta(spot: float, strike: float, option_type: str, days_to_expiry: 
             return max(-0.95, min(-0.05, base))
 
 
+# ── Thresholds (tunable) ──
+VIX_CALM_THRESHOLD = 15
+VIX_ELEVATED_THRESHOLD = 22
+CRASH_DAY_CHANGE_PCT = -1.5
+CRASH_VIX_CHANGE_PCT = 10
+RECOVERY_FROM_LOW_PCT = 0.5
+RALLY_DAY_CHANGE_PCT = 0.5
+HARD_STOP_MULTIPLIER = 1.5       # close if combined premium > 1.5x sold
+SCENARIO_OFFSETS = [300, 150, 0, -150, -400, -700]  # pts from spot for expiry scenarios
+
+
 # ──────────────────────────────────────────────
 # VIX phase classifier
 # ──────────────────────────────────────────────
 def _classify_vix(vix: float) -> str:
-    if vix < 15:
+    if vix < VIX_CALM_THRESHOLD:
         return "CALM"
-    elif vix < 22:
+    elif vix < VIX_ELEVATED_THRESHOLD:
         return "ELEVATED"
     else:
         return "SPIKE"
@@ -92,24 +106,24 @@ def _classify_market_phase(
     lows   = [c[3] for c in recent]
     closes = [c[4] for c in recent]
 
-    day_change_pct = (nifty_spot - nifty_prev_close) / nifty_prev_close * 100
-    vix_change_pct = (vix_current - vix_prev_close) / vix_prev_close * 100
+    day_change_pct = ((nifty_spot - nifty_prev_close) / nifty_prev_close * 100) if nifty_prev_close else 0.0
+    vix_change_pct = ((vix_current - vix_prev_close) / vix_prev_close * 100) if vix_prev_close else 0.0
 
     # Day low (all candles)
     all_lows = [c[3] for c in candles]
     day_low = min(all_lows)
-    recovery_from_low = (nifty_spot - day_low) / day_low * 100
+    recovery_from_low = ((nifty_spot - day_low) / day_low * 100) if day_low else 0.0
 
     # Trend: are recent candles making higher highs and higher lows?
     higher_highs = sum(1 for i in range(1, len(highs)) if highs[i] > highs[i - 1])
     lower_lows   = sum(1 for i in range(1, len(lows))  if lows[i]  < lows[i - 1])
 
     # CRASH: big gap down + VIX spiking + making new lows
-    if day_change_pct < -1.5 and vix_change_pct > 10 and lower_lows >= 3:
+    if day_change_pct < CRASH_DAY_CHANGE_PCT and vix_change_pct > CRASH_VIX_CHANGE_PCT and lower_lows >= 3:
         return "CRASH"
 
     # RECOVERY: bounced from lows, higher highs forming, VIX falling/stable
-    if recovery_from_low > 0.5 and higher_highs >= 3 and vix_change_pct < 5:
+    if recovery_from_low > RECOVERY_FROM_LOW_PCT and higher_highs >= 3 and vix_change_pct < 5:
         return "RECOVERY"
 
     # RALLY: NIFTY approaching or above previous close, upward momentum
@@ -162,11 +176,7 @@ def _build_scenarios(
 # ──────────────────────────────────────────────
 def _days_to_expiry(expiry_str: str) -> int:
     """Return calendar days to expiry. 0 = expiry today."""
-    try:
-        expiry_date = datetime.strptime(expiry_str, "%Y-%m-%d").date()
-        return max(0, (expiry_date - date.today()).days)
-    except Exception:
-        return 999
+    return _days_to_expiry_util(expiry_str)
 
 
 # ──────────────────────────────────────────────
@@ -176,7 +186,16 @@ def _build_summary_text(a: dict) -> str:
     """Build a dense, readable analysis block for the LLM context."""
 
     dte  = a["days_to_expiry"]
-    expiry_warning = "⚠️  EXPIRY TOMORROW — Gamma is extreme. Prefer closing over holding." if a["expiry_tomorrow"] else ""
+    if a.get("is_expiry_day"):
+        expiry_warning = (
+            "📅 EXPIRY TODAY (0 DTE) — Theta decay is MAXIMUM today. "
+            "Hold and let premium decay unless position is underwater or NIFTY breaks out of range. "
+            "Hard deadline: close by 3:00 PM IST."
+        )
+    elif a["expiry_tomorrow"]:
+        expiry_warning = "⚠️  EXPIRY TOMORROW — Gamma risk increases. Monitor closely, prefer simple actions."
+    else:
+        expiry_warning = ""
     underwater_warning = "🚨 POSITION UNDERWATER — Combined premium > sold. Hard stop triggered." if a["is_underwater"] else ""
 
     scenario_lines = "\n".join([
@@ -198,8 +217,8 @@ Market Phase   : {a['market_phase']}
 
 OPTION LEGS
 -----------
-24200 CE  |  Sold: {a['ce_sell_price']:.2f}  |  Now: {a['ce_ltp']:.2f}  |  P&L: {(a['ce_sell_price'] - a['ce_ltp']):+.2f} pts
-24200 PE  |  Sold: {a['pe_sell_price']:.2f}  |  Now: {a['pe_ltp']:.2f}  |  P&L: {(a['pe_sell_price'] - a['pe_ltp']):+.2f} pts
+{a['strike']} CE  |  Sold: {a['ce_sell_price']:.2f}  |  Now: {a['ce_ltp']:.2f}  |  P&L: {(a['ce_sell_price'] - a['ce_ltp']):+.2f} pts
+{a['strike']} PE  |  Sold: {a['pe_sell_price']:.2f}  |  Now: {a['pe_ltp']:.2f}  |  P&L: {(a['pe_sell_price'] - a['pe_ltp']):+.2f} pts
 Combined  |  Sold: {a['combined_sold']:.2f}  |  Now: {a['combined_current']:.2f}  |  Decayed: {a['premium_decayed_pct']:.1f}%
 
 NET P&L    : {a['net_pnl_pts']:+.2f} pts  →  {a['net_pnl_inr']:>+,.0f} INR per lot
@@ -220,6 +239,67 @@ Tested leg    : {a['nearest_itm_leg']}
 EXPIRY SCENARIOS (if held to expiry)
 ------------------------------------
 {scenario_lines}"""
+
+
+# ──────────────────────────────────────────────
+# Real greeks from broker (market hours only)
+# ──────────────────────────────────────────────
+def _try_fetch_real_greeks(underlying: str, expiry: str, strike: int) -> Optional[dict]:
+    """
+    Try to fetch real option greeks from Angel One.
+    Returns {ce_delta, pe_delta, ce_iv, pe_iv, ce_gamma, pe_gamma} or None.
+    Only works during market hours — returns None silently otherwise.
+    """
+    try:
+        from trading.utils.time_utils import is_market_open
+        if not is_market_open():
+            return None
+
+        from trading.services.data_service import BrokerClient
+
+        expiry_fmt = iso_to_angel_long(expiry)
+        if not expiry_fmt:
+            return None
+
+        b = BrokerClient.get_instance()
+        greeks_data = b.option_greeks(underlying, expiry_fmt)
+
+        if not greeks_data:
+            return None
+
+        # Find our strike in the chain
+        for item in greeks_data:
+            if not isinstance(item, dict):
+                continue
+            sp = float(item.get("strikePrice", 0))
+            if abs(sp - strike) < 1:
+                result = {}
+                # Extract CE greeks
+                ce_delta = item.get("ceDelta") or item.get("CE_delta")
+                pe_delta = item.get("peDelta") or item.get("PE_delta")
+                ce_iv = item.get("ceImpliedVolatility") or item.get("CE_impliedVolatility")
+                pe_iv = item.get("peImpliedVolatility") or item.get("PE_impliedVolatility")
+                ce_gamma = item.get("ceGamma") or item.get("CE_gamma")
+                pe_gamma = item.get("peGamma") or item.get("PE_gamma")
+
+                if ce_delta is not None:
+                    result["ce_delta"] = float(ce_delta)
+                if pe_delta is not None:
+                    result["pe_delta"] = float(pe_delta)
+                if ce_iv is not None:
+                    result["ce_iv"] = float(ce_iv)
+                if pe_iv is not None:
+                    result["pe_iv"] = float(pe_iv)
+                if ce_gamma is not None:
+                    result["ce_gamma"] = float(ce_gamma)
+                if pe_gamma is not None:
+                    result["pe_gamma"] = float(pe_gamma)
+
+                return result if result else None
+
+        return None
+    except Exception:
+        return None  # Silent fallback to approximation
 
 
 # ──────────────────────────────────────────────
@@ -265,8 +345,8 @@ def analyze_straddle(
     """
     # ── Market ──
     nifty_gap_pts = nifty_spot - nifty_prev_close
-    nifty_gap_pct = nifty_gap_pts / nifty_prev_close * 100
-    vix_change_pct = (vix_current - vix_prev_close) / vix_prev_close * 100
+    nifty_gap_pct = (nifty_gap_pts / nifty_prev_close * 100) if nifty_prev_close else 0.0
+    vix_change_pct = ((vix_current - vix_prev_close) / vix_prev_close * 100) if vix_prev_close else 0.0
     vix_phase = _classify_vix(vix_current)
 
     # ── P&L ──
@@ -287,10 +367,16 @@ def analyze_straddle(
     else:
         nearest_itm_leg = "BOTH_OTM"
 
-    # ── Delta ──
+    # ── Delta (prefer real greeks from broker, fallback to approximation) ──
     dte = _days_to_expiry(expiry)
-    long_ce_delta = _approx_delta(nifty_spot, strike, "CE", dte)
-    long_pe_delta = _approx_delta(nifty_spot, strike, "PE", dte)
+    real_greeks = _try_fetch_real_greeks(underlying, expiry, strike)
+
+    if real_greeks:
+        long_ce_delta = real_greeks.get("ce_delta", _approx_delta(nifty_spot, strike, "CE", dte))
+        long_pe_delta = real_greeks.get("pe_delta", _approx_delta(nifty_spot, strike, "PE", dte))
+    else:
+        long_ce_delta = _approx_delta(nifty_spot, strike, "CE", dte)
+        long_pe_delta = _approx_delta(nifty_spot, strike, "PE", dte)
 
     # We are SHORT both options → flip delta sign
     short_ce_delta = -long_ce_delta   # short call = negative delta
@@ -306,8 +392,9 @@ def analyze_straddle(
 
     # ── Risk flags ──
     is_underwater = combined_current > combined_sold
-    stop_triggered = combined_current > (combined_sold * 1.0)  # Any loss = stop consideration
-    expiry_tomorrow = dte <= 1
+    stop_triggered = combined_current > (combined_sold * HARD_STOP_MULTIPLIER)
+    is_expiry_day = dte == 0
+    expiry_tomorrow = dte <= 1  # True for BOTH expiry day and day before
 
     # ── Market phase ──
     market_phase = _classify_market_phase(
@@ -347,6 +434,7 @@ def analyze_straddle(
         "delta_bias": delta_bias,
         "is_underwater": is_underwater,
         "stop_triggered": stop_triggered,
+        "is_expiry_day": is_expiry_day,
         "pe_itm_by": pe_itm_by,
         "ce_itm_by": ce_itm_by,
         "nearest_itm_leg": nearest_itm_leg,
@@ -382,6 +470,7 @@ def analyze_straddle(
         delta_bias=delta_bias,
         is_underwater=is_underwater,
         stop_triggered=stop_triggered,
+        is_expiry_day=is_expiry_day,
         expiry_tomorrow=expiry_tomorrow,
         days_to_expiry=dte,
         market_phase=market_phase,

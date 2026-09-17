@@ -46,15 +46,43 @@ _broker_service = BrokerService()
 # ──────────────────────────────────────────────
 def _audit(event_type: str, symbol: str = "", risk_details: dict = None,
            execution_details: dict = None, trade_journal=None):
-    """Write audit log. Never blocks trading flow."""
+    """Write a v2 Event row. Never blocks trading flow.
+
+    Maps the legacy `event_type` string onto the closest Event.Type and
+    packs the rest into the payload — the unified Event log is now the
+    canonical audit surface (apps.events).
+    """
     try:
-        from trading.models import AuditLog
-        AuditLog.objects.create(
-            event_type=event_type,
-            symbol=symbol,
-            risk_details=risk_details,
-            execution_details=execution_details,
-            trade_journal=trade_journal,
+        from apps.events.services.event_writer import emit
+        from apps.events.models import Event
+        from apps.tenants.models import Membership
+
+        mem = (
+            Membership.objects.filter(is_active=True, role="owner")
+            .select_related("tenant").first()
+        )
+        if mem is None:
+            return  # no tenant → silently skip (single-trader bootstrap)
+
+        # Crude legacy→v2 type mapping. Anything unknown falls back to
+        # WORKFLOW_STEP_COMPLETED so the row still lands in the unified log.
+        type_map = {
+            "RISK_APPROVE":  Event.Type.RISK_APPROVED,
+            "RISK_REJECT":   Event.Type.RISK_REJECTED,
+            "EXECUTION":     Event.Type.ORDER_SENT,
+            "RECONCILE":     Event.Type.WORKFLOW_STEP_COMPLETED,
+            "LLM_CALL":      Event.Type.LLM_REQUEST,
+        }
+        emit(
+            tenant=mem.tenant,
+            type=type_map.get(event_type, Event.Type.WORKFLOW_STEP_COMPLETED),
+            text=f"{event_type} {symbol}".strip(),
+            payload={
+                "event_type": event_type,
+                "symbol": symbol,
+                "risk_details": risk_details or {},
+                "execution_details": execution_details or {},
+            },
         )
     except Exception as e:
         logger.warning(f"Audit write failed (non-fatal): {e}")
@@ -68,13 +96,16 @@ def reconcile_positions():
     On startup: pull broker positions, compare with DB, log mismatches.
     Never assume state is correct.
     """
-    from trading.models import TradeJournal, PortfolioSnapshot
-
     trading_mode = os.getenv("TRADING_MODE", "paper")
 
     if trading_mode == "paper":
         logger.info("Reconciliation skipped (paper mode)")
         return
+
+    # Imports moved below the paper-mode short-circuit — the workflow runs
+    # this on every start, so a missing legacy module here used to crash
+    # every paper-mode run before it ever reached the planner.
+    from apps.trading.models import PortfolioSnapshot, Trade
 
     logger.info("=== Position Reconciliation ===")
 
@@ -83,9 +114,9 @@ def reconcile_positions():
         broker_positions = _data_service.fetch_positions()
         broker_data = broker_positions.get("data", []) if isinstance(broker_positions, dict) else []
 
-        # Pull DB state: open/executed trades from today
-        db_open = TradeJournal.objects.filter(
-            status__in=["EXECUTED", "FILLED", "PARTIAL"],
+        # Pull DB state: open/executed trades from today (v2 ledger).
+        db_open = Trade.objects.filter(
+            status__in=[Trade.Status.SENT, Trade.Status.PARTIAL, Trade.Status.FILLED],
             trade_date=date.today(),
         )
 
@@ -118,12 +149,14 @@ def reconcile_positions():
         if not db_only and not broker_only:
             logger.info("Reconciliation: OK — positions match")
 
-        # Update portfolio snapshot
+        # Update the most recent portfolio snapshot — v2 PortfolioSnapshot
+        # has `open_positions` only (the legacy duplicate `open_positions_count`
+        # field is gone).
         try:
-            snap = PortfolioSnapshot.objects.latest()
-            snap.open_positions = len(broker_symbols) if broker_data else len(db_symbols)
-            snap.open_positions_count = snap.open_positions
-            snap.save()
+            snap = PortfolioSnapshot.objects.order_by("-captured_at").first()
+            if snap is not None:
+                snap.open_positions = len(broker_symbols) if broker_data else len(db_symbols)
+                snap.save(update_fields=["open_positions"])
         except Exception:
             pass
 
@@ -159,18 +192,18 @@ def fetch_data_node(state: TradingState) -> dict:
             "symbol": "",
         }
 
-    today = date.today().isoformat()
-    logger.info(f"Fetching data for {symbol} on {today}")
+    from trading.utils.time_utils import get_session_phase
+    phase = get_session_phase()
+    logger.info(f"Fetching data for {symbol} (session={phase})")
 
     try:
-        data = _data_service.fetch_intraday(symbol, today)
+        # fetch_intraday auto-pivots to last_trading_day pre-market / weekend.
+        data = _data_service.fetch_intraday(symbol)
 
         if "error" in data:
-            # Data fetch failed but don't block workflow —
-            # planner can still work with RAG context alone
             fallback = (
-                f"Market data unavailable for {symbol} on {today}.\n"
-                f"Reason: {data['error']}\n"
+                f"Market data unavailable for {symbol}.\n"
+                f"Reason: {data['error']} (session={phase})\n"
                 f"Planner should rely on RAG context and strategy rules."
             )
             logger.warning(f"Data fetch issue for {symbol}: {data['error']} — continuing with RAG only")
@@ -178,7 +211,7 @@ def fetch_data_node(state: TradingState) -> dict:
                 "symbol": symbol,
                 "market_data": data,
                 "market_data_raw": fallback,
-                "error": None,  # don't propagate — let planner decide
+                "error": None,
             }
 
         return {
@@ -191,7 +224,7 @@ def fetch_data_node(state: TradingState) -> dict:
     except Exception as e:
         logger.exception(f"Data fetch failed: {e}")
         fallback = (
-            f"Market data unavailable for {symbol} on {today}.\n"
+            f"Market data unavailable for {symbol} (session={phase}).\n"
             f"Reason: {str(e)}\n"
             f"Planner should rely on RAG context and strategy rules."
         )
@@ -199,7 +232,7 @@ def fetch_data_node(state: TradingState) -> dict:
             "symbol": symbol,
             "market_data": None,
             "market_data_raw": fallback,
-            "error": None,  # don't block workflow
+            "error": None,
         }
 
 
@@ -298,18 +331,25 @@ def risk_node(state: TradingState) -> dict:
             "risk_result": RiskResult(approved=False, reason=reason).model_dump(),
         }
 
-    # Get portfolio state
-    from trading.models import PortfolioSnapshot
+    # Portfolio state — read from the v2 trading.PortfolioSnapshot (most
+    # recent for the only tenant in dev). Falls back to DEFAULT_CAPITAL on
+    # any error so the workflow keeps producing a planner + risk verdict
+    # even in a fresh setup where snapshots don't exist yet.
     try:
-        snap = PortfolioSnapshot.objects.latest()
-        capital = snap.capital
-        daily_loss = snap.daily_loss
-        open_positions = snap.open_positions
-    except Exception:
-        capital = float(os.getenv("DEFAULT_CAPITAL", "100000"))
+        from apps.trading.models import PortfolioSnapshot, Trade
+        snap = PortfolioSnapshot.objects.order_by("-captured_at").first()
+        if snap is None:
+            raise RuntimeError("no PortfolioSnapshot rows yet")
+        capital = float(snap.equity)
+        daily_loss = max(0.0, -float(snap.day_pnl))     # day_pnl is signed
+        open_positions = Trade.objects.filter(
+            status__in=[Trade.Status.SENT, Trade.Status.PARTIAL, Trade.Status.FILLED],
+        ).count()
+    except Exception as e:
+        capital = float(os.getenv("DEFAULT_CAPITAL", "500000"))
         daily_loss = 0.0
         open_positions = 0
-        logger.warning(f"No portfolio snapshot — using default capital: {capital}")
+        logger.warning(f"PortfolioSnapshot unavailable ({e}) — using default capital: {capital}")
 
     approved, reason, details = validate_trade(
         plan=plan,
@@ -396,9 +436,7 @@ def execute_node(state: TradingState) -> dict:
 # Node: journal_writer
 # ──────────────────────────────────────────────
 def journal_node(state: TradingState) -> dict:
-    """Save the trade to the journal (Django ORM)."""
-    from trading.models import TradeJournal
-
+    """Persist the trade as an apps.trading.Trade row in the v2 ledger."""
     plan = state.get("trade_plan")
     risk_result = state.get("risk_result") or {}
     exec_result = state.get("execution_result") or {}
@@ -407,40 +445,63 @@ def journal_node(state: TradingState) -> dict:
     if not plan:
         return {"journal_id": None}
 
-    # Determine status
-    if not risk_approved:
-        status = TradeJournal.Status.REJECTED
-    elif exec_result.get("success"):
-        mode = exec_result.get("mode", "paper")
-        status = TradeJournal.Status.PAPER if mode == "paper" else TradeJournal.Status.EXECUTED
-    else:
-        status = TradeJournal.Status.APPROVED
-
     try:
-        journal = TradeJournal.objects.create(
+        from apps.trading.models import Portfolio, Trade
+        from apps.tenants.models import Membership
+
+        # Map workflow outcome → v2 Trade status. The legacy
+        # APPROVED/PAPER/EXECUTED distinctions collapse onto the new
+        # lifecycle (PLAN→APPROVED/REJECTED→…→FILLED).
+        if not risk_approved:
+            status = Trade.Status.REJECTED
+        elif exec_result.get("success"):
+            status = Trade.Status.FILLED
+        else:
+            status = Trade.Status.APPROVED
+
+        # Pick the first tenant + their default Portfolio. The agent CLI
+        # runs without a tenant in scope, same convention as the screener
+        # plugin's persist() path — single-trader bootstrap.
+        mem = (
+            Membership.objects.filter(is_active=True, role="owner")
+            .select_related("tenant")
+            .first()
+        )
+        if mem is None:
+            logger.warning("Journal skipped: no owner membership found.")
+            return {"journal_id": None}
+        portfolio = (
+            Portfolio.objects.filter(tenant=mem.tenant).order_by("created_at").first()
+        )
+        if portfolio is None:
+            portfolio = Portfolio.objects.create(tenant=mem.tenant, name="Default")
+
+        trade = Trade.objects.create(
+            tenant=mem.tenant,
+            portfolio=portfolio,
             symbol=plan["symbol"],
             side=plan["side"],
             entry_price=plan["entry_price"],
             stop_loss=plan["stop_loss"],
             target=plan["target"],
-            quantity=plan["quantity"],
+            quantity=int(plan["quantity"]),
             reasoning=plan.get("reasoning", ""),
             confidence=plan.get("confidence", 0),
             status=status,
-            order_id=exec_result.get("order_id", ""),
             fill_price=exec_result.get("fill_price"),
             fill_quantity=exec_result.get("fill_quantity"),
             risk_approved=risk_approved,
-            risk_reason=risk_result.get("reason", ""),
+            risk_reason=risk_result.get("reason", "")[:255],
+            origin=Trade.Origin.WORKFLOW,
             trade_date=date.today(),
         )
 
-        logger.info(f"Journal saved: ID={journal.id} | {journal}")
-        return {"journal_id": journal.id}
+        logger.info(f"Trade saved: {trade.id} | {trade}")
+        return {"journal_id": str(trade.id)}
 
     except Exception as e:
-        logger.exception(f"Journal save failed: {e}")
-        return {"journal_id": None, "error": f"Journal save failed: {str(e)}"}
+        logger.exception(f"Trade journal save failed: {e}")
+        return {"journal_id": None, "error": f"Trade save failed: {e}"}
 
 
 # ──────────────────────────────────────────────

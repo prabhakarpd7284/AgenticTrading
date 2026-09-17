@@ -1,0 +1,307 @@
+/**
+ * OpRunPanel — the run/log half of the ops console, extracted so any page
+ * can embed it (Monthly's "refresh signal outcomes", Swing Scanner's
+ * "Re-scan now", Pyramid's "Run via CLI", Setup's "Plan a trade for X",
+ * etc.).
+ *
+ * Self-contained: opens the WS on Run, streams log lines in, fires
+ * `onSuccess` when the subprocess exits 0 so the parent can refetch its
+ * data. Stop kills the subprocess. Argument input is a single text box
+ * pre-filled with `defaultArgs`; the user can edit before firing.
+ */
+import * as React from "react";
+import { useQuery } from "@tanstack/react-query";
+import { AlertTriangle, ChevronDown, ChevronRight, Play, Square } from "lucide-react";
+
+import { api } from "@/lib/api";
+import { connect } from "@/lib/ws";
+import { cn } from "@/lib/utils";
+import { Badge } from "@/components/ui/Badge";
+import { Button } from "@/components/ui/Button";
+
+export type RunStatus = "idle" | "running" | "done" | "error";
+
+export interface OpRunPanelProps {
+  /** Django management command name, e.g. "run_pyramid". */
+  command: string;
+  /** Optional one-line description shown above the args input. */
+  description?: string;
+  /** Initial args, either a shell-style string ("--strike 24200 --dry-run")
+   *  or a list. Editable in the input field before Run. */
+  defaultArgs?: string | string[];
+  /** Flag the command visually as destructive (matches the badge in OpsPage). */
+  dangerous?: boolean;
+  /** Fired on subprocess exit 0 so the caller can refetch its data. */
+  onSuccess?: () => void;
+  /** Fired on any non-zero exit / spawn error. */
+  onError?: (detail: string) => void;
+  /** Hide the --help collapsible (defaults to visible). */
+  hideHelp?: boolean;
+}
+
+interface LogLine {
+  kind: "log" | "info" | "done" | "error";
+  text: string;
+}
+
+export function OpRunPanel(props: OpRunPanelProps) {
+  const {
+    command, description, defaultArgs = "", dangerous,
+    onSuccess, onError, hideHelp,
+  } = props;
+
+  const [args, setArgs] = React.useState(() =>
+    Array.isArray(defaultArgs) ? defaultArgs.join(" ") : defaultArgs,
+  );
+  React.useEffect(() => {
+    // When the caller passes new defaults (page state changed), reset.
+    setArgs(Array.isArray(defaultArgs) ? defaultArgs.join(" ") : defaultArgs);
+  }, [defaultArgs]);
+
+  const [status, setStatus] = React.useState<RunStatus>("idle");
+  const [lines, setLines] = React.useState<LogLine[]>([]);
+  const [helpOpen, setHelpOpen] = React.useState(false);
+  const wsRef = React.useRef<ReturnType<typeof connect> | null>(null);
+  // Per-run bookkeeping, so the close handler knows whether the socket died
+  // on us or we tore it down on purpose.
+  const runRef = React.useRef({ sawStart: false, finished: true });
+  const logEnd = React.useRef<HTMLDivElement | null>(null);
+
+  React.useEffect(() => {
+    // Cleanup on unmount — close the WS, which triggers server-side SIGTERM.
+    return () => {
+      runRef.current.finished = true;
+      wsRef.current?.close();
+      wsRef.current = null;
+    };
+  }, []);
+
+  React.useEffect(() => {
+    logEnd.current?.scrollIntoView({ behavior: "auto", block: "end" });
+  }, [lines]);
+
+  const helpQ = useQuery<{ help: string }>({
+    enabled: !hideHelp && helpOpen,
+    queryKey: ["ops-command-help", command],
+    queryFn: () => api.get(`/ops/commands/${command}/help/`).then((r) => r.data),
+  });
+
+  /** A failed handshake looks identical to a dead backend in the browser
+   *  (both are close-1006, no reason). Ask the REST surface — which shares
+   *  the ops tier policy with the consumer — what actually went wrong. */
+  const diagnose = async (): Promise<string> => {
+    try {
+      await api.get("/ops/commands/");
+      return "ops channel refused the connection — is the backend still running?";
+    } catch (err) {
+      const st = (err as { response?: { status?: number } }).response?.status;
+      if (st === 401) return "session expired — sign in again to run commands.";
+      if (st === 403) {
+        return "your account isn't allowed to run ops commands (owner or platform-admin only, and the console must be enabled).";
+      }
+      return "could not reach the backend on :8000.";
+    }
+  };
+
+  const start = () => {
+    if (status === "running") return;
+    setLines([]);
+    setStatus("running");
+    const run = runRef.current;
+    run.sawStart = false;
+    run.finished = false;
+    const ws = connect("/ws/ops/", (msg) => {
+      const m = msg as {
+        type: string; line?: string; detail?: string;
+        exit_code?: number; argv?: string[]; pid?: number;
+      };
+      if (m.type === "log" && typeof m.line === "string") {
+        setLines((prev) => [...prev, { kind: "log", text: m.line! }]);
+      } else if (m.type === "started") {
+        run.sawStart = true;
+        setLines((prev) => [
+          ...prev,
+          { kind: "info", text: `▶ pid=${m.pid}  argv=${(m.argv ?? []).join(" ")}` },
+        ]);
+      } else if (m.type === "done") {
+        const ok = m.exit_code === 0;
+        run.finished = true;
+        setStatus(ok ? "done" : "error");
+        setLines((prev) => [...prev, { kind: "done", text: `── exit ${m.exit_code} ──` }]);
+        wsRef.current?.close();
+        wsRef.current = null;
+        if (ok) onSuccess?.();
+        else onError?.(`exit ${m.exit_code}`);
+      } else if (m.type === "error") {
+        run.finished = true;
+        setStatus("error");
+        setLines((prev) => [...prev, { kind: "error", text: `✗ ${m.detail}` }]);
+        onError?.(m.detail ?? "unknown error");
+      } else if (m.type === "stopped") {
+        run.finished = true;
+        setStatus("done");
+        setLines((prev) => [...prev, { kind: "info", text: "── stopped ──" }]);
+      }
+    }, {
+      // One-shot: no auto-reconnect. `onOpen` fires the run, so a silent
+      // reconnect would re-execute the command — and a rejected handshake
+      // would retry forever, which is what produced the old wall of
+      // "✗ websocket error" lines.
+      reconnect: false,
+      onOpen: () => {
+        wsRef.current?.send({ type: "start", command, args });
+      },
+      // The browser gives no usable detail on `error` — it always fires a
+      // `close` right after, so report there once, with a real reason.
+      onClose: (_ev, { everOpened }) => {
+        if (run.finished) return;
+        if (!everOpened) {
+          void diagnose().then((why) => {
+            setStatus("error");
+            setLines((prev) => [...prev, { kind: "error", text: `✗ ${why}` }]);
+            onError?.(why);
+          });
+          return;
+        }
+        const why = run.sawStart
+          ? "connection lost — the run was terminated"
+          : "connection closed before the run started";
+        setStatus("error");
+        setLines((prev) => [...prev, { kind: "error", text: `✗ ${why}` }]);
+        onError?.(why);
+      },
+    });
+    wsRef.current = ws;
+  };
+
+  const stop = () => wsRef.current?.send({ type: "stop" });
+
+  return (
+    <div className="flex h-full flex-col gap-3">
+      {/* ── header row: name · badges · run/stop ── */}
+      <div className="flex items-center justify-between gap-2">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <span className="truncate font-mono text-sm font-medium">{command}</span>
+            {dangerous && (
+              <Badge tone="warning">
+                <AlertTriangle className="mr-1 size-3" /> dangerous
+              </Badge>
+            )}
+          </div>
+          {description && (
+            <div className="mt-0.5 text-xs text-fg-muted">{description}</div>
+          )}
+        </div>
+        {status === "running" ? (
+          <Button onClick={stop} variant="destructive" size="sm">
+            <Square className="mr-1 size-4" /> Stop
+          </Button>
+        ) : (
+          <Button onClick={start} size="sm">
+            <Play className="mr-1 size-4" /> {status === "done" || status === "error" ? "Run again" : "Run"}
+          </Button>
+        )}
+      </div>
+
+      {/* ── args input ──
+         Promoted to a high-contrast, taller textarea with a live preview of
+         the full argv so the operator sees exactly what will execute.       */}
+      <div className="flex flex-col gap-2">
+        <div className="flex items-baseline justify-between">
+          <label
+            htmlFor={`op-args-${command}`}
+            className="text-xs font-semibold uppercase tracking-wider text-fg"
+          >
+            Arguments
+          </label>
+          <span className="text-xs text-fg-muted">
+            Press <kbd className="rounded border border-border bg-bg-subtle px-1 py-px font-mono text-[10px]">⏎</kbd> to run
+          </span>
+        </div>
+        <div
+          className={cn(
+            "flex items-start gap-2 rounded-md border-2 bg-bg-subtle px-3 py-3 transition-colors",
+            "focus-within:border-accent",
+            status === "running"
+              ? "border-border opacity-60"
+              : "border-border hover:border-fg-muted",
+          )}
+        >
+          <span className="select-none font-mono text-sm text-fg-muted">
+            $&nbsp;manage.py {command}
+          </span>
+          <textarea
+            id={`op-args-${command}`}
+            value={args}
+            onChange={(e) => setArgs(e.target.value)}
+            disabled={status === "running"}
+            spellCheck={false}
+            placeholder="--option value …"
+            rows={1}
+            className="min-h-[1.5rem] w-full resize-none bg-transparent font-mono text-base leading-6 text-fg outline-none placeholder:text-fg-subtle disabled:cursor-not-allowed"
+            onKeyDown={(e) => {
+              // Enter runs; Shift+Enter inserts a newline (for very long arg lines).
+              if (e.key === "Enter" && !e.shiftKey && status !== "running") {
+                e.preventDefault();
+                start();
+              }
+            }}
+            onInput={(e) => {
+              // Grow with content (up to ~6 lines).
+              const ta = e.currentTarget;
+              ta.style.height = "auto";
+              ta.style.height = Math.min(ta.scrollHeight, 144) + "px";
+            }}
+          />
+        </div>
+        {!hideHelp && (
+          <>
+            <button
+              type="button"
+              onClick={() => setHelpOpen((v) => !v)}
+              className="flex items-center gap-1 self-start text-xs text-fg-muted hover:text-fg"
+            >
+              {helpOpen ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
+              --help
+            </button>
+            {helpOpen && helpQ.data && (
+              <pre className="max-h-48 overflow-auto rounded-md bg-bg-subtle p-3 font-mono text-xs leading-relaxed text-fg-muted">
+                {helpQ.data.help}
+              </pre>
+            )}
+          </>
+        )}
+      </div>
+
+      {/* ── log panel ── */}
+      <div
+        className={cn(
+          "flex-1 overflow-y-auto rounded-md border border-border bg-bg-subtle font-mono text-xs leading-relaxed",
+          lines.length === 0 && "flex items-center justify-center",
+        )}
+      >
+        {lines.length === 0 ? (
+          <div className="text-fg-subtle">Run output will appear here.</div>
+        ) : (
+          <div className="p-3">
+            {lines.map((l, i) => (
+              <div
+                key={i}
+                className={cn(
+                  "whitespace-pre-wrap break-all",
+                  l.kind === "error" && "text-red-400",
+                  l.kind === "info" && "text-fg-muted",
+                  l.kind === "done" && (status === "error" ? "text-red-400" : "text-emerald-500"),
+                )}
+              >
+                {l.text}
+              </div>
+            ))}
+            <div ref={logEnd} />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

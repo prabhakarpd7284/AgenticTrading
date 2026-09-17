@@ -1,0 +1,287 @@
+//@version=5
+// ════════════════════════════════════════════════════════════════════════
+//  Oliver Kell's Cycle of Price Action — v2 (robust, timeframe-tiered)
+//
+//  Lockstep companion to backend/plugins/strategy_swing/v2 (engine.py /
+//  factors.py / config.py). Same math, same factor weights, same grades —
+//  so the chart and the AlphaDesk scanner agree bar-for-bar.
+//
+//  What changed vs the v1 indicator:
+//    • Regime is a HARD GATE (primary + HTF EMA stack AND slope). Longs need
+//      an up-regime, shorts a down-regime. No more wrong-way signals.
+//    • Extension is ATR-normalised (distance from EMA10 in ATR units), not a
+//      scale-dependent stdev band.
+//    • A real multi-bar CONTRACTION base is required for pop/breakout phases.
+//    • Signals fire only on the TRIGGER bar (fixes the wall-of-labels bug —
+//      v1 plotted an HTF label on every single bar).
+//    • Exhaustion in an uptrend = TRIM/trail (yellow), never an auto-short.
+//    • Momentum (RSI regime + EMA3×WMA21 + ROC) and Relative Strength vs
+//      NIFTY are scored, not ignored.
+//    • Each entry draws entry / structural stop / measured target, and the
+//      table shows the 8-factor scorecard + composite grade (A/B/C).
+//    • Confirmed-bar-close only — no intrabar repaint on alerts.
+//
+//  Tier = just set the chart timeframe:
+//    15m → small swing · 45m/1h → medium · 1D → long. Set HTF to match.
+// ════════════════════════════════════════════════════════════════════════
+indicator("OK Cycles v2", shorttitle="OKv2", overlay=true, max_labels_count=500, max_lines_count=500, max_boxes_count=200)
+
+// ───────────────────────── Inputs ──────────────────────────
+grp_e = "EMAs / ATR"
+ema_fast_len = input.int(10, "EMA Fast", minval=1, group=grp_e)
+ema_mid_len  = input.int(20, "EMA Mid",  minval=1, group=grp_e)
+ema_slow_len = input.int(50, "EMA Slow", minval=1, group=grp_e)
+atr_len      = input.int(14, "ATR Length", minval=1, group=grp_e)
+
+grp_x = "Extension (ATR units)"
+ext_chase = input.float(4.0, "Chase / Exhaustion (ATRs from EMA)", step=0.1, group=grp_x)
+ext_ideal = input.float(1.5, "Ideal entry distance (ATRs)", step=0.1, group=grp_x)
+
+grp_b = "Base / Volume / Time"
+base_window  = input.int(12, "Base window (bars)", minval=4, group=grp_b)
+base_min     = input.int(4,  "Min base bars", minval=1, group=grp_b)
+contraction_ratio = input.float(0.6, "Contraction ratio (recent/earlier range)", step=0.05, group=grp_b)
+pivot_lb     = input.int(5,  "Swing pivot lookback", minval=2, group=grp_b)
+vol_med_len  = input.int(20, "Volume median length", minval=2, group=grp_b)
+vol_breakout = input.float(1.4, "Breakout volume ×median", step=0.1, group=grp_b)
+fresh_max    = input.int(6,  "Freshness window (bars)", minval=1, group=grp_b)
+
+grp_m = "Momentum / RS"
+rsi_len   = input.int(14, "RSI Length", group=grp_m)
+rsi_ema_l = input.int(3,  "RSI EMA", group=grp_m)
+rsi_wma_l = input.int(21, "RSI WMA", group=grp_m)
+roc_len   = input.int(10, "ROC Length", group=grp_m)
+rs_len    = input.int(20, "RS slope lookback", group=grp_m)
+bench_sym = input.symbol("NSE:NIFTY", "RS Benchmark", group=grp_m)
+
+grp_r = "Risk / Money"
+sl_atr_mult = input.float(1.8, "Stop = ATR ×", step=0.1, group=grp_r)
+sl_buffer   = input.float(0.3, "Pivot stop buffer %", step=0.1, group=grp_r) / 100.0
+rr_target   = input.float(2.5, "Target R-multiple", step=0.1, group=grp_r)
+
+grp_htf = "Higher Timeframe"
+htf_tf = input.timeframe("D", "HTF for regime gate", group=grp_htf)
+
+grp_w = "Factor weights (sum≈1)"
+w_regime = input.float(0.20, "Regime", step=0.01, group=grp_w)
+w_mom    = input.float(0.15, "Momentum", step=0.01, group=grp_w)
+w_rs     = input.float(0.15, "Rel.Strength", step=0.01, group=grp_w)
+w_ext    = input.float(0.10, "Extension", step=0.01, group=grp_w)
+w_base   = input.float(0.15, "Base", step=0.01, group=grp_w)
+w_vol    = input.float(0.10, "Volume", step=0.01, group=grp_w)
+w_fresh  = input.float(0.05, "Freshness", step=0.01, group=grp_w)
+w_risk   = input.float(0.10, "Risk geom", step=0.01, group=grp_w)
+
+grp_v = "Display"
+show_signals = input.bool(true, "Show signals", group=grp_v)
+show_levels  = input.bool(true, "Draw entry/stop/target", group=grp_v)
+show_table   = input.bool(true, "Show scorecard", group=grp_v)
+grade_a = input.float(0.75, "Grade A ≥", step=0.01, group=grp_v)
+grade_b = input.float(0.60, "Grade B ≥", step=0.01, group=grp_v)
+grade_c = input.float(0.45, "Grade C ≥", step=0.01, group=grp_v)
+
+// ───────────────────────── Helpers ─────────────────────────
+clamp01(x) => na(x) ? 0.0 : math.max(0.0, math.min(1.0, x))
+tanh01(x, s) => s == 0 ? 0.5 : 0.5 * (1 + (math.exp(2*x/s) - 1) / (math.exp(2*x/s) + 1))
+
+// ───────────────────────── Core series ─────────────────────
+ema_f = ta.ema(close, ema_fast_len)
+ema_m = ta.ema(close, ema_mid_len)
+ema_s = ta.ema(close, ema_slow_len)
+atr   = ta.atr(atr_len)
+ext_atr = atr > 0 ? (close - ema_f) / atr : 0.0
+ema_s_slope = ema_s[5] != 0 ? (ema_s - ema_s[5]) / ema_s[5] * 100 : 0.0
+
+rsi      = ta.rsi(close, rsi_len)
+rsi_ema3 = ta.ema(rsi, rsi_ema_l)
+rsi_wma21= ta.wma(rsi, rsi_wma_l)
+roc      = ta.roc(close, roc_len)
+
+vol_med   = ta.median(volume, vol_med_len)
+vol_ratio = vol_med > 0 ? volume / vol_med : 0.0
+
+swing_hi = ta.highest(high, pivot_lb)[1]
+swing_lo = ta.lowest(low, pivot_lb)[1]
+above = close > ema_f and close > ema_m
+below = close < ema_f and close < ema_m
+
+// ───────────────────────── Regime (primary + HTF) ──────────
+regime(ef, em, es, slope) =>
+    ef > em and em > es and slope >= -0.02 ? "bullish" :
+      ef < em and em < es and slope <= 0.02 ? "bearish" : "neutral"
+
+reg_p = regime(ema_f, ema_m, ema_s, ema_s_slope)
+
+[h_f, h_m, h_s, h_slope] = request.security(syminfo.tickerid, htf_tf, [ta.ema(close, ema_fast_len), ta.ema(close, ema_mid_len), ta.ema(close, ema_slow_len), (ta.ema(close, ema_slow_len) - ta.ema(close, ema_slow_len)[5]) / ta.ema(close, ema_slow_len)[5] * 100], lookahead=barmerge.lookahead_off)
+reg_h = regime(h_f, h_m, h_s, h_slope)
+aligned = reg_p == reg_h and reg_p != "neutral"
+
+// ───────────────────────── Relative strength ───────────────
+bench_close = request.security(bench_sym, timeframe.period, close, lookahead=barmerge.lookahead_off)
+rs_line = bench_close != 0 ? close / bench_close : na
+rs_slope = not na(rs_line) and not na(rs_line[rs_len]) and rs_line[rs_len] != 0 ? (rs_line / rs_line[rs_len] - 1) * 100 : 0.0
+
+// ───────────────────────── Base / contraction ──────────────
+recent_hi = ta.highest(high, base_window)[1]
+recent_lo = ta.lowest(low, base_window)[1]
+earlier_hi = ta.highest(high, base_window)[1 + base_window]
+earlier_lo = ta.lowest(low, base_window)[1 + base_window]
+recent_range = recent_hi - recent_lo
+earlier_range = earlier_hi - earlier_lo
+contraction = earlier_range > 0 ? recent_range / earlier_range : 1.0
+tr = ta.tr
+earlier_tr_thresh = ta.sma(tr, base_window)[1 + base_window]
+base_len = 0
+for k = 1 to base_window
+    base_len += (not na(earlier_tr_thresh) and tr[k] <= earlier_tr_thresh) ? 1 : 0
+has_base = base_len >= base_min and contraction <= contraction_ratio
+expansion = vol_ratio >= vol_breakout * 0.85
+in_zone = close >= math.min(ema_f, ema_m) and close <= math.max(ema_f, ema_m)
+
+// ───────────────────────── Phase detection (priority order) ─
+// 0 NONE, 1 RE, 2 WP, 3 EC, 4 BB, 5 EX, 6 WD, 7 ECB, 8 BBB
+ph = 0
+ph := ext_atr >= ext_chase and above ? 5 : ext_atr <= -ext_chase and below ? 1 : ph
+ph := ph == 0 and not na(swing_hi) and close > swing_hi and has_base and expansion and close > ema_m ? 4 : ph
+ph := ph == 0 and above and not above[1] and has_base and expansion ? 2 : ph
+ph := ph == 0 and in_zone and ema_s > 0 and close > ema_s and ema_s_slope >= 0 and close > close[1] and close[1] <= close[2] ? 3 : ph
+ph := ph == 0 and not na(swing_lo) and close < swing_lo and has_base and expansion and close < ema_m ? 8 : ph
+ph := ph == 0 and below and not below[1] and has_base and expansion ? 6 : ph
+ph := ph == 0 and in_zone and ema_s > 0 and close < ema_s and ema_s_slope <= 0 and close < close[1] and close[1] >= close[2] ? 7 : ph
+
+phase_code = ph == 1 ? "RE" : ph == 2 ? "WP" : ph == 3 ? "EC" : ph == 4 ? "BB" : ph == 5 ? "EX" : ph == 6 ? "WD" : ph == 7 ? "ECB" : ph == 8 ? "BBB" : "—"
+is_long_entry  = ph == 2 or ph == 3 or ph == 4
+is_short_entry = ph == 6 or ph == 7 or ph == 8
+dir = is_long_entry or ph == 1 or ph == 5 ? "long" : is_short_entry ? "short" : ""
+
+// Action with the regime gate
+action = "—"
+action := is_long_entry  ? ((reg_p == "bearish" or reg_h == "bearish") ? "AVOID" : (reg_p=="bullish" and reg_h=="bullish" and ph==4 ? "ADD" : "BUY")) : action
+action := is_short_entry ? ((reg_p == "bullish" or reg_h == "bullish") ? "AVOID" : "SHORT") : action
+action := ph == 5 ? "TRIM" : ph == 1 ? "WATCH" : action
+
+// Freshness: bars since this phase first triggered (transition-based)
+var int last_trig_bar = na
+trig = ph != 0 and ph != ph[1]
+if trig
+    last_trig_bar := bar_index
+bars_since = na(last_trig_bar) ? fresh_max : bar_index - last_trig_bar
+
+// ───────────────────────── Factor scorecard ────────────────
+want_bull = dir == "long"
+f_regime = (want_bull ? (reg_p=="bullish" and reg_h=="bullish" ? 1.0 : reg_p=="bullish" and reg_h=="neutral" ? 0.65 : reg_p=="neutral" and reg_h=="bullish" ? 0.5 : reg_p=="bullish" and reg_h=="bearish" ? 0.2 : reg_p=="neutral" and reg_h=="neutral" ? 0.25 : 0.0) : (reg_p=="bearish" and reg_h=="bearish" ? 1.0 : reg_p=="bearish" and reg_h=="neutral" ? 0.65 : reg_p=="neutral" and reg_h=="bearish" ? 0.5 : reg_p=="bearish" and reg_h=="bullish" ? 0.2 : reg_p=="neutral" and reg_h=="neutral" ? 0.25 : 0.0))
+
+mom_regime = want_bull ? clamp01((rsi-45)/35) : clamp01((55-rsi)/35)
+mom_cross  = want_bull ? clamp01(0.5 + (rsi_ema3-rsi_wma21)/20) : clamp01(0.5 + (rsi_wma21-rsi_ema3)/20)
+mom_roc    = want_bull ? tanh01(roc, 6.0) : tanh01(-roc, 6.0)
+f_mom = clamp01(0.4*mom_regime + 0.35*mom_cross + 0.25*mom_roc)
+
+f_rs = tanh01(want_bull ? rs_slope : -rs_slope, 4.0)
+
+d_ext = want_bull ? ext_atr : -ext_atr
+f_ext = d_ext < -ext_chase ? 0.1 : d_ext <= ext_ideal ? clamp01(0.85 + 0.15*(1 - math.abs(d_ext)/math.max(ext_ideal,1e-9))) : clamp01(0.85*(1 - (d_ext-ext_ideal)/math.max(ext_chase-ext_ideal,1e-9)))
+
+f_base = base_len < base_min ? clamp01(0.2*base_len/math.max(base_min,1)) : clamp01(0.6*clamp01((1.0-contraction)/math.max(1.0-contraction_ratio,1e-9)) + 0.4*clamp01(base_len/(3.0*base_min)))
+
+needs_exp = ph==2 or ph==4 or ph==6 or ph==8
+f_vol = needs_exp ? clamp01((vol_ratio-1.0)/math.max(vol_breakout-1.0,1e-9)) : clamp01(0.6*clamp01((1.0-math.min(1.0,vol_ratio))/0.15) + 0.4*clamp01(1.0 - math.max(0.0,vol_ratio-1.2)))
+
+f_fresh = bars_since <= 0 ? 1.0 : bars_since >= fresh_max ? 0.0 : clamp01(1.0 - bars_since/fresh_max)
+
+// Money model (entries only)
+struct_long  = math.min(ema_m, na(swing_lo) ? ema_m : swing_lo) * (1 - sl_buffer)
+struct_short = math.max(ema_m, na(swing_hi) ? ema_m : swing_hi) * (1 + sl_buffer)
+stop_l = math.max(struct_long, close - atr*sl_atr_mult)
+stop_l := stop_l >= close ? close - atr*sl_atr_mult : stop_l
+stop_s = math.min(struct_short, close + atr*sl_atr_mult)
+stop_s := stop_s <= close ? close + atr*sl_atr_mult : stop_s
+base_height = recent_hi - recent_lo
+risk_l = math.max(close - stop_l, 1e-6)
+risk_s = math.max(stop_s - close, 1e-6)
+tgt_l = math.max(close + base_height, close + risk_l*1.5)
+tgt_s = math.min(close - base_height, close - risk_s*1.5)
+entry = close
+stop  = want_bull ? stop_l : stop_s
+target= want_bull ? tgt_l  : tgt_s
+risk_ps = want_bull ? risk_l : risk_s
+risk_pct = close > 0 ? risk_ps/close : 0.0
+rr = risk_ps > 0 ? math.abs(target-close)/risk_ps : 0.0
+
+f_risk = clamp01(0.5*clamp01((0.08-risk_pct)/0.06) + 0.5*clamp01(rr/math.max(rr_target,1e-9)))
+
+wsum = w_regime+w_mom+w_rs+w_ext+w_base+w_vol+w_fresh+w_risk
+score = wsum > 0 ? (f_regime*w_regime + f_mom*w_mom + f_rs*w_rs + f_ext*w_ext + f_base*w_base + f_vol*w_vol + f_fresh*w_fresh + f_risk*w_risk)/wsum : 0.0
+grade = score >= grade_a ? "A" : score >= grade_b ? "B" : score >= grade_c ? "C" : "—"
+is_entry = (action == "BUY" or action == "ADD" or action == "SHORT")
+actionable = is_entry and grade != "—"
+
+// ───────────────────────── Plotting ────────────────────────
+plot(ema_f, "EMA Fast", color.new(color.blue, 0), 2)
+plot(ema_m, "EMA Mid",  color.new(color.orange, 0), 2)
+plot(ema_s, "EMA Slow", color.new(color.gray, 0), 1)
+
+up_band = ema_f + atr*ext_chase
+dn_band = ema_f - atr*ext_chase
+plot(up_band, "Exhaustion band", color.new(color.red, 80))
+plot(dn_band, "Washout band", color.new(color.green, 80))
+
+bgcolor(reg_p=="bullish" ? color.new(color.green, 95) : reg_p=="bearish" ? color.new(color.red, 95) : na, title="Regime")
+
+// Signals — ONLY on the trigger bar (this is the v1 bug fix)
+buy_sig   = show_signals and trig and (action=="BUY" or action=="ADD") and actionable
+short_sig = show_signals and trig and action=="SHORT" and actionable
+trim_sig  = show_signals and trig and action=="TRIM"
+watch_sig = show_signals and trig and action=="WATCH"
+plotshape(buy_sig,   title="BUY",   location=location.belowbar, style=shape.triangleup,   color=color.new(color.green,0),  size=size.small, text="BUY")
+plotshape(short_sig, title="SHORT", location=location.abovebar, style=shape.triangledown, color=color.new(color.red,0),    size=size.small, text="SHORT")
+plotshape(trim_sig,  title="TRIM",  location=location.abovebar, style=shape.xcross,       color=color.new(color.yellow,0), size=size.tiny,  text="TRIM")
+plotshape(watch_sig, title="WATCH", location=location.belowbar, style=shape.circle,       color=color.new(color.gray,0),   size=size.tiny,  text="?")
+
+// Entry / Stop / Target lines on a fresh entry
+if show_levels and (buy_sig or short_sig) and barstate.isconfirmed
+    line.new(bar_index, entry,  bar_index+8, entry,  color=color.blue,  width=2)
+    line.new(bar_index, stop,   bar_index+8, stop,   color=color.red,   width=1, style=line.style_dashed)
+    line.new(bar_index, target, bar_index+8, target, color=color.green, width=1, style=line.style_dashed)
+    label.new(bar_index+8, target, str.tostring(grade)+"  R:R "+str.tostring(rr, "#.##"), style=label.style_label_left, color=color.new(color.black,80), textcolor=color.white, size=size.small)
+
+// ───────────────────────── Scorecard table ─────────────────
+gcol = grade=="A" ? color.green : grade=="B" ? color.teal : grade=="C" ? color.orange : color.gray
+acol = action=="BUY" or action=="ADD" ? color.green : action=="SHORT" ? color.red : action=="TRIM" ? color.yellow : color.gray
+f_cell(t, v) =>
+    [t, str.tostring(v, "#.##"), color.new(v >= 0.66 ? color.green : v >= 0.4 ? color.orange : color.red, 30)]
+
+var table tb = table.new(position.top_right, 2, 14, frame_color=color.gray, frame_width=1, border_width=1)
+if barstate.islast and show_table
+    table.cell(tb, 0, 0, "OK v2 · "+timeframe.period, text_color=color.white, bgcolor=color.black, text_size=size.small)
+    table.cell(tb, 1, 0, phase_code+" "+action, text_color=color.white, bgcolor=acol, text_size=size.small)
+    table.cell(tb, 0, 1, "Grade / Score", text_color=color.black, text_size=size.tiny)
+    table.cell(tb, 1, 1, grade+"  "+str.tostring(score, "#.##"), text_color=color.white, bgcolor=gcol, text_size=size.tiny)
+    table.cell(tb, 0, 2, "Regime P/H", text_color=color.black, text_size=size.tiny)
+    table.cell(tb, 1, 2, reg_p+" / "+reg_h+(aligned?" ✓":""), text_color=color.black, text_size=size.tiny)
+    [t3,v3,c3] = f_cell("Regime", f_regime)
+    table.cell(tb, 0, 3, t3, text_color=color.black, text_size=size.tiny), table.cell(tb, 1, 3, v3, text_color=color.white, bgcolor=c3, text_size=size.tiny)
+    [t4,v4,c4] = f_cell("Momentum", f_mom)
+    table.cell(tb, 0, 4, t4, text_color=color.black, text_size=size.tiny), table.cell(tb, 1, 4, v4, text_color=color.white, bgcolor=c4, text_size=size.tiny)
+    [t5,v5,c5] = f_cell("Rel.Strength", f_rs)
+    table.cell(tb, 0, 5, t5, text_color=color.black, text_size=size.tiny), table.cell(tb, 1, 5, v5, text_color=color.white, bgcolor=c5, text_size=size.tiny)
+    [t6,v6,c6] = f_cell("Extension", f_ext)
+    table.cell(tb, 0, 6, t6, text_color=color.black, text_size=size.tiny), table.cell(tb, 1, 6, v6, text_color=color.white, bgcolor=c6, text_size=size.tiny)
+    [t7,v7,c7] = f_cell("Base", f_base)
+    table.cell(tb, 0, 7, t7, text_color=color.black, text_size=size.tiny), table.cell(tb, 1, 7, v7, text_color=color.white, bgcolor=c7, text_size=size.tiny)
+    [t8,v8,c8] = f_cell("Volume", f_vol)
+    table.cell(tb, 0, 8, t8, text_color=color.black, text_size=size.tiny), table.cell(tb, 1, 8, v8, text_color=color.white, bgcolor=c8, text_size=size.tiny)
+    [t9,v9,c9] = f_cell("Freshness", f_fresh)
+    table.cell(tb, 0, 9, t9, text_color=color.black, text_size=size.tiny), table.cell(tb, 1, 9, v9, text_color=color.white, bgcolor=c9, text_size=size.tiny)
+    [t10,v10,c10] = f_cell("Risk geom", f_risk)
+    table.cell(tb, 0, 10, t10, text_color=color.black, text_size=size.tiny), table.cell(tb, 1, 10, v10, text_color=color.white, bgcolor=c10, text_size=size.tiny)
+    table.cell(tb, 0, 11, "Entry / Stop", text_color=color.black, text_size=size.tiny)
+    table.cell(tb, 1, 11, str.tostring(entry, "#.##")+" / "+str.tostring(stop, "#.##"), text_color=color.black, text_size=size.tiny)
+    table.cell(tb, 0, 12, "Target / R:R", text_color=color.black, text_size=size.tiny)
+    table.cell(tb, 1, 12, str.tostring(target, "#.##")+" / "+str.tostring(rr, "#.##"), text_color=color.black, text_size=size.tiny)
+    table.cell(tb, 0, 13, "Base len / ext", text_color=color.black, text_size=size.tiny)
+    table.cell(tb, 1, 13, str.tostring(base_len)+" / "+str.tostring(ext_atr, "#.##")+"atr", text_color=color.black, text_size=size.tiny)
+
+// ───────────────────────── Alerts (confirmed only) ─────────
+alertcondition(buy_sig,   title="OKv2 BUY",   message="{{ticker}} OKv2 BUY {{interval}} — graded entry, see table")
+alertcondition(short_sig, title="OKv2 SHORT", message="{{ticker}} OKv2 SHORT {{interval}} — graded entry")
+alertcondition(trim_sig,  title="OKv2 TRIM",  message="{{ticker}} OKv2 exhaustion — trim/trail")

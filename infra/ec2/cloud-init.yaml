@@ -1,0 +1,44 @@
+#cloud-config
+# Stage-1 bootstrap — installs Docker + compose on a fresh Ubuntu 22.04 AMI.
+# After apply, `ubuntu@ec2` can `git pull && docker compose up -d`.
+
+package_update: true
+package_upgrade: true
+
+packages:
+  - ca-certificates
+  - curl
+  - gnupg
+  - git
+  - unzip
+
+runcmd:
+  - install -m 0755 -d /etc/apt/keyrings
+  - curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+  - chmod a+r /etc/apt/keyrings/docker.gpg
+  - |
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" \
+      > /etc/apt/sources.list.d/docker.list
+  - apt-get update
+  - apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+  - usermod -aG docker ubuntu
+  - mkdir -p /opt/alphadesk
+  - chown -R ubuntu:ubuntu /opt/alphadesk
+
+write_files:
+  - path: /etc/systemd/system/alphadesk.service
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=AlphaDesk docker-compose stack
+      After=docker.service network-online.target
+      Requires=docker.service
+      [Service]
+      Type=oneshot
+      RemainAfterExit=yes
+      WorkingDirectory=/opt/alphadesk
+      EnvironmentFile=/opt/alphadesk/.env
+      ExecStart=/usr/bin/docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+      ExecStop=/usr/bin/docker compose down
+      [Install]
+      WantedBy=multi-user.target

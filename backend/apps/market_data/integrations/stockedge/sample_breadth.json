@@ -1,0 +1,115 @@
+{
+  "dataset": "market_breadth",
+  "as_of_date": "2026-06-25",
+  "exchange": "NSE",
+  "unit": "percent",
+  "source_url": "https://web.stockedge.com/market-breadth",
+  "columns": [
+    "rs_pos",
+    "sma20",
+    "sma50",
+    "sma100",
+    "sma200"
+  ],
+  "rows": [
+    {
+      "index_name": "Nifty 50",
+      "constituent_count": 50,
+      "rs_pos": 54,
+      "sma20": 64,
+      "sma50": 50,
+      "sma100": 46,
+      "sma200": 50
+    },
+    {
+      "index_name": "Nifty 500",
+      "constituent_count": 500,
+      "rs_pos": 67,
+      "sma20": 66,
+      "sma50": 60,
+      "sma100": 65,
+      "sma200": 51
+    },
+    {
+      "index_name": "Nifty Bank",
+      "constituent_count": 14,
+      "rs_pos": 64,
+      "sma20": 93,
+      "sma50": 93,
+      "sma100": 64,
+      "sma200": 79
+    },
+    {
+      "index_name": "Nifty Financial Services",
+      "constituent_count": 20,
+      "rs_pos": 65,
+      "sma20": 80,
+      "sma50": 50,
+      "sma100": 50,
+      "sma200": 55
+    },
+    {
+      "index_name": "Nifty Midcap Select",
+      "constituent_count": 25,
+      "rs_pos": 72,
+      "sma20": 64,
+      "sma50": 68,
+      "sma100": 72,
+      "sma200": 48
+    },
+    {
+      "index_name": "Nifty Next 50",
+      "constituent_count": 50,
+      "rs_pos": 70,
+      "sma20": 70,
+      "sma50": 64,
+      "sma100": 68,
+      "sma200": 50
+    },
+    {
+      "index_name": "Nifty 100",
+      "constituent_count": 100,
+      "rs_pos": 62,
+      "sma20": 67,
+      "sma50": 57,
+      "sma100": 57,
+      "sma200": 50
+    },
+    {
+      "index_name": "Nifty 200",
+      "constituent_count": 200,
+      "rs_pos": 63,
+      "sma20": 62,
+      "sma50": 56,
+      "sma100": 58,
+      "sma200": 48
+    },
+    {
+      "index_name": "Nifty Midcap 150",
+      "constituent_count": 150,
+      "rs_pos": 63,
+      "sma20": 61,
+      "sma50": 57,
+      "sma100": 60,
+      "sma200": 47
+    },
+    {
+      "index_name": "Nifty Smallcap 250",
+      "constituent_count": 250,
+      "rs_pos": 72,
+      "sma20": 68,
+      "sma50": 63,
+      "sma100": 72,
+      "sma200": 53
+    },
+    {
+      "index_name": "Nifty Microcap 250",
+      "constituent_count": 250,
+      "rs_pos": 74,
+      "sma20": 61,
+      "sma50": 62,
+      "sma100": 71,
+      "sma200": 50
+    }
+  ]
+}

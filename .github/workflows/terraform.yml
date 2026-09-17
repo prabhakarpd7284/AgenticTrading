@@ -1,0 +1,110 @@
+name: terraform
+
+on:
+  pull_request:
+    paths:
+      - "infra/terraform/**"
+      - ".github/workflows/terraform.yml"
+  push:
+    branches: [main]
+    paths:
+      - "infra/terraform/**"
+      - ".github/workflows/terraform.yml"
+  workflow_dispatch:
+    inputs:
+      env:
+        description: "Environment to apply (dev|prod)"
+        required: true
+        default: "dev"
+
+permissions:
+  contents: read
+  id-token: write
+  pull-requests: write
+
+env:
+  AWS_REGION: ap-south-1
+  TF_VERSION: 1.7.5
+
+jobs:
+
+  # ---------- plan on every PR, both envs ----------
+  plan:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix: { env: [dev, prod] }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_TF_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: fmt
+        working-directory: infra/terraform
+        run: terraform fmt -check -recursive
+
+      - name: init
+        working-directory: infra/terraform/envs/${{ matrix.env }}
+        run: terraform init -backend-config=backend.hcl
+
+      - name: validate
+        working-directory: infra/terraform/envs/${{ matrix.env }}
+        run: terraform validate
+
+      - name: plan
+        working-directory: infra/terraform/envs/${{ matrix.env }}
+        env:
+          TF_VAR_db_password: ${{ secrets.TF_DB_PASSWORD }}
+        run: |
+          terraform plan -no-color -input=false \
+            -var-file=${{ matrix.env }}.tfvars \
+            -out=tfplan | tee plan.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tfplan-${{ matrix.env }}
+          path: infra/terraform/envs/${{ matrix.env }}/tfplan
+
+      - name: Comment plan on PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const body = `### terraform plan — ${{ matrix.env }}\n\n\`\`\`\n` +
+              fs.readFileSync('infra/terraform/envs/${{ matrix.env }}/plan.txt', 'utf8').slice(0, 50000) +
+              `\n\`\`\``;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner, repo: context.repo.repo,
+              issue_number: context.issue.number, body
+            });
+
+  # ---------- apply on manual dispatch only (never auto-apply prod) ----------
+  apply:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    environment:
+      name: terraform-${{ inputs.env }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_TF_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: init
+        working-directory: infra/terraform/envs/${{ inputs.env }}
+        run: terraform init -backend-config=backend.hcl
+
+      - name: apply
+        working-directory: infra/terraform/envs/${{ inputs.env }}
+        env:
+          TF_VAR_db_password: ${{ secrets.TF_DB_PASSWORD }}
+        run: terraform apply -auto-approve -input=false -var-file=${{ inputs.env }}.tfvars

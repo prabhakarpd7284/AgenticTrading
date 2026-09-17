@@ -1,0 +1,77 @@
+version: "3.9"
+
+# Stage-1 production overlay — sourced on top of docker-compose.yml on the EC2 host.
+# Differences vs. dev:
+#   - Images pulled from ECR instead of built locally
+#   - Secrets read from an .env file created by the deploy step (never committed)
+#   - Backend runs gunicorn (REST) + daphne (WS) in separate containers
+
+services:
+  postgres:
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER:     ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB:       ${POSTGRES_DB}
+    ports: []   # not exposed publicly
+
+  redis:
+    restart: unless-stopped
+    ports: []
+
+  backend:
+    image: ${BACKEND_IMAGE}
+    build: !reset null
+    restart: unless-stopped
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.prod
+      DATABASE_URL:        ${DATABASE_URL}
+      REDIS_URL:           ${REDIS_URL}
+      CELERY_BROKER_URL:   ${REDIS_URL}
+      CELERY_RESULT_BACKEND: ${REDIS_URL}
+      DJANGO_SECRET_KEY:   ${DJANGO_SECRET_KEY}
+      ANTHROPIC_API_KEY:   ${ANTHROPIC_API_KEY}
+      ALLOWED_HOSTS:       ${ALLOWED_HOSTS}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS}
+      DEBUG: "0"
+    command: >
+      sh -c "python manage.py migrate --noinput &&
+             gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 3 --timeout 60"
+    volumes: []
+
+  ws:
+    image: ${BACKEND_IMAGE}
+    restart: unless-stopped
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.prod
+      DATABASE_URL:        ${DATABASE_URL}
+      REDIS_URL:           ${REDIS_URL}
+      DJANGO_SECRET_KEY:   ${DJANGO_SECRET_KEY}
+      ALLOWED_HOSTS:       ${ALLOWED_HOSTS}
+    command: ["daphne", "-b", "0.0.0.0", "-p", "8000", "config.asgi:application"]
+    depends_on: [backend]
+    expose: ["8000"]
+
+  worker:
+    image: ${WORKER_IMAGE}
+    build: !reset null
+    restart: unless-stopped
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.prod
+      DATABASE_URL:      ${DATABASE_URL}
+      REDIS_URL:         ${REDIS_URL}
+      CELERY_BROKER_URL: ${REDIS_URL}
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY}
+    volumes: []
+
+  beat:
+    image: ${WORKER_IMAGE}
+    build: !reset null
+    restart: unless-stopped
+    volumes: []
+
+  frontend:
+    image: ${FRONTEND_IMAGE}
+    build: !reset null
+    restart: unless-stopped
+    ports: ["80:80"]
