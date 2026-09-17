@@ -139,3 +139,113 @@ class Candle(models.Model):
     class Meta:
         unique_together = [("symbol", "interval", "t")]
         indexes = [models.Index(fields=["symbol", "interval", "-t"])]
+
+
+# ---------------------------------------------------------------------------
+# StockEdge advisory overlay (shared reference data — NOT tenant-scoped)
+#
+# StockEdge analytics (market breadth, sector rotation, FII/DII, F&O OI/PCR …)
+# are ingested as an independent research/confirmation overlay. They never
+# reach @RiskGuard or position sizing — purely advisory. Like Symbol/Candle,
+# these are plain non-tenant reference tables shared read-only across tenants
+# (see docs/integrations/STOCKEDGE_INTEGRATION.md §4).
+# ---------------------------------------------------------------------------
+class StockEdgeSnapshot(models.Model):
+    """One captured StockEdge dataset for a given (dataset, as_of_date, exchange).
+
+    Append-only-ish: re-pulls of the same day upsert in place (unique_together)
+    so we keep exactly one canonical row per day/exchange while preserving the
+    full captured payload in ``raw`` for replay/diffing against our own signals.
+    """
+    id = models.BigAutoField(primary_key=True)
+    dataset = models.CharField(max_length=40, db_index=True,
+                               help_text="market_breadth | sector_rotation | fii_dii | fno_oi | …")
+    as_of_date = models.DateField(db_index=True)
+    captured_at = models.DateTimeField(auto_now_add=True,
+                                       help_text="First time this (dataset, day, exchange) was captured")
+    refreshed_at = models.DateTimeField(auto_now=True,
+                                        help_text="Last time this snapshot was re-pulled/updated in place")
+    source_url = models.URLField(max_length=512, blank=True, default="")
+    exchange = models.CharField(max_length=8, default="NSE")
+    raw = models.JSONField(default=dict, help_text="Full captured/normalized payload")
+    meta = models.JSONField(default=dict, blank=True,
+                            help_text="Capture metadata (columns, unit, scan id, etc.)")
+
+    class Meta:
+        ordering = ["-as_of_date"]
+        unique_together = [("dataset", "as_of_date", "exchange")]
+        indexes = [models.Index(fields=["dataset", "-as_of_date"])]
+
+    def __str__(self) -> str:
+        return f"{self.dataset} {self.exchange} @ {self.as_of_date}"
+
+
+class StockEdgeBreadthRow(models.Model):
+    """Flattened market-breadth row — one index universe (Nifty 50 … Microcap 250).
+
+    Values are percentages (0-100): the share of the index's constituents that
+    satisfy each condition (RS positive, price above SMA20/50/100/200).
+    """
+    id = models.BigAutoField(primary_key=True)
+    snapshot = models.ForeignKey(StockEdgeSnapshot, on_delete=models.CASCADE,
+                                 related_name="breadth_rows")
+    index_name = models.CharField(max_length=80)
+    constituent_count = models.IntegerField(null=True, blank=True)
+    rs_pos = models.FloatField(null=True, blank=True, help_text="% constituents with RS > 0")
+    sma20 = models.FloatField(null=True, blank=True, help_text="% constituents above SMA20")
+    sma50 = models.FloatField(null=True, blank=True, help_text="% constituents above SMA50")
+    sma100 = models.FloatField(null=True, blank=True, help_text="% constituents above SMA100")
+    sma200 = models.FloatField(null=True, blank=True, help_text="% constituents above SMA200")
+    as_of_date = models.DateField(db_index=True)
+    exchange = models.CharField(max_length=8, default="NSE")
+
+    class Meta:
+        indexes = [models.Index(fields=["as_of_date", "index_name"])]
+
+    def __str__(self) -> str:
+        return f"{self.index_name} {self.as_of_date} (breadth={self.breadth_score})"
+
+    @property
+    def breadth_score(self) -> float | None:
+        """Mean of the available breadth percentages, ignoring missing values.
+
+        Returns None when no component is present.
+        """
+        vals = [v for v in (self.rs_pos, self.sma20, self.sma50, self.sma100, self.sma200)
+                if v is not None]
+        if not vals:
+            return None
+        return round(sum(vals) / len(vals), 2)
+
+
+class StockEdgeScanRow(models.Model):
+    """One per-stock row from a StockEdge CSV export (scan / strategy / scores).
+
+    Common stock columns are promoted to real fields for querying; everything
+    dataset-specific (momentum scores + zones, strategy match type + criteria
+    flags, …) is preserved in ``attrs`` so a single model serves every
+    stock-list export. Shared, non-tenant reference data.
+    """
+    id = models.BigAutoField(primary_key=True)
+    snapshot = models.ForeignKey(StockEdgeSnapshot, on_delete=models.CASCADE,
+                                 related_name="scan_rows")
+    symbol = models.CharField(max_length=40, db_index=True)
+    name = models.CharField(max_length=160, blank=True, default="")
+    sector = models.CharField(max_length=80, blank=True, default="")
+    industry = models.CharField(max_length=160, blank=True, default="")
+    ltp = models.FloatField(null=True, blank=True)
+    change_pct = models.FloatField(null=True, blank=True)
+    market_cap_cr = models.FloatField(null=True, blank=True, help_text="Market cap in Rs. crore")
+    attrs = models.JSONField(default=dict, blank=True,
+                             help_text="Dataset-specific fields (scores, zones, flags, type, …)")
+    as_of_date = models.DateField(db_index=True)
+    exchange = models.CharField(max_length=8, default="NSE")
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["as_of_date", "symbol"]),
+            models.Index(fields=["snapshot", "symbol"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.symbol} @ {self.as_of_date}"

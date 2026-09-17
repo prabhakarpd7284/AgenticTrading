@@ -86,10 +86,15 @@ class Command(BaseCommand):
         total_errors = 0
         total_pending = 0
 
+        # Swing/multi-day sources are forward-enriched with daily candles by
+        # `enrich_swing_signals`; this intraday (same-day) pass must not touch
+        # them or it would clobber their forward MFE/MAE with ~0 same-day moves.
+        from apps.strategies.services.swing_enrichment import SWING_SOURCES
+
         for tenant in tenants:
             pending_qs = Signal.objects.filter(
                 tenant=tenant, eod_price__isnull=True,
-            )
+            ).exclude(source__in=SWING_SOURCES)
             if not options["all"]:
                 pending_qs = pending_qs.filter(signal_date=target_date)
 

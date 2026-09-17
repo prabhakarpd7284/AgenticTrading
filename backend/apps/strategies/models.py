@@ -49,6 +49,7 @@ class Signal(TenantModel):
         OK_SCANNER  = "OK_SCANNER"
         PREMARKET   = "PREMARKET"
         TRADINGVIEW = "TRADINGVIEW"
+        STOCKEDGE   = "STOCKEDGE"      # StockEdge-derived (e.g. composite momentum)
 
     class Outcome(models.TextChoices):
         PENDING   = "PENDING"
