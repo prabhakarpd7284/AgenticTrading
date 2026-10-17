@@ -60,40 +60,74 @@ New Django app `backend/apps/mutual_funds/`:
 - Migration generated: `apps/mutual_funds/migrations/0001_initial.py`
   (ran successfully once the DB was reachable — see bug fixed below).
 
-**None of this has been migrated into a live DB yet** — that's the immediate
-next step, blocked only on Docker being up (see below).
+## Status update — 2026-10-17 (supersedes the "not yet migrated" notes above)
 
-## Bug already found and fixed this session
+Everything above is now **built, migrated, and committed** on branch
+`abhinav/redesign-v2` (commits `35985cc` code, `4164ad9` docs). On the
+original machine: migrations applied, `pull_amfi_nav` loaded **14,376
+schemes / 14,376 NAV rows** (latest NAV 2026-10-14). 89 tests pass
+(`cd backend && .venv/bin/python -m pytest tests/mutual_funds -q`).
 
-`backend/.env` had `DATABASE_URL` pointing at port **5436** (stale — that
-port now belongs to a different, unrelated "Hopzy" project per the repo's
-own `alphadesk-dev-stack` skill). Fixed to **5444**, which matches
-`docker-compose.dev.yml`'s actual port mapping (`5444:5432`). This fix is
-already applied and saved in `backend/.env`.
+Added since this handoff was first written:
+- `services/amfi_history.py` + `backfill_amfi_history` — per-AMC AMFI
+  history (AMFI cannot filter by scheme; ~15 MB per AMC-year, so pass only
+  held schemes). Verified: 494 rows / 2 years for scheme `148921`.
+- `services/staleness.py` + `check_stale_navs` — flags 5,628 schemes today,
+  mostly matured funds; noisy, restrict to holdings in MF-3.
+- `tasks.py` + two beat entries in `settings/base.py` (23:45 and 07:30 IST).
+  Wired and loading, but not observed firing (needs worker + beat).
+- `services/cas_parser.py`, `cas_import.py`, `import_cas_statement`
+  (MF-2) — via `casparser`; **synthetic fixtures only, never run on a real
+  CAS PDF**.
+- `services/advisor.py` + `run_mf_advisor` (MF-3) — direct-vs-regular
+  (estimate), allocation vs target, category/AMC overlap, SIP continuity.
+  **Never run on real holdings.**
+- `docs/MF4_HOUSEKEEPING_FINDINGS.md` — read-only MF-4 evidence; no
+  decisions made, nothing deleted.
 
-## Immediate next steps, in order
+### Bugs found and fixed loading real AMFI data
+- `MFScheme.option` was `varchar(30)`; AMFI values reach 84 chars → widened
+  to 100 (migration `0002_widen_scheme_option`).
+- The NAV file was decoded via `resp.text` (latin-1 fallback) and mangled
+  non-ASCII category names; now decoded as UTF-8 from `resp.content`.
 
-1. `cd ~/abhinav-codes/AgenticTrading && docker compose -f docker-compose.dev.yml up -d`
-   then `docker compose -f docker-compose.dev.yml ps` — confirm Postgres
-   and Redis both show running/healthy. (This was blocked in the cloud
-   session because its device-bridge shell has no Docker — needs to run
-   from an actual native terminal, which this Claude Code session has.)
-2. `cd backend && .venv/bin/python manage.py migrate`
-3. `.venv/bin/python manage.py pull_amfi_nav` — first real NAV pull, expect
-   on the order of ~16,000 scheme/NAV rows. Report scheme/NAV counts back.
-4. **Read `.claude/skills/alphadesk-dev-stack/SKILL.md` before trusting
-   anything about broker status or market data** — it documents two
-   non-obvious failure modes that look fine but aren't real:
-   - The advertised dev login `admin@local.dev` in README/CLAUDE.md is the
-     **wrong tenant**. The working one is `prabhakarpd7284@gmail.com`.
-   - If no broker link is `status: active` on the *right* tenant, the
-     system silently serves a **synthesized options chain** with nothing
-     louder than a log WARNING — strategies look normal while trading on
-     fake prices.
+### Continuing on a new machine
+1. `git fetch && git checkout abhinav/redesign-v2`
+2. Recreate `backend/.env` (gitignored — it did not travel) from
+   `backend/.env.example`. `DATABASE_URL` must use port **5444**, not the
+   stale 5436 (that range belongs to unrelated Hopzy projects).
+3. `cd backend && uv sync` — `casparser` was added to `pyproject.toml` but
+   `uv.lock` was not regenerated; commit the lock change.
+4. `docker compose -f docker-compose.dev.yml up -d`, confirm Postgres/Redis
+   healthy, then `manage.py migrate` and `manage.py pull_amfi_nav`. The NAV
+   data is in the old machine's Postgres volume, not in git — a fresh
+   machine starts empty.
+5. Tests need `pytest pytest-django pytest-asyncio factory-boy` in the venv
+   (they were missing from the original `.venv` and were installed ad hoc).
 
-## After the NAV pull works: the actual MF module roadmap
+### What is genuinely still open
+1. **A real CAS PDF** (CAMS/KFintech) — the only thing that can verify MF-2
+   and MF-3. First run: `import_cas_statement ... --dry-run`.
+2. **A `trading.Portfolio` for MF holdings** and a tenant choice (the old
+   machine's DB had 2 tenants and none for MF).
+3. **Broker/tenant setup** — see the dev-stack skill and CLAUDE.md MF-0b.
+   Note the old machine's DB did not contain `prabhakarpd7284@gmail.com`
+   or tenant `29e91b00…`, and its only broker link was `paper`, so it was on
+   synthesized prices.
+4. **MF-4 owner decisions** — see the findings doc. Notably: remove the six
+   empty old app dirs?; archive `db.sqlite3`?; investigate the possible
+   v1/v2 `enrich_signals` clash (v1 may mark `swing_v2_*` signals
+   `EXPIRED`); prod Docker images copy only `backend/`, so the legacy
+   `trading/` package is likely missing in prod.
+5. **Advisor event type** — findings currently use `workflow.step.completed`
+   because `Event.Type` has no advisor member; a dedicated type needs an
+   `events` enum change + migration.
+6. Replace the advisor's assumed 0.75% regular-plan drag with real expense
+   ratios when available.
 
-1. **CAS import** (next big piece, not started) — parse a CAMS/KFin
+## Original roadmap notes (kept for design rationale)
+
+1. **CAS import** — parse a CAMS/KFin
    Consolidated Account Statement (the password-protected PDF a user gets,
    PAN+DOB as password) into `MFHolding` + `MFTransaction` rows. This is
    how real holdings get into the system — there's no broker API for MF

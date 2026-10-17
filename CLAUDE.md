@@ -452,41 +452,56 @@ chat persona, anything aimed at a second/paying user, and any SEBI RA/IA or
 AMFI ARN registration work. Don't let scope creep back into any of those
 while working the phases below — they're sequenced on purpose.
 
-If `backend/apps/mutual_funds/` already has `models.py`,
-`services/amfi_nav_collector.py`, and
-`management/commands/pull_amfi_nav.py`, Phase MF-0's build is already done
-— start at "run it" in that phase, not from scratch. Check
-`HANDOFF_MUTUAL_FUNDS.md` at the repo root for the full detail behind each
-item below before starting.
+**Status as of 2026-10-17 (read this first):** MF-0 through MF-3 are
+*built and committed* on branch `abhinav/redesign-v2` (`35985cc`), with 89
+passing tests in `backend/tests/mutual_funds/`. What is **not** done: nothing
+has run against real holdings (no real CAS PDF yet — CAS import and the
+advisor are verified on synthetic fixtures only), the broker/tenant
+setup (MF-0b and MF-0's last item), and the MF-4 owner decisions. Don't
+rebuild anything marked `[x]` below — start from the unticked items. Check
+`HANDOFF_MUTUAL_FUNDS.md` at the repo root for the detail behind each item.
+
+New machine? `backend/.env` is gitignored — recreate it from
+`backend/.env.example` with `DATABASE_URL` on port **5444**, run `uv sync`
+(`casparser` was added, `uv.lock` not yet regenerated), start Docker, then
+`migrate` and `pull_amfi_nav`. The NAV data lives in the local Postgres
+volume, not in git.
 
 ### Phase MF-0 — Get the environment actually running (blocking everything else)
 
-**Confirmed status as of 2026-10-15: Docker is NOT up yet.** The cloud
-session that wrote this plan cannot start Docker itself (no Docker in its
-device-bridge shell — confirmed via `docker: command not found`). This is
-exactly the kind of step a native Claude Code terminal session CAN do
-directly, with real shell access. Don't wait for the owner to run this by
-hand — start Docker yourself as the literal first action of this phase.
+**Status:** DONE on the original dev machine (2026-10-15) except the broker
+item. Run the first four steps again on any fresh machine — a native Claude
+Code session has real shell access, so run `docker compose ... up -d`
+yourself rather than suggesting it.
 
-- [ ] Run `docker compose -f docker-compose.dev.yml up -d` directly (don't
+- [x] Run `docker compose -f docker-compose.dev.yml up -d` directly (don't
       just suggest the command — actually run it)
-- [ ] Run `docker compose -f docker-compose.dev.yml ps`; confirm Postgres
+- [x] Run `docker compose -f docker-compose.dev.yml ps`; confirm Postgres
       `:5444` and Redis `:6380` both show `running`/`healthy`. If a
       container is unhealthy or restarting, check its logs
       (`docker compose -f docker-compose.dev.yml logs <service>`) before
       moving on — don't proceed to migrate against a half-up DB
-- [ ] `cd backend && .venv/bin/python manage.py migrate` — confirm
+- [x] `cd backend && .venv/bin/python manage.py migrate` — confirm
       `mutual_funds_scheme` / `mutual_funds_nav` / `mutual_funds_holding` /
       `mutual_funds_transaction` tables exist
-- [ ] `.venv/bin/python manage.py pull_amfi_nav` — confirm non-zero scheme
-      + NAV row counts (expect ~16k+ rows)
+- [x] `.venv/bin/python manage.py pull_amfi_nav` — confirm non-zero scheme
+      + NAV row counts. Actual: **14,376 schemes / 14,376 NAV rows** (the
+      "~16k+" estimate was high; this is what AMFI serves today). First run
+      exposed two bugs, both fixed: `MFScheme.option` was `varchar(30)` but
+      AMFI values reach 84 chars (now 100, migration `0002`), and the NAV
+      file was decoded as latin-1 instead of UTF-8.
 - [ ] Verify a broker link is `status: active` on the *right* tenant —
       wrong tenant or no active link means the rest of AlphaDesk is
       silently trading on a synthesized price feed (see the dev-stack
-      skill's "Check 2")
+      skill's "Check 2"). **Open:** on the original machine's DB the only
+      users were `istpduckymomo@gmail.com` and `smoke@alphadesk.local`
+      (no `prabhakarpd7284@gmail.com`, no tenant `29e91b00…`), and the only
+      broker link was a `paper` link — so the system was on synthesized
+      prices. Blocked on MF-0b / tenant setup.
 
 **Acceptance:** `pull_amfi_nav` succeeds with real counts; a Django shell
 query (`MFScheme.objects.count()`, `MFNav.objects.count()`) confirms it.
+*Met.* (Field is `MFNav.nav_date`, not `date`.)
 
 ### Phase MF-0b — Connect the real Zerodha account (do this now — account already exists)
 
@@ -545,55 +560,89 @@ action) returns real position/holdings/margin data from the owner's actual
 Zerodha account, not synthesized data.
 
 ### Phase MF-1 — Daily collector hardening
-- [ ] Schedule `pull_amfi_nav` in Celery beat, same pattern as the existing
-      08:20 swing scan / 16:00 EOD enrichment entries
-- [ ] Add a historical backfill path (AMFI serves per-scheme historical
-      NAV via a date-ranged request) so newly added schemes have more than
-      just "today"
-- [ ] Flag schemes with no NAV update in >3 trading days as stale
+**Status:** built and tested (2026-10-17). Beat has not been observed firing.
+- [x] Schedule `pull_amfi_nav` in Celery beat — `mf-nav-pull-night` (23:45
+      IST) and `mf-nav-pull-morning` (07:30 IST), daily, idempotent; task is
+      `apps.mutual_funds.tasks.pull_amfi_nav` (also runs the stale sweep)
+- [x] Historical backfill: `manage.py backfill_amfi_history --scheme <code>
+      [--years N]`. AMFI can only filter by **AMC**, not scheme, so each
+      AMC-year is a ~15 MB download — pass the schemes you hold, never the
+      whole catalog. Verified on scheme `148921`: 494 rows, 2 years, 13 s.
+- [x] Stale flag: `manage.py check_stale_navs` (>3 trading days). Flags
+      5,628 of 14,376 schemes today, mostly matured/closed funds still in
+      AMFI's file (some last priced 2008) — **noisy**; MF-3 should only
+      surface stale schemes the owner actually holds.
 
 **Acceptance:** a beat entry exists and fires; manually triggering backfill
-on one scheme produces >1 year of NAV history.
+on one scheme produces >1 year of NAV history. *Backfill: met. Beat entry
+exists and loads; "fires" is unverified until a worker + beat run.*
 
 ### Phase MF-2 — Real holdings via CAS import
-- [ ] Parser for a CAMS/KFin Consolidated Account Statement PDF
-      (password = PAN+DOB): extract folio, scheme, units, transaction
-      history
-- [ ] Map each row to `MFScheme` by ISIN first; fall back to AMC+scheme-name
-      fuzzy match only if ISIN is missing
-- [ ] Upsert into `MFHolding` + `MFTransaction`, tagged `source="cas"`
-- [ ] Management command: `import_cas_statement --file <path> --password <PAN+DOB>`
-      (manual/on-demand — no upload UI needed for personal use yet)
+**Status:** built; **UNVERIFIED against a real statement** — tested only on
+synthetic fixtures (34 tests). Run the first real CAS with `--dry-run`.
+- [x] Parser for a CAMS/KFin Consolidated Account Statement PDF
+      (password = PAN+DOB), via the `casparser` package (added to
+      `pyproject.toml`; `uv.lock` not regenerated — run `uv sync`)
+- [x] Map each row to `MFScheme` by ISIN first, then the AMFI scheme code on
+      the statement; exact AMC+normalized-name match only when the
+      statement has no ISIN. Unmatched rows are skipped and reported.
+- [x] Upsert into `MFHolding` + `MFTransaction`, tagged `source="cas"`;
+      idempotent on re-import
+- [x] Command: `import_cas_statement --file <path> --tenant <slug|uuid>
+      --portfolio <name|uuid> [--dry-run]`; password from `$CAS_PASSWORD`,
+      `--password`, or a prompt (never logged). Needs a `trading.Portfolio`
+      to attach holdings to — none exists for MF yet, create/pick one.
+
+Known gaps: units/amounts stored as absolute values (direction is
+`txn_type`); closed-out schemes stored with 0 units (filter `units > 0`);
+tax/segregation/gift lines skipped (count printed); NSDL/CDSL demat
+statements rejected; no events emitted; `MFTransaction` has no DB unique
+key (dedupe is in code).
 
 **Acceptance:** running the command against a real CAS PDF produces
 `MFHolding` rows that match the actual folio list on eyeball check against
-the statement.
+the statement. *NOT met — needs a real CAS PDF (request from CAMS/KFintech).*
 
 ### Phase MF-3 — MF Advisor (personal use only — not sellable as-is)
-- [ ] New module `apps/mutual_funds/services/advisor.py`, kept physically
-      separate from collection code
-- [ ] **Direct vs Regular detection** — flag regular-plan holdings with
-      estimated expense-ratio drag vs. the direct equivalent of the same
-      scheme
-- [ ] **Category allocation view** — current allocation vs. a target the
-      owner states once (not a market call, just arithmetic against a
-      stated target)
-- [ ] **Overlap detection** — funds with heavy category+AMC overlap;
-      true stock-level overlap needs each fund's underlying holdings,
-      which AMFI's NAV file does not provide — that needs either factsheet
-      scraping or a paid data vendor. Flag as an open question; don't block
-      Phase MF-3 on it.
-- [ ] **SIP continuity check** — folios with no transaction in the expected
-      cadence, flagged as possibly lapsed
-- [ ] Every finding logged via `apps.events.services.event_writer.emit()`
-      (non-blocking, same as every other decision in this codebase) — never
-      a raw `Event.objects.create()`
+**Status:** built; **never run on real holdings** (26 tests on fixtures,
+SQLite). Run: `manage.py run_mf_advisor --tenant <..> [--portfolio <..>]
+[--target-file target.json] [--assumed-drag-pct 0.75]`.
+- [x] `apps/mutual_funds/services/advisor.py`, separate from collection code
+- [x] **Direct vs Regular detection** — finds the direct twin (AMC +
+      normalized name + option). The drag is an **ESTIMATE** from a
+      configurable assumed spread (default 0.75%) because AMFI has no
+      expense ratios; growth options also get an observed return gap when
+      both plans share ≥180 days of NAV.
+- [x] **Category allocation view** vs a target JSON the owner provides
+      (keys must equal the AMFI category text inside the parentheses,
+      case-insensitive — check against `MFScheme.category`)
+- [x] **Overlap detection** at category+AMC level; always returns an
+      explicit "stock-level overlap not computed" open question
+- [x] **SIP continuity check** — infers cadence from ≥3 SIPs; flags "possibly
+      lapsed" when >5 days overdue (a deliberately stopped SIP still flags)
+- [x] Findings go through `event_writer.emit()` (wrapped, non-blocking).
+      **Caveat:** `Event.Type` has no advisor member, so they use
+      `workflow.step.completed` with `step_name="mf_advisor.<kind>"`. A
+      dedicated `mf.advisor.finding` type needs an enum change + migration
+      in `events` — undecided.
 
 **Acceptance:** run against the owner's real CAS-imported holdings; produces
 at least one direct-vs-regular flag and one allocation summary the owner
-hand-verifies against one fund.
+hand-verifies against one fund. *NOT met — blocked on MF-2 real CAS data.*
 
 ### Phase MF-4 — Housekeeping decisions (parallel track, doesn't block MF-0..3)
+**Status:** investigated read-only (2026-10-17); **no decisions made, nothing
+deleted.** Evidence and recommendations are in
+`docs/MF4_HOUSEKEEPING_FINDINGS.md`. Items below stay unticked until the
+owner confirms. Headlines: the six old app dirs hold only `__pycache__`
+(recommend remove); both swing scanners are live (keep both); `db.sqlite3`
+still has 2 straddle / 8 journal / 58 watchlist rows (archive after
+confirming); fyers/vertical_spread/scalp are live (keep). Two things worth
+acting on: v1 `enrich_signals` (16:00) may mark same-day `swing_v2_*`
+signals `EXPIRED` (from reading code, not reproduced), and the Docker
+images copy only `backend/` while `prod.py` never installs the legacy
+`trading/` package, so daily scan/enrichment tasks would likely fail in
+prod (not tested in a container).
 - [ ] Confirm `audit`, `journals`, `broker`, `orders`, `portfolio`, `legacy`
       (unregistered in `LOCAL_APPS`, per `grep` confirmation on 2026-10-13)
       have no remaining plain-Python imports, then remove them
