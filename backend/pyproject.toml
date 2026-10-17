@@ -44,6 +44,7 @@ dependencies = [
     "cryptography>=42.0",
     "pyotp>=2.9",
     "logzero>=1.7",
+    "casparser>=1.4",          # apps.mutual_funds CAS PDF import (MF-2)
     # Legacy CLI commands at `trading/management/commands/*` flow through
     # trading.services.data_service which imports SmartApi at module load.
     # The ops console (apps.system.consumers.OpsConsumer) spawns those

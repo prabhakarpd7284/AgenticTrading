@@ -65,6 +65,7 @@ LOCAL_APPS = [
     "apps.tenants",
     "apps.billing",
     "apps.market_data",  # absorbed the broker app in Phase 4b (BrokerLink + adapters)
+    "apps.mutual_funds",  # MF scheme/NAV catalog + holdings (added 2026-10)
     "apps.trading",      # Phase 4c: portfolio + orders + trades merged into one
     "apps.strategies",
     "apps.agents_core",
@@ -316,6 +317,18 @@ CELERY_BEAT_SCHEDULE = {
     "daily-derive-trades": {
         "task": "apps.strategies.tasks.daily_pipeline.derive_intraday_trades",
         "schedule": crontab(hour=16, minute=30, day_of_week="mon-fri"),
+    },
+    # ── Mutual fund NAVs ──────────────────────────────────────────────
+    # AMFI publishes the day's NAVs by ~23:00 IST; the 23:45 run takes them,
+    # the 07:30 run catches any late publication. Idempotent, every day
+    # (liquid/overnight funds post NAVs on weekends too).
+    "mf-nav-pull-night": {
+        "task": "apps.mutual_funds.tasks.pull_amfi_nav",
+        "schedule": crontab(hour=23, minute=45),
+    },
+    "mf-nav-pull-morning": {
+        "task": "apps.mutual_funds.tasks.pull_amfi_nav",
+        "schedule": crontab(hour=7, minute=30),
     },
 }
 
