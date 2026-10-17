@@ -436,3 +436,186 @@ All `.env*` are gitignored. Use `.env.example` files as templates. **Never commi
 | `docs/SCREENER_SPEC.md` | Live screener spec |
 | `TRADING_FRAMEWORK.md` | The Cascade — 6-stage pre-trade framework |
 | `DELIVERY_MANIFEST.md` | What ships in this repo |
+
+---
+
+## Roadmap: Mutual Fund Module (added 2026-10-15)
+
+**Scope lock, read this before touching anything below.** In scope right
+now: the existing AlphaDesk stock-trading engine (personal use, prove
+profit before selling — unchanged), plus a **mutual fund data collector and
+advisor**, for personal use on the working tenant
+(`prabhakarpd7284@gmail.com` — see `.claude/skills/alphadesk-dev-stack`, NOT
+`admin@local.dev`). **Explicitly out of scope right now:** FDs, bonds,
+commodities, a cross-asset financial planner, tax filing, a conversational
+chat persona, anything aimed at a second/paying user, and any SEBI RA/IA or
+AMFI ARN registration work. Don't let scope creep back into any of those
+while working the phases below — they're sequenced on purpose.
+
+If `backend/apps/mutual_funds/` already has `models.py`,
+`services/amfi_nav_collector.py`, and
+`management/commands/pull_amfi_nav.py`, Phase MF-0's build is already done
+— start at "run it" in that phase, not from scratch. Check
+`HANDOFF_MUTUAL_FUNDS.md` at the repo root for the full detail behind each
+item below before starting.
+
+### Phase MF-0 — Get the environment actually running (blocking everything else)
+
+**Confirmed status as of 2026-10-15: Docker is NOT up yet.** The cloud
+session that wrote this plan cannot start Docker itself (no Docker in its
+device-bridge shell — confirmed via `docker: command not found`). This is
+exactly the kind of step a native Claude Code terminal session CAN do
+directly, with real shell access. Don't wait for the owner to run this by
+hand — start Docker yourself as the literal first action of this phase.
+
+- [ ] Run `docker compose -f docker-compose.dev.yml up -d` directly (don't
+      just suggest the command — actually run it)
+- [ ] Run `docker compose -f docker-compose.dev.yml ps`; confirm Postgres
+      `:5444` and Redis `:6380` both show `running`/`healthy`. If a
+      container is unhealthy or restarting, check its logs
+      (`docker compose -f docker-compose.dev.yml logs <service>`) before
+      moving on — don't proceed to migrate against a half-up DB
+- [ ] `cd backend && .venv/bin/python manage.py migrate` — confirm
+      `mutual_funds_scheme` / `mutual_funds_nav` / `mutual_funds_holding` /
+      `mutual_funds_transaction` tables exist
+- [ ] `.venv/bin/python manage.py pull_amfi_nav` — confirm non-zero scheme
+      + NAV row counts (expect ~16k+ rows)
+- [ ] Verify a broker link is `status: active` on the *right* tenant —
+      wrong tenant or no active link means the rest of AlphaDesk is
+      silently trading on a synthesized price feed (see the dev-stack
+      skill's "Check 2")
+
+**Acceptance:** `pull_amfi_nav` succeeds with real counts; a Django shell
+query (`MFScheme.objects.count()`, `MFNav.objects.count()`) confirms it.
+
+### Phase MF-0b — Connect the real Zerodha account (do this now — account already exists)
+
+The owner already has a funded Zerodha trading account, so this replaces
+the paper-broker POC path for the stock-trading side. Confirmed by reading
+the actual code before writing this:
+
+- `backend/plugins/broker_zerodha/adapter.py` already has a real, complete
+  `ZerodhaAdapter` — not a stub. It implements all 5 required methods
+  (`authenticate`, `health_check`, `fetch_positions`, `fetch_holdings`,
+  `fetch_margin`) via the `kiteconnect` SDK, which is already declared in
+  `pyproject.toml` (`kiteconnect>=3.9`) — nothing new to install beyond
+  `uv sync`.
+- It does **not** implement order placement or quotes/options-chain — only
+  position/holdings/margin read access right now. That matters for cost:
+  Zerodha's **free "Personal" API plan** covers exactly this (order, GTT,
+  alert, margin, portfolio read access, no subscription fee) — the paid
+  Connect plan (₹500/app/month) is only needed once real-time/historical
+  **market data** or order placement is added. So this can be wired up at
+  zero cost today.
+- The adapter's docstring is explicit: Kite's `access_token` expires daily
+  (~6 AM IST) — there is **no existing daily-login helper** for any broker
+  in this repo yet (checked: no `*_login.py` management command exists
+  for angel_one or zerodha). Angel One avoids this via TOTP; Zerodha does
+  not. Building this helper is new work, not a gap to just "turn on."
+
+Steps:
+1. [ ] Register a Kite Connect app at developers.kite.trade using the
+       owner's existing Zerodha login (Personal plan, free) — gives an
+       `api_key` + `api_secret`.
+2. [ ] Add `KITE_API_KEY` / `KITE_API_SECRET` to `backend/.env` (new vars —
+       not present yet; follow the existing `ANGEL_*` naming convention in
+       that file if one exists, otherwise just `KITE_API_KEY=` /
+       `KITE_API_SECRET=`).
+3. [ ] Write a small daily-login helper (new — doesn't exist yet), e.g.
+       `apps.market_data.management.commands.zerodha_login`: print
+       `KiteConnect(api_key=...).login_url()`, prompt for the
+       `request_token` from the redirect URL after the owner logs in in a
+       browser, call `kite.generate_session(request_token, api_secret=...)`
+       to get `access_token`.
+4. [ ] POST that `{api_key, api_secret, access_token}` to
+       `/api/v1/brokers/zerodha/connect/` (existing endpoint,
+       `BrokerLinkViewSet.connect` in `apps/market_data/api/broker_views.py`
+       — tests auth via `authenticate()` before saving, so bad creds never
+       hit the DB).
+5. [ ] Confirm the resulting `BrokerLink` shows `status: ACTIVE` on the
+       correct tenant (`prabhakarpd7284@gmail.com`, per the dev-stack
+       skill) — this is what satisfies Phase MF-0's last checklist item
+       and stops the synthesized-price fallback for the equity side.
+6. [ ] Remember this is a **daily** step, not one-time setup — the
+       `access_token` goes stale every morning and step 3–4 must be
+       repeated each trading day until this is automated.
+
+**Acceptance:** `GET /api/v1/brokers/{id}/diagnose/` (or the positions
+action) returns real position/holdings/margin data from the owner's actual
+Zerodha account, not synthesized data.
+
+### Phase MF-1 — Daily collector hardening
+- [ ] Schedule `pull_amfi_nav` in Celery beat, same pattern as the existing
+      08:20 swing scan / 16:00 EOD enrichment entries
+- [ ] Add a historical backfill path (AMFI serves per-scheme historical
+      NAV via a date-ranged request) so newly added schemes have more than
+      just "today"
+- [ ] Flag schemes with no NAV update in >3 trading days as stale
+
+**Acceptance:** a beat entry exists and fires; manually triggering backfill
+on one scheme produces >1 year of NAV history.
+
+### Phase MF-2 — Real holdings via CAS import
+- [ ] Parser for a CAMS/KFin Consolidated Account Statement PDF
+      (password = PAN+DOB): extract folio, scheme, units, transaction
+      history
+- [ ] Map each row to `MFScheme` by ISIN first; fall back to AMC+scheme-name
+      fuzzy match only if ISIN is missing
+- [ ] Upsert into `MFHolding` + `MFTransaction`, tagged `source="cas"`
+- [ ] Management command: `import_cas_statement --file <path> --password <PAN+DOB>`
+      (manual/on-demand — no upload UI needed for personal use yet)
+
+**Acceptance:** running the command against a real CAS PDF produces
+`MFHolding` rows that match the actual folio list on eyeball check against
+the statement.
+
+### Phase MF-3 — MF Advisor (personal use only — not sellable as-is)
+- [ ] New module `apps/mutual_funds/services/advisor.py`, kept physically
+      separate from collection code
+- [ ] **Direct vs Regular detection** — flag regular-plan holdings with
+      estimated expense-ratio drag vs. the direct equivalent of the same
+      scheme
+- [ ] **Category allocation view** — current allocation vs. a target the
+      owner states once (not a market call, just arithmetic against a
+      stated target)
+- [ ] **Overlap detection** — funds with heavy category+AMC overlap;
+      true stock-level overlap needs each fund's underlying holdings,
+      which AMFI's NAV file does not provide — that needs either factsheet
+      scraping or a paid data vendor. Flag as an open question; don't block
+      Phase MF-3 on it.
+- [ ] **SIP continuity check** — folios with no transaction in the expected
+      cadence, flagged as possibly lapsed
+- [ ] Every finding logged via `apps.events.services.event_writer.emit()`
+      (non-blocking, same as every other decision in this codebase) — never
+      a raw `Event.objects.create()`
+
+**Acceptance:** run against the owner's real CAS-imported holdings; produces
+at least one direct-vs-regular flag and one allocation summary the owner
+hand-verifies against one fund.
+
+### Phase MF-4 — Housekeeping decisions (parallel track, doesn't block MF-0..3)
+- [ ] Confirm `audit`, `journals`, `broker`, `orders`, `portfolio`, `legacy`
+      (unregistered in `LOCAL_APPS`, per `grep` confirmation on 2026-10-13)
+      have no remaining plain-Python imports, then remove them
+- [ ] Resolve `swing_scanner` vs `swing_scanner_v2` — both are currently
+      registered live; ask Prabhakar which one should stay before deleting
+      either
+- [ ] Decide fate of `db.sqlite3` (README says Phase 6 dropped it; it's
+      still on disk), the `fyers` broker plugin (registered but
+      undocumented — active or dead?), and the StockEdge pipeline's terms
+      of service before relying on it in anything that gets sold
+- [ ] Fix the doc drift: `docs/MIND_PALACE.md` / `docs/architecture/
+      ARCHITECTURE.md` still describe the old dual-Django/Streamlit design;
+      CLAUDE.md/README themselves are also wrong about ports/dev-login per
+      the dev-stack skill — reconcile all three against what's actually
+      running
+
+**Acceptance:** each item has an explicit keep/remove/defer decision
+recorded, not just noticed again.
+
+### Phase MF-5 (future — do not start before MF-0 through MF-3 are proven)
+A light conversational persona over AlphaDesk's existing trading data
+(positions, signals, risk status) plus the MF advisor's output. Motivated
+by the owner missing trading opportunities from being busy — not a general
+chatbot, a thin front-end on data that already exists. Design work not
+started; revisit once MF-3 has run against real data for a while.
