@@ -34,6 +34,25 @@ ALLOWED_HOSTS = env("ALLOWED_HOSTS")
 
 TRADING_MODE = env("TRADING_MODE", default="paper")  # paper | live | halt
 
+# Zerodha Kite Connect app credentials (developers.kite.trade, Personal plan).
+# Used by `manage.py zerodha_login` to mint the daily access_token; the
+# per-tenant credentials themselves are stored encrypted on BrokerLink.
+KITE_API_KEY = env("KITE_API_KEY", default="")
+KITE_API_SECRET = env("KITE_API_SECRET", default="")
+
+# Fyers app credentials (fyers.in/web/api-dashboard/user-apps), used by
+# `manage.py fyers_login`. Fyers only accepts https redirect URLs, so the app
+# registers Fyers' own landing page and the auth_code is pasted into the command.
+FYERS_APP_ID = env("FYERS_APP_ID", default="")
+FYERS_SECRET_KEY = env("FYERS_SECRET_KEY", default="")
+FYERS_REDIRECT_URI = env(
+    "FYERS_REDIRECT_URI",
+    default="https://trade.fyers.in/api-login/redirect-uri/index.html",
+)
+
+# SPA origin the broker OAuth callback bounces the browser back to.
+FRONTEND_ORIGIN = env("FRONTEND_ORIGIN", default="http://localhost:5173")
+
 # The /ws/ops/ developer console runs arbitrary management commands as the
 # server user — superuser-only AND off unless explicitly enabled. Defaults to
 # DEBUG so it's available in local dev but disabled in prod unless opted in.

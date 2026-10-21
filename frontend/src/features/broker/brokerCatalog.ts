@@ -87,7 +87,7 @@ export const BROKER_CATALOG: Record<string, BrokerSpec> = {
       ],
       redirectHelp:
         "Register this redirect URL in your Kite app: " +
-        "http://127.0.0.1:5173/api/v1/brokers/zerodha/oauth/callback/",
+        "http://localhost:5173/api/v1/brokers/zerodha/oauth/callback/",
     },
     metaFields: [
       { key: "account_alias", label: "Account alias", placeholder: "e.g. Personal" },
@@ -98,7 +98,7 @@ export const BROKER_CATALOG: Record<string, BrokerSpec> = {
     name: "fyers",
     label: "Fyers API v3",
     blurb: "Read-only positions/holdings/funds. Daily access-token re-login via Fyers login.",
-    setupUrl: "https://myapi.fyers.in/",
+    setupUrl: "https://fyers.in/web/api-dashboard/user-apps",
     dailyTokenRefresh: true,
     fields: [],   // OAuth-only
     oauth: {
@@ -108,8 +108,9 @@ export const BROKER_CATALOG: Record<string, BrokerSpec> = {
         { key: "secret_key", label: "Secret key", kind: "secret", required: true },
       ],
       redirectHelp:
-        "Register this redirect URL in your Fyers app: " +
-        "http://127.0.0.1:5173/api/v1/brokers/fyers/oauth/callback/",
+        "Fyers only accepts https redirect URLs, so the button below can't complete. " +
+        "Register https://trade.fyers.in/api-login/redirect-uri/index.html in your Fyers app " +
+        "and connect daily with `manage.py fyers_login --tenant <slug>` instead.",
     },
     metaFields: [
       { key: "account_alias", label: "Account alias", placeholder: "e.g. Personal" },

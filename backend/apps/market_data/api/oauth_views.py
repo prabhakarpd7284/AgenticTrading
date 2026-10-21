@@ -17,7 +17,7 @@ through the broker's hosted login page once per day. The flow:
 
   4. Backend:   matches state → PendingOAuth → completes the token
                 exchange → upserts the BrokerLink → bounces the browser
-                back to the SPA at /broker?connected={name}.
+                back to the SPA at /brokers?connected={name}.
 
 Angel One bypasses this — it uses TOTP and doesn't need a redirect flow.
 """
@@ -147,19 +147,17 @@ def _callback_redirect_uri(request: Request, broker_name: str) -> str:
 
 
 def _spa_redirect_target(request: Request, broker_name: str, ok: bool, msg: str = "") -> str:
-    """Where to bounce the browser after the broker callback finishes."""
-    spa_origin = request.META.get("HTTP_REFERER", "")
-    # Strip any path so we land on /broker no matter what.
-    from urllib.parse import urlparse
-    if spa_origin:
-        p = urlparse(spa_origin)
-        spa_base = f"{p.scheme}://{p.netloc}"
-    else:
-        # Vite dev server default. Override with FRONTEND_ORIGIN env in prod.
-        from django.conf import settings
-        spa_base = getattr(settings, "FRONTEND_ORIGIN", "http://localhost:5173")
-    qs = f"connected={broker_name}" if ok else f"error={broker_name}&reason={msg[:80]}"
-    return f"{spa_base}/broker?{qs}"
+    """Where to bounce the browser after the broker callback finishes.
+
+    Uses settings.FRONTEND_ORIGIN, never the Referer: on the callback the
+    Referer is the broker's login page (kite.zerodha.com), not the SPA.
+    """
+    from urllib.parse import urlencode
+
+    from django.conf import settings
+    spa_base = settings.FRONTEND_ORIGIN.rstrip("/")
+    params = {"connected": broker_name} if ok else {"error": broker_name, "reason": msg[:80]}
+    return f"{spa_base}/brokers?{urlencode(params)}"
 
 
 def _prune_old_pending():

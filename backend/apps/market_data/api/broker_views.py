@@ -12,11 +12,11 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from apps.market_data.adapters.factory import (
-    build_adapter, get_adapter_class, list_adapters,
-)
+from apps.market_data.adapters.factory import build_adapter, list_adapters
 from apps.market_data.models import BrokerLink, BrokerPositionSnapshot
-from apps.market_data.services.crypto import encrypt_credentials
+from apps.market_data.services.broker_connect import (
+    BrokerConnectError, connect_broker,
+)
 
 
 # Brokers whose access_token expires daily ~6 AM IST and needs a fresh
@@ -144,41 +144,17 @@ class BrokerLinkViewSet(viewsets.ModelViewSet):
         Body: {"credentials": {...broker-specific...}, "meta": {...}, "display_name": "..."}
         Tests auth before persisting — bad creds never reach the DB.
         """
-        cls = get_adapter_class(broker_name)
-        if cls is None:
-            raise ValidationError(f"Unknown broker: {broker_name}")
-
-        creds = request.data.get("credentials") or {}
-        meta = request.data.get("meta") or {}
-        display_name = request.data.get("display_name") or ""
-        if not isinstance(creds, dict) or not creds:
-            raise ValidationError("`credentials` must be a non-empty object")
-
         try:
-            probe = cls(credentials=creds, meta=meta)
-            ok = probe.authenticate()
-        except Exception as e:
-            raise ValidationError(f"Auth probe raised: {e}")
-        if not ok:
-            raise ValidationError("Broker rejected the credentials")
-
-        link, _ = BrokerLink.objects.update_or_create(
-            tenant=request.tenant,
-            broker_name=broker_name,
-            owner=request.user,
-            display_name=display_name,
-            defaults={
-                "credential_blob": encrypt_credentials(creds),
-                "credential_meta": meta,
-                "status": BrokerLink.Status.ACTIVE,
-                "last_error": "",
-                "last_refreshed_at": timezone.now(),
-            },
-        )
-        try:
-            _take_snapshot(link)
-        except Exception:
-            pass
+            link = connect_broker(
+                tenant=request.tenant,
+                owner=request.user,
+                broker_name=broker_name,
+                credentials=request.data.get("credentials") or {},
+                meta=request.data.get("meta") or {},
+                display_name=request.data.get("display_name") or "",
+            )
+        except BrokerConnectError as e:
+            raise ValidationError(str(e))
         return Response(BrokerLinkSerializer(link).data, status=status.HTTP_201_CREATED)
 
     # ── /api/v1/brokers/{id}/refresh/ ─────────────────────────────────
@@ -400,17 +376,28 @@ def _take_snapshot(link: BrokerLink) -> BrokerPositionSnapshot:
     try:
         positions = adapter.fetch_positions()
         holdings = adapter.fetch_holdings()
-        margin = adapter.fetch_margin()
+        # A margin-only failure (e.g. Fyers' funds endpoint hanging off-hours)
+        # must not flag a link whose token works. Carry the last good margin
+        # forward rather than writing {} — that would sum as zero cash.
+        margin_error = ""
+        try:
+            margin = type(adapter).serialise_margin(adapter.fetch_margin())
+        except Exception as e:
+            if _looks_like_auth_failure(str(e)):
+                raise
+            margin_error = f"margin unavailable — {str(e)[:300]}"
+            prev = link.snapshots.filter(ok=True).exclude(margin={}).first()
+            margin = prev.margin if prev else {}
         snap = BrokerPositionSnapshot.objects.create(
             tenant=link.tenant, link=link, fetched_at=timezone.now(),
             positions=type(adapter).serialise_positions(positions),
             holdings=type(adapter).serialise_holdings(holdings),
-            margin=type(adapter).serialise_margin(margin),
-            ok=True,
+            margin=margin,
+            ok=True, error=margin_error,
         )
         link.status = BrokerLink.Status.ACTIVE
         link.last_refreshed_at = snap.fetched_at
-        link.last_error = ""
+        link.last_error = margin_error
         link.save(update_fields=["status", "last_refreshed_at", "last_error"])
         return snap
     except Exception as e:

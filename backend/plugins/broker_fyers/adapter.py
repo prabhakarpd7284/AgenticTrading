@@ -14,7 +14,9 @@ Meta carries non-secret bits like ``client_id`` (Fyers user id).
 """
 from __future__ import annotations
 
+import concurrent.futures
 import logging
+import threading
 import time
 from typing import Any
 
@@ -23,6 +25,34 @@ from apps.market_data.adapters.base import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Fyers' `funds` endpoint has been seen to hang indefinitely (no response, no
+# socket timeout in the SDK), which froze snapshots, /diagnose/ and Celery
+# broker refreshes.
+_FUNDS_TIMEOUT = 15
+
+
+def call_with_timeout(fn, timeout: float, what: str, **kwargs):
+    """Run a blocking SDK call with a hard timeout.
+
+    Uses a daemon thread rather than a ThreadPoolExecutor: the executor's
+    ``with`` exit — and interpreter shutdown — join their worker threads, so a
+    hung call would still block the caller (or a management command's exit)
+    after the timeout. A timed-out daemon thread is simply abandoned.
+    """
+    future: concurrent.futures.Future = concurrent.futures.Future()
+
+    def run():
+        try:
+            future.set_result(fn(**kwargs))
+        except BaseException as exc:  # noqa: BLE001 — re-raised in the caller
+            future.set_exception(exc)
+
+    threading.Thread(target=run, name=f"fyers-{what}", daemon=True).start()
+    try:
+        return future.result(timeout=timeout)
+    except concurrent.futures.TimeoutError as exc:
+        raise RuntimeError(f"Fyers {what} timed out after {timeout}s") from exc
 
 
 class FyersAdapter(BrokerAdapterBase):
@@ -107,7 +137,7 @@ class FyersAdapter(BrokerAdapterBase):
     def fetch_margin(self) -> Margin:
         if self._api is None and not self.authenticate():
             raise RuntimeError("Fyers authentication failed — daily re-login required")
-        r = self._api.funds()  # type: ignore[union-attr]
+        r = call_with_timeout(self._api.funds, _FUNDS_TIMEOUT, "funds")  # type: ignore[union-attr]
         _raise_if_error(r, "funds")
         # Fyers `funds` returns {"s":"ok","fund_limit":[{title,equityAmount,...}, ...]}
         items = (r or {}).get("fund_limit") or []
