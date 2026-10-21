@@ -34,7 +34,7 @@ export interface Destination {
 export const DESTINATIONS: Destination[] = [
   {
     key: "today", label: "Today", to: "/", icon: Home,
-    description: "What to do now — market context and where today's ideas come from",
+    description: "What to do now — Action Board, portfolio snapshot, what needs you, market context",
     items: [
       { to: "/pulse", label: "Market Pulse", icon: Gauge, hint: "g t", keywords: "today what's happening regime" },
       { to: "/rotation", label: "Rotation", icon: Layers, hint: "g r", keywords: "sector drill-in" },
@@ -99,7 +99,7 @@ function matches(path: string, to: string): boolean {
 
 /** Destination + sub-item for a pathname (the index route belongs to Today). */
 export function locate(pathname: string): { destination?: Destination; item?: NavItem } {
-  const path = pathname === "/" ? "/pulse" : pathname;
+  const path = pathname;
   for (const d of DESTINATIONS) {
     const item = d.items.find((i) => matches(path, i.to));
     if (item) return { destination: d, item };

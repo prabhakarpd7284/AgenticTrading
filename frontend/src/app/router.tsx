@@ -28,6 +28,7 @@ import { OnboardingPage } from "@/features/auth/OnboardingPage";
 import { RunsPage } from "@/features/runs/RunsPage";
 import { LabPage } from "@/features/lab/LabPage";
 import { PortfolioPage } from "@/features/portfolio/PortfolioPage";
+import { TodayPage } from "@/features/today/TodayPage";
 import { RequireAuth } from "./guards";
 import { RouteError } from "./RouteError";
 
@@ -48,10 +49,9 @@ export const router = createBrowserRouter([
     // the whole SPA.
     errorElement: <RouteError />,
     children: [
-      // "What's Happening Today" is the trader's first read — Stage 1+2
-      // of The Cascade — so it replaces the generic dashboard as the
-      // index route.  The old /dashboard remains for capital + positions.
-      { index: true, element: <MarketPulsePage /> },
+      // Today (UX redesign R3): Action Board + portfolio snapshot + needs
+      // attention, with Market Pulse collapsed inside. Pulse keeps /pulse.
+      { index: true, element: <TodayPage /> },
       { path: "pulse", element: <MarketPulsePage /> },
       // Cascade Stage 3 — drill-in from the pulse sector heatmap.
       { path: "rotation", element: <RotationPage /> },
