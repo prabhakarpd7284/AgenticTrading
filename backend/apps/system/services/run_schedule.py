@@ -43,6 +43,8 @@ TRACKED_TASKS: dict[str, str] = {
     "apps.trading.tasks.reconcile.reconcile_stale_intraday": "reconcile_stale_intraday",
     "apps.market_data.tasks.eod_capture.capture_session_candles": "eod_candle_capture",
     "apps.market_data.tasks.eod_capture.capture_bhavcopy": "eod_bhavcopy_capture",
+    "apps.trading.tasks.action_board.build_action_board": "action_board",
+    "apps.trading.tasks.action_board.evaluate_action_outcomes": "action_board_outcomes",
     # Swing v2 (config/celery.py): one Celery task serves three tiers, so
     # receipts carry a per-tier task_name (see swing_v2_receipt_task).
     "config.celery.run_swing_v2[small]": "swing_v2.small",
@@ -79,6 +81,10 @@ ENTRY_META: dict[str, dict] = {
     "eod-bhavcopy-capture": {"label": "Bhavcopy capture", "grace_min": 60, "since": "2026-10-22"},
     "eod-bhavcopy-capture-retry": {"label": "Bhavcopy capture (retry)", "grace_min": 40,
                                    "since": "2026-10-22"},
+    "action-board-build": {"label": "Action Board build (directional, paper)", "grace_min": 30,
+                           "since": "2026-10-22"},
+    "action-board-outcomes": {"label": "Action Board outcomes (missed replay)", "grace_min": 40,
+                              "since": "2026-10-22"},
     "swing_v2_small": {"label": "Swing v2 scan (small tier)", "grace_min": 20, "since": "2026-10-22"},
     "swing_v2_medium": {"label": "Swing v2 scan (medium tier)", "since": "2026-10-22"},
     "swing_v2_long": {"label": "Swing v2 scan (long tier)", "since": "2026-10-22"},
@@ -110,6 +116,13 @@ RERUNNABLE: dict[str, dict] = {
     "eod_bhavcopy_capture": {"task": "apps.market_data.tasks.eod_capture.capture_bhavcopy",
                              "kwargs": {"trigger": "manual", "attempt": 2},
                              "note": "Latest closed session's NSE bhavcopy (one download)."},
+    "action_board": {"task": "apps.trading.tasks.action_board.build_action_board",
+                     "kwargs": {"trigger": "manual"},
+                     "note": "Up to 10 Claude planner calls + ~50 Angel 1m fetches; idempotent per day "
+                             "(decided cards are never overwritten)."},
+    "action_board_outcomes": {"task": "apps.trading.tasks.action_board.evaluate_action_outcomes",
+                              "kwargs": {"trigger": "manual"},
+                              "note": "DB-only replay of skipped/expired cards on stored 1m candles."},
 }
 
 

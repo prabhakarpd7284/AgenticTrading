@@ -454,3 +454,96 @@ class CooldownState(TenantModel):
 
     class Meta:
         db_table = "trading_cooldownstate"
+
+
+# ════════════════════════════════════════════════════════════════════
+# Action Board (docs/ALPHADESK_UX_REDESIGN_PLAN.md §4, UX redesign R3)
+# ════════════════════════════════════════════════════════════════════
+
+class TodayAction(TenantModel):
+    """One proposed action for one trading day — a card on the Action Board.
+
+    Produced by ``apps.trading.services.action_board.build_action_board``
+    from an enabled strategy (R3: only ``directional``, PAPER, unproven).
+    Sizing is deterministic (never the LLM's quantity); ``risk_check`` is a
+    RiskEngine dry run — nothing here places an order. Approve sends the card
+    through ``PlaceOrder`` → trading-rules gate → RiskEngine (the last gate).
+    """
+
+    class Kind(models.TextChoices):
+        BUY = "BUY"
+        SELL = "SELL"
+        EXIT = "EXIT"
+        REVIEW = "REVIEW"
+
+    class Horizon(models.TextChoices):
+        INTRADAY = "intraday"
+        SWING = "swing"
+        POSITIONAL = "positional"
+
+    class Status(models.TextChoices):
+        PROPOSED = "proposed"
+        APPROVED = "approved"     # transient: approve accepted, order being placed
+        SKIPPED = "skipped"
+        SNOOZED = "snoozed"
+        EXECUTED = "executed"     # order accepted by PlaceOrder (paper)
+        EXPIRED = "expired"
+        REJECTED = "rejected"     # risk pre-check / order path / cooldown said no
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    portfolio = models.ForeignKey(Portfolio, on_delete=models.CASCADE, related_name="today_actions")
+    date = models.DateField(db_index=True)
+    kind = models.CharField(max_length=8, choices=Kind.choices)
+    symbol = models.CharField(max_length=32)
+    strategy = models.CharField(max_length=64)
+    strategy_version = models.CharField(max_length=32, blank=True, default="")
+    horizon = models.CharField(max_length=12, choices=Horizon.choices, default=Horizon.INTRADAY)
+    side = models.CharField(max_length=4)                       # BUY | SELL
+
+    entry_price = models.DecimalField(max_digits=14, decimal_places=4)
+    entry_low = models.DecimalField(max_digits=14, decimal_places=4)
+    entry_high = models.DecimalField(max_digits=14, decimal_places=4)
+    stoploss = models.DecimalField(max_digits=14, decimal_places=4)
+    target = models.DecimalField(max_digits=14, decimal_places=4)
+    suggested_qty = models.IntegerField(default=0)
+    capital_required = models.DecimalField(max_digits=16, decimal_places=2, default=Decimal("0"))
+    risk_at_stake = models.DecimalField(max_digits=16, decimal_places=2, default=Decimal("0"))
+    risk_multiplier = models.DecimalField(max_digits=4, decimal_places=2, default=Decimal("1"))
+
+    risk_check = models.JSONField(default=dict, blank=True,
+                                  help_text="RiskEngine dry run: approved, reason, failed_criterion, criteria")
+    risk_passed = models.BooleanField(default=False)
+    confidence = models.DecimalField(max_digits=4, decimal_places=3, null=True, blank=True)
+    reasons = models.JSONField(default=list, blank=True, help_text="Top 3 reasons")
+    source_refs = models.JSONField(default=dict, blank=True,
+                                   help_text="run receipt, nightly scan row, planner meta, data provenance")
+    shadow = models.BooleanField(default=False, help_text="Would-be trade recorded during a cooldown")
+    blocked_reason = models.CharField(max_length=255, blank=True, default="")
+
+    planned_as_of = models.DateTimeField(help_text="Market data cut-off the plan was made from")
+    expires_at = models.DateTimeField()
+    status = models.CharField(max_length=10, choices=Status.choices, default=Status.PROPOSED,
+                              db_index=True)
+    snoozed_until = models.DateTimeField(null=True, blank=True)
+    decided_at = models.DateTimeField(null=True, blank=True)
+    decided_by = models.ForeignKey("accounts.User", on_delete=models.SET_NULL, null=True, blank=True,
+                                   related_name="+")
+    decision_note = models.TextField(blank=True, default="")
+    order = models.ForeignKey(Order, on_delete=models.SET_NULL, null=True, blank=True,
+                              related_name="today_actions")
+
+    # What the plan would have done (EOD replay on that day's 1m candles)
+    outcome = models.JSONField(default=dict, blank=True)
+    outcome_computed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "trading_todayaction"
+        ordering = ["date", "-risk_passed", "symbol"]
+        constraints = [
+            models.UniqueConstraint(fields=["tenant", "date", "strategy", "symbol", "side"],
+                                    name="uniq_today_action_per_day"),
+        ]
+        indexes = [models.Index(fields=["tenant", "date", "status"])]
+
+    def __str__(self) -> str:
+        return f"{self.date} {self.side} {self.symbol} [{self.strategy}] {self.status}"

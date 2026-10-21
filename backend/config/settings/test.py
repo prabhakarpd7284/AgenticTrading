@@ -42,3 +42,6 @@ CELERY_TASK_EAGER_PROPAGATES = True
 
 # Never push run-receipt alerts to a real Telegram chat from tests.
 RUN_RECEIPTS_TELEGRAM = False
+
+# Never push Action Board summaries to a real Telegram chat from tests.
+ACTION_BOARD = {**ACTION_BOARD, "TELEGRAM": False}  # noqa: F405

@@ -243,6 +243,10 @@ CELERY_TIMEZONE = "Asia/Kolkata"
 # queue. (On 2026-06-24 a stopped worker let process_outbox accumulate 13,669
 # stale messages over ~11h.) A 1s poll is worthless 10s later, so its TTL is
 # tight; longer cadences get >= one interval.
+# Action Board build time (IST, "HH:MM") — after the first 15–20 min of 1m data.
+ACTION_BOARD_TIME = env("ACTION_BOARD_TIME", default="09:35")
+_ACTION_BOARD_HH, _ACTION_BOARD_MM = (int(x) for x in ACTION_BOARD_TIME.split(":"))
+
 CELERY_BEAT_SCHEDULE = {
     "process-order-outbox": {
         "task": "apps.trading.tasks.outbox.process_outbox",
@@ -394,6 +398,19 @@ CELERY_BEAT_SCHEDULE = {
         "schedule": crontab(hour=21, minute=0),
         "options": {"expires": 3 * 3600},
     },
+    # ── Action Board (UX redesign R3) ─────────────────────────────────
+    # Build today's cards after the open (first ~20 min of 1m data), and
+    # score them after the 15:50 candle capture. Both self-skip holidays.
+    "action-board-build": {
+        "task": "apps.trading.tasks.action_board.build_action_board",
+        "schedule": crontab(hour=_ACTION_BOARD_HH, minute=_ACTION_BOARD_MM, day_of_week="mon-fri"),
+        "options": {"expires": 2 * 3600},
+    },
+    "action-board-outcomes": {
+        "task": "apps.trading.tasks.action_board.evaluate_action_outcomes",
+        "schedule": crontab(hour=16, minute=10, day_of_week="mon-fri"),
+        "options": {"expires": 4 * 3600},
+    },
     # Run-receipt schedule watcher (UX redesign R1) — writes a `not_run`
     # receipt + alert for any crontab job above that missed its window, and
     # fails receipts stuck RUNNING (hard-killed worker). Cheap DB-only.
@@ -434,6 +451,19 @@ NEWS_SENTIMENT = {
     "MAX_CONSECUTIVE_FAILURES": 2,
     "MODEL": env("NEWS_SENTIMENT_MODEL", default=""),   # "" = CLI default
     "LOOKBACK_DAYS": 3,
+}
+
+# Action Board (UX redesign R3) — directional ideas, PAPER only, unproven.
+ACTION_BOARD = {
+    "TIME": ACTION_BOARD_TIME,
+    "MAX_PLANNER_CALLS": env.int("ACTION_BOARD_MAX_PLANNER_CALLS", default=10),
+    "EXPIRES_AT": "15:00",            # cards not decided by then expire
+    "EOD_EXIT": "15:14",              # what-if exit (TRADING_RULES.md §2)
+    "MIN_BARS": 10,                   # 1m bars needed before a symbol can be planned
+    "MAX_BAR_LAG_MIN": 5,             # last bar must be this close to the as-of time
+    "MIN_FRESH_FRACTION": 0.8,        # below this share of fresh candidates the board fails
+    "TELEGRAM": env.bool("ACTION_BOARD_TELEGRAM", default=True),
+    "APP_URL": env("ALPHADESK_APP_URL", default="http://localhost:5173"),
 }
 
 NIGHTLY_SCAN = {
