@@ -85,6 +85,9 @@ class RiskDecision:
     approved: bool
     reason: str = ""
     criteria: dict[str, Any] = field(default_factory=dict)
+    # Name of the criterion that rejected the draft ("" when approved) —
+    # lets a dry run (Action Board pre-check) say *which* gate would fail.
+    failed_criterion: str = ""
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -197,23 +200,23 @@ class RiskEngine:
         criteria["regime"] = regime_details
         if not regime_ok:
             log.warning("risk.rejected.regime", reason=regime_reason)
-            return RiskDecision(approved=False, reason=regime_reason, criteria=criteria)
+            return RiskDecision(approved=False, failed_criterion="regime", reason=regime_reason, criteria=criteria)
 
         # 1. Field validation
         err = self._check_fields(draft)
         if err:
-            return RiskDecision(approved=False, reason=err, criteria=criteria)
+            return RiskDecision(approved=False, failed_criterion="fields", reason=err, criteria=criteria)
 
         # 2. SL direction
         if draft.side == "BUY" and draft.stop_loss >= draft.entry_price:
             return RiskDecision(
-                approved=False,
+                approved=False, failed_criterion="sl_direction",
                 reason=f"BUY stop_loss ({draft.stop_loss}) must be below entry ({draft.entry_price})",
                 criteria=criteria,
             )
         if draft.side == "SELL" and draft.stop_loss <= draft.entry_price:
             return RiskDecision(
-                approved=False,
+                approved=False, failed_criterion="sl_direction",
                 reason=f"SELL stop_loss ({draft.stop_loss}) must be above entry ({draft.entry_price})",
                 criteria=criteria,
             )
@@ -221,13 +224,13 @@ class RiskEngine:
         # 3. Target direction
         if draft.side == "BUY" and draft.target <= draft.entry_price:
             return RiskDecision(
-                approved=False,
+                approved=False, failed_criterion="target_direction",
                 reason=f"BUY target ({draft.target}) must be above entry ({draft.entry_price})",
                 criteria=criteria,
             )
         if draft.side == "SELL" and draft.target >= draft.entry_price:
             return RiskDecision(
-                approved=False,
+                approved=False, failed_criterion="target_direction",
                 reason=f"SELL target ({draft.target}) must be below entry ({draft.entry_price})",
                 criteria=criteria,
             )
@@ -235,7 +238,7 @@ class RiskEngine:
         portfolio = self.portfolio_provider.get(portfolio_id)
         capital = portfolio.capital
         if capital <= 0:
-            return RiskDecision(approved=False, reason="Portfolio capital is zero", criteria=criteria)
+            return RiskDecision(approved=False, failed_criterion="capital", reason="Portfolio capital is zero", criteria=criteria)
 
         # 4. Risk per trade
         risk_per_share = abs(draft.entry_price - draft.stop_loss)
@@ -253,7 +256,7 @@ class RiskEngine:
         if risk_amount > max_risk:
             note = f" (×{risk_multiplier:g} losing-streak reduction)" if risk_multiplier != 1.0 else ""
             return RiskDecision(
-                approved=False,
+                approved=False, failed_criterion="risk_per_trade",
                 reason=(
                     f"Risk {risk_amount:.0f} INR exceeds "
                     f"{self.limits['MAX_RISK_PER_TRADE_PCT'] if risk_multiplier == 1.0 else f'{max_risk_pct:g}'}"
@@ -271,13 +274,13 @@ class RiskEngine:
         }
         if daily_loss >= max_daily_loss:
             return RiskDecision(
-                approved=False,
+                approved=False, failed_criterion="daily_loss",
                 reason=f"Daily loss limit reached ({daily_loss:.0f} >= {max_daily_loss:.0f} INR)",
                 criteria=criteria,
             )
         if (daily_loss + risk_amount) > max_daily_loss * 1.5:
             return RiskDecision(
-                approved=False,
+                approved=False, failed_criterion="daily_loss",
                 reason=(
                     f"Trade could breach daily loss limit. Loss so far: {daily_loss:.0f}, "
                     f"trade risk: {risk_amount:.0f}, limit: {max_daily_loss:.0f}"
@@ -294,7 +297,7 @@ class RiskEngine:
         }
         if position_value > max_position:
             return RiskDecision(
-                approved=False,
+                approved=False, failed_criterion="position_size",
                 reason=(
                     f"Position value {position_value:.0f} INR exceeds "
                     f"{self.limits['MAX_POSITION_SIZE_PCT']}% of capital ({max_position:.0f} INR)"
@@ -309,7 +312,7 @@ class RiskEngine:
         criteria["rr"] = {"ratio": round(rr, 2), "min_required": min_rr}
         if self._rr_below_minimum(rr, min_rr):
             return RiskDecision(
-                approved=False,
+                approved=False, failed_criterion="risk_reward",
                 reason=f"Risk:Reward ratio {rr:.2f} below minimum {min_rr}",
                 criteria=criteria,
             )
@@ -319,7 +322,7 @@ class RiskEngine:
         criteria["confidence"] = {"value": round(draft.confidence, 3), "min_required": min_conf}
         if draft.confidence < min_conf:
             return RiskDecision(
-                approved=False,
+                approved=False, failed_criterion="confidence",
                 reason=f"Confidence {draft.confidence:.2f} below minimum {min_conf}",
                 criteria=criteria,
             )
@@ -329,7 +332,7 @@ class RiskEngine:
         criteria["open_positions"] = {"current": portfolio.open_positions, "max_allowed": max_open}
         if portfolio.open_positions >= max_open:
             return RiskDecision(
-                approved=False,
+                approved=False, failed_criterion="open_positions",
                 reason=f"Max open positions reached ({portfolio.open_positions}/{max_open})",
                 criteria=criteria,
             )
@@ -338,7 +341,7 @@ class RiskEngine:
         trading_mode = getattr(settings, "TRADING_MODE", "paper")
         if trading_mode == "halt":
             return RiskDecision(
-                approved=False,
+                approved=False, failed_criterion="kill_switch",
                 reason="Trading halted by kill-switch",
                 criteria=criteria,
             )
