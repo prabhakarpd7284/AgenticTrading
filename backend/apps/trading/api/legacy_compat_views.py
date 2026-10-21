@@ -148,7 +148,7 @@ def portfolio(request):
     snap = (
         PortfolioSnapshot.objects.filter(tenant=tenant).order_by("-captured_at").first()
     )
-    portfolio_row = Portfolio.objects.filter(tenant=tenant).first()
+    portfolio_row = Portfolio.objects.filter(tenant=tenant).order_by("created_at").first()
     capital = float(portfolio_row.capital) if portfolio_row else DEFAULT_CAPITAL
 
     if snap:
@@ -455,7 +455,7 @@ def audit(request):
 def _risk_utilization(tenant) -> dict:
     snap = (PortfolioSnapshot.objects.filter(tenant=tenant)
             .order_by("-captured_at").first())
-    portfolio_row = Portfolio.objects.filter(tenant=tenant).first()
+    portfolio_row = Portfolio.objects.filter(tenant=tenant).order_by("created_at").first()
     capital = float(portfolio_row.capital) if portfolio_row else DEFAULT_CAPITAL
 
     if snap:
@@ -654,7 +654,7 @@ def analytics(request):
 def exposure(request):
     tenant = request.tenant
     today = date.today()
-    portfolio_row = Portfolio.objects.filter(tenant=tenant).first()
+    portfolio_row = Portfolio.objects.filter(tenant=tenant).order_by("created_at").first()
     capital = float(portfolio_row.capital) if portfolio_row else DEFAULT_CAPITAL
     equity_invested = float(portfolio_row.used_capital) if portfolio_row else 0.0
 

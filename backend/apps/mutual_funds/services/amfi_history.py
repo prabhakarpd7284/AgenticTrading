@@ -12,14 +12,18 @@ Row format (semicolon-delimited, category/AMC header lines interleaved):
 
 AMC ids are sparse and not published as a list, so they are resolved by
 probing ``mf=1..MAX_AMC_ID`` with a one-week window and reading the AMC
-header line out of the response. Results are cached per process.
+header line out of the response. Results are cached per process, and a
+persisted map (``data/amfi_amc_ids.json``, probed 2026-10-21) is consulted
+first so a normal run makes no probe calls at all.
 """
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
+from pathlib import Path
 
 import requests
 import structlog
@@ -29,6 +33,7 @@ log = structlog.get_logger(__name__)
 AMFI_HISTORY_URL = "https://portal.amfiindia.com/DownloadNAVHistoryReport_Po.aspx"
 MAX_AMC_ID = 150
 _AMC_ID_CACHE: dict[str, int] = {}
+AMC_ID_FILE = Path(__file__).resolve().parent.parent / "data" / "amfi_amc_ids.json"
 
 
 @dataclass(frozen=True)
@@ -78,12 +83,27 @@ def parse_history_text(text: str, scheme_codes: set[str] | None = None) -> list[
     return out
 
 
-def resolve_amc_id(amc_name: str, max_id: int = MAX_AMC_ID) -> int | None:
-    """Finds AMFI's numeric id for an AMC by probing, ascending, until the
-    AMC header line in a one-week report matches ``amc_name``."""
+def known_amc_ids() -> dict[str, int]:
+    """Persisted AMC-name -> AMFI id map (normalised names)."""
+    try:
+        raw = json.loads(AMC_ID_FILE.read_text())
+    except (OSError, ValueError):
+        return {}
+    return {_norm(k): int(v) for k, v in (raw.get("amc_ids") or {}).items()}
+
+
+def resolve_amc_id(amc_name: str, max_id: int = MAX_AMC_ID, probe: bool = True) -> int | None:
+    """AMFI's numeric id for an AMC: the persisted map first, else probe
+    ascending until the AMC header line in a one-week report matches."""
     key = _norm(amc_name)
     if key in _AMC_ID_CACHE:
         return _AMC_ID_CACHE[key]
+    persisted = known_amc_ids()
+    if key in persisted:
+        _AMC_ID_CACHE[key] = persisted[key]
+        return persisted[key]
+    if not probe:
+        return None
     end = date.today()
     start = end - timedelta(days=7)
     for amc_id in range(1, max_id + 1):

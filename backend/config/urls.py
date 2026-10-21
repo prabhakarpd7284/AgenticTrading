@@ -35,6 +35,9 @@ api_v1 = [
     path("strategies/", include("apps.strategies.api.urls")),
     path("agents/", include("apps.agents_core.api.urls")),
     path("rag/", include("apps.rag.api.urls")),
+    # /mutual-funds/ — MF holdings, AMFI scheme search/NAV history, advisor
+    # findings and NAV freshness (Phase MF-UI).
+    path("mutual-funds/", include("apps.mutual_funds.api.urls")),
     # /journals/ is a back-compat alias — Phase 4a folded the journals app
     # into events; the viewset now reads the unified Event log.
     path("journals/", include("apps.events.api.journal_urls")),

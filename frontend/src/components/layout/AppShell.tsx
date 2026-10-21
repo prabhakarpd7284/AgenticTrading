@@ -2,7 +2,7 @@ import * as React from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import {
   Activity, BarChart3, Bot, Briefcase, Calendar, CandlestickChart, Gauge, HeartPulse,
-  Layers, Link2, LineChart, ListChecks, LogOut, Moon, Radio, Search, Settings,
+  Layers, Landmark, Link2, LineChart, ListChecks, LogOut, Moon, Radio, Search, Settings,
   ShoppingBag, Sigma, Sun, Terminal, TrendingUp, Triangle, Workflow,
 } from "lucide-react";
 import { useAuthStore } from "@/stores/auth";
@@ -23,6 +23,7 @@ const nav = [
   { to: "/positions",  label: "Positions",    icon: Briefcase, hint: "g p" },
   { to: "/options",    label: "Options Desk", icon: Sigma,     hint: "g e" },
   { to: "/monthly",    label: "Monthly",      icon: Calendar,  hint: "g m" },
+  { to: "/mutual-funds", label: "Mutual Funds", icon: Landmark, hint: "g f" },
   { to: "/agents",     label: "Agent Console",icon: Bot,       hint: "g a" },
   { to: "/strategies", label: "Strategies",   icon: LineChart, hint: "g s" },
   { to: "/backtester", label: "Backtester",   icon: BarChart3, hint: "g b" },

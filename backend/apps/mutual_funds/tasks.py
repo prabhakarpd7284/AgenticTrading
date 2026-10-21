@@ -15,3 +15,16 @@ def pull_amfi_nav() -> None:
     call_command("pull_amfi_nav")
     call_command("check_stale_navs", limit=0)
     log.info("mf_daily_pull.done")
+
+
+@shared_task(name="apps.mutual_funds.tasks.compute_mf_metrics_weekly", ignore_result=True)
+def compute_mf_metrics_weekly() -> None:
+    """Weekly screener refresh: top up benchmark TRI, then recompute metric
+    snapshots as of the catalog NAV date. NAV history itself is appended
+    daily by pull_amfi_nav."""
+    try:
+        call_command("pull_mf_benchmarks", incremental=True)
+    except Exception as exc:  # noqa: BLE001 — metrics still run without fresh TRI
+        log.warning("mf_benchmarks.weekly_failed", error=str(exc))
+    call_command("compute_mf_metrics")
+    log.info("mf_metrics_weekly.done")

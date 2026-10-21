@@ -3,7 +3,7 @@ import { Command } from "cmdk";
 import * as DialogPrim from "@radix-ui/react-dialog";
 import { useNavigate } from "react-router-dom";
 import {
-  Activity, BarChart3, BookOpen, BriefcaseBusiness, Calendar, Gauge, Layers,
+  Activity, BarChart3, BookOpen, BriefcaseBusiness, Calendar, Gauge, Landmark, Layers,
   LayoutDashboard, Link2, ListChecks, Play, Search, ShoppingBag, Sparkles,
   TestTube2, TrendingUp, Wrench,
 } from "lucide-react";
@@ -63,6 +63,7 @@ export function CommandPalette() {
                 <Item icon={<Activity/>}         onSelect={() => go("/agents")}>Agent Console</Item>
                 <Item icon={<BriefcaseBusiness/>}onSelect={() => go("/positions")}>Positions</Item>
                 <Item icon={<Calendar/>}         onSelect={() => go("/monthly")}>Monthly · Earning tracker</Item>
+                <Item icon={<Landmark/>}         onSelect={() => go("/mutual-funds")}>Mutual Funds</Item>
                 <Item icon={<BookOpen/>}         onSelect={() => go("/journal")}>Journal</Item>
                 <Item icon={<Sparkles/>}         onSelect={() => go("/strategies")}>Strategies</Item>
                 <Item icon={<TestTube2/>}        onSelect={() => go("/backtester")}>Backtester</Item>

@@ -9,6 +9,7 @@ import { SetupPage } from "@/features/setup/SetupPage";
 import { DashboardPage } from "@/features/dashboard/DashboardPage";
 import { PositionsPage } from "@/features/positions/PositionsPage";
 import { MonthlyPage } from "@/features/monthly/MonthlyPage";
+import { MutualFundsPage } from "@/features/mutual-funds/MutualFundsPage";
 import { AgentConsolePage } from "@/features/agents/AgentConsolePage";
 import { StrategyBuilderPage } from "@/features/strategies/StrategyBuilderPage";
 import { BacktesterPage } from "@/features/backtester/BacktesterPage";
@@ -52,6 +53,8 @@ export const router = createBrowserRouter([
       { path: "positions", element: <PositionsPage /> },
       // Post-trade feedback loop — monthly earning tracker.
       { path: "monthly", element: <MonthlyPage /> },
+      // Mutual funds — CAS-imported holdings, AMFI NAVs, advisor findings.
+      { path: "mutual-funds", element: <MutualFundsPage /> },
       { path: "agents", element: <AgentConsolePage /> },
       { path: "agents/:runId", element: <AgentConsolePage /> },
       { path: "strategies", element: <StrategyBuilderPage /> },

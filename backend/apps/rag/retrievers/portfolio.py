@@ -13,7 +13,7 @@ class PortfolioRetriever:
         tenant_id = q.filters.get("tenant_id")
         if not tenant_id:
             return []
-        portfolio = Portfolio.objects.filter(tenant_id=tenant_id).first()
+        portfolio = Portfolio.objects.filter(tenant_id=tenant_id).order_by("created_at").first()
         if portfolio is None:
             return []
 

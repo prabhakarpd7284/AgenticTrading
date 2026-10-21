@@ -105,15 +105,50 @@ Added since this handoff was first written:
 5. Tests need `pytest pytest-django pytest-asyncio factory-boy` in the venv
    (they were missing from the original `.venv` and were installed ad hoc).
 
+### Verified later on 2026-10-17 (second machine, uncommitted working tree)
+- Working tenant here is `istpduckymomo` (`istpduckymomo@gmail.com`, id
+  `000d8a50-ebbe-4a8c-9d1e-cd4bf7a4d026`). Portfolios: `Default` (paper,
+  500,000 — the trading one) and `Mutual Funds` (paper, capital 0, id
+  `ca053d3f-27b4-4717-8013-5944b72c48c9`) for MF holdings. Default-portfolio
+  lookups (`legacy_compat_views`, monthly report view, RAG portfolio
+  retriever) now `order_by("created_at")` so the MF portfolio never gets
+  picked as the trading one.
+- MF-1: `pull_amfi_nav` task ran on the live Celery worker (succeeded in
+  68 s; 14,390 schemes, 87 new NAV rows, stale sweep 5,628). Both beat
+  entries load (Asia/Kolkata, next 23:45). A scheduled fire is still **not
+  observed** — check `logs/beat.log` after 23:45 IST.
+- MF-0b step 3: `manage.py zerodha_login` written + 10 tests (kiteconnect
+  mocked). Shares `apps/market_data/services/broker_connect.py`
+  `connect_broker()` with `POST /brokers/{name}/connect/`. Never run
+  against real Kite. `KITE_API_KEY` / `KITE_API_SECRET` added to settings
+  and `backend/.env.example`.
+- MF-3 smoke: `run_mf_advisor --tenant istpduckymomo --portfolio "Mutual
+  Funds"` runs cleanly on Postgres → "No MF holdings found … 0 finding(s)."
+
 ### What is genuinely still open
 1. **A real CAS PDF** (CAMS/KFintech) — the only thing that can verify MF-2
-   and MF-3. First run: `import_cas_statement ... --dry-run`.
-2. **A `trading.Portfolio` for MF holdings** and a tenant choice (the old
-   machine's DB had 2 tenants and none for MF).
-3. **Broker/tenant setup** — see the dev-stack skill and CLAUDE.md MF-0b.
-   Note the old machine's DB did not contain `prabhakarpd7284@gmail.com`
-   or tenant `29e91b00…`, and its only broker link was `paper`, so it was on
+   and MF-3. First run: `import_cas_statement --file <pdf> --tenant
+   istpduckymomo --portfolio "Mutual Funds" --dry-run`.
+2. ~~A `trading.Portfolio` for MF holdings~~ — done (see above).
+3. **Real Zerodha link** — owner registers a Kite Connect app (Personal
+   plan), puts `KITE_API_KEY` / `KITE_API_SECRET` in `backend/.env`, then
+   runs `manage.py zerodha_login --tenant istpduckymomo` every trading
+   morning. No broker links exist on this machine yet, so equity is on
    synthesized prices.
+3a. **MF-UI — Mutual Fund page** (new phase, after MF-3, not gated on MF-5):
+   read-only `/api/v1/mutual-funds/` API (holdings + latest NAV/value/gain,
+   scheme search + NAV history, latest advisor findings, NAV freshness),
+   `frontend/src/features/mutual-funds/` + `/mutual-funds` route + nav entry
+   (holdings table, allocation by category, findings, freshness badge, CAS
+   empty state), backend tenant-isolation tests + a frontend test.
+   **Built 2026-10-17 (uncommitted):** API in `apps/mutual_funds/api/`
+   (holdings, schemes search/detail, advisor findings + owner-only POST run,
+   status), page in `frontend/src/features/mutual-funds/`. 18 API tests + 2
+   frontend tests; full backend suite 588 passed. Curled live on
+   `istpduckymomo`: every endpoint 200 with empty holdings; a temporary
+   holding (folio `TEMP-MFUI-VERIFY-DELETE-ME`) was created, curled and
+   deleted again — zero MF holdings remain. Not visually checked in a
+   browser. Acceptance with real holdings still waits on a CAS import.
 4. **MF-4 owner decisions** — see the findings doc. Notably: remove the six
    empty old app dirs?; archive `db.sqlite3`?; investigate the possible
    v1/v2 `enrich_signals` clash (v1 may mark `swing_v2_*` signals

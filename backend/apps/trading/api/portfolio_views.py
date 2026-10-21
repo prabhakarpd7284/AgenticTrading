@@ -66,7 +66,7 @@ class MonthlyReportView(APIView):
         qs = Portfolio.objects.filter(tenant=request.tenant)
         if portfolio_id:
             qs = qs.filter(id=portfolio_id)
-        portfolio = qs.first()
+        portfolio = qs.order_by("created_at").first()
 
         if not portfolio:
             # Auto-create a default paper portfolio so the page always loads

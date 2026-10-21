@@ -53,10 +53,27 @@ def test_year_chunks_short_and_single_day():
 
 
 @pytest.fixture(autouse=True)
-def _clear_amc_cache():
+def _clear_amc_cache(tmp_path, monkeypatch):
+    # Probe tests must not be short-circuited by the persisted id map.
+    monkeypatch.setattr(h, "AMC_ID_FILE", tmp_path / "missing.json")
     h._AMC_ID_CACHE.clear()
     yield
     h._AMC_ID_CACHE.clear()
+
+
+def test_resolve_amc_id_uses_persisted_map_without_probing(tmp_path, monkeypatch):
+    f = tmp_path / "ids.json"
+    f.write_text('{"amc_ids": {"HDFC Mutual Fund": 9}}')
+    monkeypatch.setattr(h, "AMC_ID_FILE", f)
+    with patch.object(h, "fetch_history_text", side_effect=AssertionError("no probing")):
+        assert h.resolve_amc_id("hdfc mutual fund") == 9
+        assert h.resolve_amc_id("Unknown Mutual Fund", probe=False) is None
+
+
+def test_shipped_amc_id_map_is_valid():
+    import json
+    ids = json.loads(h.Path(h.__file__).resolve().parent.parent.joinpath("data", "amfi_amc_ids.json").read_text())
+    assert ids["amc_ids"]["HDFC Mutual Fund"] == 9
 
 
 def test_resolve_amc_id_probes_until_match_and_caches():

@@ -99,10 +99,12 @@ cd frontend && npm install && cd ..
 
 Copy env templates (gitignored):
 ```bash
-cp .env.example .env
 cp backend/.env.example backend/.env
 cp frontend/.env.example frontend/.env.local
 ```
+Do **not** copy the root `.env.example` to `.env` — it is a prod/compose
+template whose `postgres:5432`-style hosts are loaded first and override
+`backend/.env`. A root `.env` should hold only `SMARTAPI_*` / `TELEGRAM_*`.
 
 ### Start the stack
 ```bash
@@ -341,6 +343,7 @@ frontend/src/
 │   ├── dashboard/                 Capital + equity curve + AI activity
 │   ├── positions/                 Live positions with WebSocket LTP
 │   ├── monthly/                   Monthly Feedback Report
+│   ├── mutual-funds/              MF holdings, NAV freshness, allocation, advisor findings, scheme search (/mutual-funds)
 │   ├── pyramid/                   Pyramid strategy UI (live ticker, KPIs, charts)
 │   ├── swing-scanner/             Oliver Kell scanner
 │   ├── agents/                    Agent run console
@@ -454,10 +457,22 @@ while working the phases below — they're sequenced on purpose.
 
 **Status as of 2026-10-17 (read this first):** MF-0 through MF-3 are
 *built and committed* on branch `abhinav/redesign-v2` (`35985cc`), with 89
-passing tests in `backend/tests/mutual_funds/`. What is **not** done: nothing
-has run against real holdings (no real CAS PDF yet — CAS import and the
-advisor are verified on synthetic fixtures only), the broker/tenant
-setup (MF-0b and MF-0's last item), and the MF-4 owner decisions. Don't
+passing tests in `backend/tests/mutual_funds/`. Later on 2026-10-17 (second
+machine, uncommitted working tree): the MF portfolio was created, the
+`pull_amfi_nav` Celery task was run through the live worker, and the
+`zerodha_login` helper (MF-0b step 3) was written and tested. What is **not**
+done: nothing has run against real holdings (no real CAS PDF yet — CAS
+import and the advisor are verified on synthetic fixtures only), the real
+Zerodha link (needs the owner's Kite app + daily browser login), the MF-UI
+page, and the MF-4 owner decisions.
+
+**Working tenant on the current dev machine:** `istpduckymomo`
+(`istpduckymomo@gmail.com`, tenant id `000d8a50-ebbe-4a8c-9d1e-cd4bf7a4d026`)
+— `prabhakarpd7284@gmail.com` and `admin@local.dev` do not exist there. It has
+two `trading.Portfolio` rows: `Default` (paper, 500,000, trading) and
+`Mutual Funds` (paper, capital 0, id `ca053d3f-27b4-4717-8013-5944b72c48c9`)
+for `MFHolding`. Code that picks "the" portfolio for a tenant now takes the
+oldest (`order_by("created_at")`), so the trading one wins. Don't
 rebuild anything marked `[x]` below — start from the unticked items. Check
 `HANDOFF_MUTUAL_FUNDS.md` at the repo root for the detail behind each item.
 
@@ -497,7 +512,10 @@ yourself rather than suggesting it.
       users were `istpduckymomo@gmail.com` and `smoke@alphadesk.local`
       (no `prabhakarpd7284@gmail.com`, no tenant `29e91b00…`), and the only
       broker link was a `paper` link — so the system was on synthesized
-      prices. Blocked on MF-0b / tenant setup.
+      prices. Blocked on MF-0b / tenant setup. **2026-10-17, current
+      machine:** still open — no broker links at all on tenant
+      `istpduckymomo`; MF-0b step 3's helper now exists, steps 1/2/4/5 need
+      the owner.
 
 **Acceptance:** `pull_amfi_nav` succeeds with real counts; a Django shell
 query (`MFScheme.objects.count()`, `MFNav.objects.count()`) confirms it.
@@ -536,12 +554,20 @@ Steps:
        not present yet; follow the existing `ANGEL_*` naming convention in
        that file if one exists, otherwise just `KITE_API_KEY=` /
        `KITE_API_SECRET=`).
-3. [ ] Write a small daily-login helper (new — doesn't exist yet), e.g.
+3. [x] Write a small daily-login helper (new — doesn't exist yet), e.g.
        `apps.market_data.management.commands.zerodha_login`: print
        `KiteConnect(api_key=...).login_url()`, prompt for the
        `request_token` from the redirect URL after the owner logs in in a
        browser, call `kite.generate_session(request_token, api_secret=...)`
-       to get `access_token`.
+       to get `access_token`. **Done 2026-10-17** (tested with `kiteconnect`
+       mocked — never run against real Kite):
+       `manage.py zerodha_login --tenant <slug|uuid> [--user <email>]
+       [--request-token <tok|redirect URL>] [--dry-run]`. It also does step 4
+       itself: it saves through `apps/market_data/services/broker_connect.py`
+       `connect_broker()`, the same path `POST /brokers/zerodha/connect/` now
+       uses (auth probe before save, Fernet-encrypted). Reads
+       `KITE_API_KEY` / `KITE_API_SECRET` from settings (now in
+       `backend/.env.example`, empty).
 4. [ ] POST that `{api_key, api_secret, access_token}` to
        `/api/v1/brokers/zerodha/connect/` (existing endpoint,
        `BrokerLinkViewSet.connect` in `apps/market_data/api/broker_views.py`
@@ -560,7 +586,9 @@ action) returns real position/holdings/margin data from the owner's actual
 Zerodha account, not synthesized data.
 
 ### Phase MF-1 — Daily collector hardening
-**Status:** built and tested (2026-10-17). Beat has not been observed firing.
+**Status:** built and tested (2026-10-17). The task has run end-to-end
+through the live Celery worker; the crontab firing at 23:45/07:30 has not
+been observed yet.
 - [x] Schedule `pull_amfi_nav` in Celery beat — `mf-nav-pull-night` (23:45
       IST) and `mf-nav-pull-morning` (07:30 IST), daily, idempotent; task is
       `apps.mutual_funds.tasks.pull_amfi_nav` (also runs the stale sweep)
@@ -574,8 +602,14 @@ Zerodha account, not synthesized data.
       surface stale schemes the owner actually holds.
 
 **Acceptance:** a beat entry exists and fires; manually triggering backfill
-on one scheme produces >1 year of NAV history. *Backfill: met. Beat entry
-exists and loads; "fires" is unverified until a worker + beat run.*
+on one scheme produces >1 year of NAV history. *Backfill: met. Task: met —
+on 2026-10-17 `send_task("apps.mutual_funds.tasks.pull_amfi_nav")` ran on
+the running worker and succeeded in 68 s (`logs/celery.log`: 14,390 schemes
+upserted, 87 new NAV rows, stale sweep 5,628). Beat: both entries load from
+settings with the Asia/Kolkata crontabs (next run 23:45 IST) and the running
+beat was started after they were added — but an actual scheduled fire is
+**not yet observed**. Check `logs/beat.log` for
+`Sending due task mf-nav-pull-night` after 23:45 IST before ticking this.*
 
 ### Phase MF-2 — Real holdings via CAS import
 **Status:** built; **UNVERIFIED against a real statement** — tested only on
@@ -591,7 +625,9 @@ synthetic fixtures (34 tests). Run the first real CAS with `--dry-run`.
 - [x] Command: `import_cas_statement --file <path> --tenant <slug|uuid>
       --portfolio <name|uuid> [--dry-run]`; password from `$CAS_PASSWORD`,
       `--password`, or a prompt (never logged). Needs a `trading.Portfolio`
-      to attach holdings to — none exists for MF yet, create/pick one.
+      to attach holdings to. **2026-10-17:** created — `Mutual Funds` on
+      tenant `istpduckymomo` (pass `--portfolio "Mutual Funds"`; the tenant
+      has two portfolios, so the flag is required).
 
 Known gaps: units/amounts stored as absolute values (direction is
 `txn_type`); closed-out schemes stored with 0 units (filter `units > 0`);
@@ -629,6 +665,47 @@ SQLite). Run: `manage.py run_mf_advisor --tenant <..> [--portfolio <..>]
 **Acceptance:** run against the owner's real CAS-imported holdings; produces
 at least one direct-vs-regular flag and one allocation summary the owner
 hand-verifies against one fund. *NOT met — blocked on MF-2 real CAS data.*
+Smoke run 2026-10-17 against Postgres on the empty `Mutual Funds` portfolio:
+exits cleanly with "No MF holdings found … nothing to advise on. 0
+finding(s)."
+
+### Phase MF-UI — Mutual Fund page (after MF-3; not gated on MF-5)
+**Status:** built 2026-10-17 (uncommitted); verified on the working tenant in
+its **empty state** only — no real holdings until a CAS is imported. Not
+visually verified in a browser (no browser automation was available).
+- [x] Read-only DRF API under `/api/v1/mutual-funds/` (tenant-scoped):
+      holdings with latest NAV / current value / gain, scheme search + NAV
+      history, latest advisor findings, NAV freshness (last pull time +
+      latest `nav_date`). Code: `apps/mutual_funds/api/`. Endpoints:
+      `holdings/` (`?portfolio=`, `?include_closed=1`), `schemes/?q=`,
+      `schemes/<code>/?days=`, `advisor/findings/`, `advisor/run/` (POST,
+      owner-only, emits via `advisor.emit_findings`), `status/`.
+      `status.latest_nav_date` is the busiest recent NAV date, not MAX —
+      liquid funds forward-date weekend NAVs (`max_nav_date` has the raw max).
+      "Latest advisor run" = findings within 10 min of the newest one.
+- [x] Frontend feature `frontend/src/features/mutual-funds/` + route
+      `/mutual-funds` + nav entry (and command palette): holdings table,
+      allocation-by-category view, advisor findings list (direct-vs-regular
+      labelled ESTIMATE), NAV freshness badge, scheme search + NAV chart,
+      empty state explaining how to import a CAS
+- [x] Tests: `backend/tests/mutual_funds/test_api.py` (18, incl. cross-tenant
+      isolation + empty states) + `features/mutual-funds/__tests__/` (2)
+
+**Acceptance:** logged in as the working tenant, `/mutual-funds` renders
+real DB data (empty state today, real holdings once a CAS is imported).
+
+### Phase MF-S — Fund screener (`docs/MF_SCREENER_PLAN.md`)
+**Status (2026-10-21):** first milestone built and run on real data — S0
+(`docs/MF_SCREENER_DATA_SOURCES.md`: mfapi.in for backfill, AMFI stays the
+daily source; 0 mismatches on a 20-scheme cross-check), S1
+(`backfill_mf_nav_history`, `mf_data_coverage`; 1,650-scheme live universe +
+436 dead schemes, ~3.3M NAV rows), S2 benchmarks only (`pull_mf_benchmarks`,
+7 Nifty TRIs; **TER/AUM not sourced**, scored as n/a), S3
+(`compute_mf_metrics`, beat `mf-metrics-weekly` Sat 08:15 IST), S4
+(`screen_mf`), S5 (`mf_backtest_screen`, `docs/MF_SCREENER_VALIDATION.md`:
+**the score has no measurable predictive value** — it describes the past, it
+does not forecast) and the S9 Screener tab on `/mutual-funds`. Not started:
+S6 planner (needs owner capital/SIP/horizon), S7, S8, S10.
 
 ### Phase MF-4 — Housekeeping decisions (parallel track, doesn't block MF-0..3)
 **Status:** investigated read-only (2026-10-17); **no decisions made, nothing

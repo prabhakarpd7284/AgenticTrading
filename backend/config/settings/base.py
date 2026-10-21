@@ -349,6 +349,12 @@ CELERY_BEAT_SCHEDULE = {
         "task": "apps.mutual_funds.tasks.pull_amfi_nav",
         "schedule": crontab(hour=7, minute=30),
     },
+    # Screener metric snapshots (MF-S S3) — Saturday 08:15 IST, after the
+    # Friday-night + Saturday-morning NAV pulls.
+    "mf-metrics-weekly": {
+        "task": "apps.mutual_funds.tasks.compute_mf_metrics_weekly",
+        "schedule": crontab(hour=8, minute=15, day_of_week="sat"),
+    },
 }
 
 # CORS/CSRF ------------------------------------------------------------
