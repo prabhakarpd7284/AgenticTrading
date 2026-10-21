@@ -1,7 +1,9 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
-from apps.strategies.api.views import StrategyInstanceViewSet, BacktestViewSet
+from apps.strategies.api.views import (
+    BacktestViewSet, StrategyInstanceViewSet, spec_preview, spec_validate, templates_view, universe_view,
+)
 from apps.strategies.api.scalp_views import create_scalp_run, scalp_defaults
 from apps.trading.api import legacy_compat_views as _compat
 
@@ -19,5 +21,10 @@ urlpatterns = [
     # client then opens ws/scalp/<run_id>/ to drive the playback.
     path("scalp/runs/", create_scalp_run, name="scalp-create-run"),
     path("scalp/defaults/", scalp_defaults, name="scalp-defaults"),
+    # Strategy Studio (R4): templates, spec validation / signal preview, data universe.
+    path("templates/", templates_view, name="strategy-templates"),
+    path("spec/validate/", spec_validate, name="strategy-spec-validate"),
+    path("spec/preview-signals/", spec_preview, name="strategy-spec-preview"),
+    path("universe/", universe_view, name="strategy-universe"),
     path("", include(router.urls)),
 ]
