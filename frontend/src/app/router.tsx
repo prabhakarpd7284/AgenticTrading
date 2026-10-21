@@ -12,7 +12,8 @@ import { MonthlyPage } from "@/features/monthly/MonthlyPage";
 import { MutualFundsPage } from "@/features/mutual-funds/MutualFundsPage";
 import { NightlyScanPage } from "@/features/nightly-scan/NightlyScanPage";
 import { AgentConsolePage } from "@/features/agents/AgentConsolePage";
-import { StrategyBuilderPage } from "@/features/strategies/StrategyBuilderPage";
+import { StrategiesPage } from "@/features/strategies/StrategiesPage";
+import { StrategyStudioPage } from "@/features/strategies/StrategyStudioPage";
 import { BacktesterPage } from "@/features/backtester/BacktesterPage";
 import { BrokerLinkPage } from "@/features/broker/BrokerLinkPage";
 import { BrokerMonitorPage } from "@/features/broker-monitor/BrokerMonitorPage";
@@ -69,7 +70,8 @@ export const router = createBrowserRouter([
       { path: "nightly-scan", element: <NightlyScanPage /> },
       { path: "agents", element: <AgentConsolePage /> },
       { path: "agents/:runId", element: <AgentConsolePage /> },
-      { path: "strategies", element: <StrategyBuilderPage /> },
+      { path: "strategies", element: <StrategiesPage /> },
+      { path: "strategies/:id", element: <StrategyStudioPage /> },
       { path: "swing-scanner", element: <SwingScannerPage /> },
       { path: "basket", element: <BasketPage /> },
       { path: "backtester", element: <BacktesterPage /> },
