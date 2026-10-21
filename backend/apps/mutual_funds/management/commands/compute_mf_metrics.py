@@ -47,6 +47,7 @@ class Command(BaseCommand):
             self.stdout.flush()
 
         summary = compute_snapshots(as_of, o["category"], dry_run=o["dry_run"], progress=progress)
+        self.stats = {"as_of": as_of.isoformat(), **summary}
         self.stdout.write(self.style.SUCCESS(
             f"Done in {time.monotonic() - t0:.0f}s: {summary['snapshots']} snapshots written "
             f"({summary['schemes_live']} live schemes, {summary['categories']} categories, "

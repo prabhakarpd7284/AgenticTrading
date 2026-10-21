@@ -25,6 +25,7 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         stale = stale_schemes(max_trading_days=options["days"])
+        self.stats = {"stale_schemes": len(stale)}
         self.stdout.write(f"{len(stale)} scheme(s) with no NAV in >{options['days']} trading days.")
         by_amc = Counter(s.amc_name for s, _ in stale)
         for amc, n in by_amc.most_common(5):

@@ -2,12 +2,9 @@ import * as React from "react";
 import { Command } from "cmdk";
 import * as DialogPrim from "@radix-ui/react-dialog";
 import { useNavigate } from "react-router-dom";
-import {
-  Activity, BarChart3, BookOpen, BriefcaseBusiness, Calendar, Gauge, Landmark, Layers,
-  LayoutDashboard, Link2, ListChecks, MoonStar, Play, Search, ShoppingBag, Sparkles,
-  TestTube2, TrendingUp, Wrench,
-} from "lucide-react";
+import { BarChart3, History, Play, Search, TrendingUp } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { DESTINATIONS } from "@/lib/navigation";
 
 /**
  * CommandPalette — ⌘K launcher.
@@ -53,29 +50,28 @@ export function CommandPalette() {
                 No matches. Try a different term.
               </Command.Empty>
 
-              <Group heading="Navigate">
-                <Item icon={<Gauge/>}            onSelect={() => go("/pulse")}>Today · What's happening</Item>
-                <Item icon={<Layers/>}           onSelect={() => go("/rotation")}>Rotation · Sector drill-in</Item>
-                <Item icon={<ListChecks/>}       onSelect={() => go("/shortlist")}>Shortlist · Tradeable names</Item>
-                <Item icon={<TrendingUp/>}       onSelect={() => go("/swing-scanner")}>Swing Scanner · OK Cycles</Item>
-                <Item icon={<ShoppingBag/>}      onSelect={() => go("/basket")}>Morning Basket</Item>
-                <Item icon={<MoonStar/>}         onSelect={() => go("/nightly-scan")}>Nightly Scan · News & sentiment filter</Item>
-                <Item icon={<LayoutDashboard/>}  onSelect={() => go("/dashboard")}>Desk overview</Item>
-                <Item icon={<Activity/>}         onSelect={() => go("/agents")}>Agent Console</Item>
-                <Item icon={<BriefcaseBusiness/>}onSelect={() => go("/positions")}>Positions</Item>
-                <Item icon={<Calendar/>}         onSelect={() => go("/monthly")}>Monthly · Earning tracker</Item>
-                <Item icon={<Landmark/>}         onSelect={() => go("/mutual-funds")}>Mutual Funds</Item>
-                <Item icon={<BookOpen/>}         onSelect={() => go("/journal")}>Journal</Item>
-                <Item icon={<Sparkles/>}         onSelect={() => go("/strategies")}>Strategies</Item>
-                <Item icon={<TestTube2/>}        onSelect={() => go("/backtester")}>Backtester</Item>
-                <Item icon={<Link2/>}            onSelect={() => go("/broker")}>Broker Link</Item>
-                <Item icon={<Wrench/>}           onSelect={() => go("/settings")}>Settings</Item>
-              </Group>
+              {/* Every destination and every page under it (plan §2: old pages stay searchable). */}
+              {DESTINATIONS.map((d) => (
+                <Group key={d.key} heading={d.label}>
+                  <Item icon={<d.icon />} value={`${d.label} ${d.description}`} onSelect={() => go(d.to)}>
+                    {d.label} · {d.description}
+                  </Item>
+                  {d.items
+                    .filter((i) => !(i.to === d.to && i.label === d.label))
+                    .map((i) => (
+                      <Item key={i.to} icon={<i.icon />} value={`${d.label} ${i.label} ${i.keywords ?? ""} ${i.to}`}
+                            onSelect={() => go(i.to)}>
+                        {i.label}
+                      </Item>
+                    ))}
+                </Group>
+              ))}
 
               <Group heading="Actions">
                 <Item icon={<Play/>}         shortcut="n" onSelect={() => go("/agents?new=1")}>New agent run</Item>
                 <Item icon={<BarChart3/>}    shortcut="b" onSelect={() => go("/backtester?new=1")}>New backtest</Item>
                 <Item icon={<TrendingUp/>}   shortcut="s" onSelect={() => go("/swing-scanner")}>Scan active phases</Item>
+                <Item icon={<History/>}      onSelect={() => go("/runs")}>Did today's jobs run? · Run receipts</Item>
               </Group>
             </Command.List>
           </Command>
@@ -93,12 +89,13 @@ function Group({ heading, children }: { heading: string; children: React.ReactNo
   );
 }
 
-function Item({ icon, shortcut, children, onSelect }: {
-  icon: React.ReactNode; shortcut?: string; children: React.ReactNode; onSelect: () => void;
+function Item({ icon, shortcut, children, onSelect, value }: {
+  icon: React.ReactNode; shortcut?: string; children: React.ReactNode; onSelect: () => void; value?: string;
 }) {
   return (
     <Command.Item
       onSelect={onSelect}
+      value={value}
       className={cn(
         "flex items-center gap-3 px-2 py-2 rounded-xs text-body text-fg cursor-pointer",
         "data-[selected=true]:bg-surface-2",

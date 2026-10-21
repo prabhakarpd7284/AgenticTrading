@@ -33,6 +33,8 @@ from datetime import datetime
 from celery import shared_task
 from celery.exceptions import SoftTimeLimitExceeded
 
+from apps.system.services.run_receipts import tracked_task
+
 logger = logging.getLogger(__name__)
 
 # Screener session bounds. Market is 09:15–15:30 IST = 6h15m; 7h hard
@@ -68,11 +70,18 @@ def _record_run(task_key: str, force: bool):
 
     from apps.system.models import PipelineRun
 
+    from apps.system.services.run_receipts import current_run
+
     run = PipelineRun.objects.create(
         task=task_key,
         trigger=PipelineRun.Trigger.MANUAL if force else PipelineRun.Trigger.BEAT,
         status=PipelineRun.Status.RUNNING,
     )
+    # PipelineRun stays the detail row; the RunReceipt (opened by
+    # @tracked_task around the task) points at it.
+    receipt = current_run()
+    receipt.set_detail("pipeline_run", run.id)
+    receipt.link("Daily pipeline", "/pipeline")
     try:
         yield run
     except Exception as e:
@@ -85,11 +94,72 @@ def _record_run(task_key: str, force: bool):
         run.status = PipelineRun.Status.SUCCESS
         run.finished_at = timezone.now()
         run.save(update_fields=["status", "finished_at", "summary"])
+        receipt.output(**{k: v for k, v in (run.summary or {}).items() if k != "ok"})
+
+
+# ─── Run-receipt checks per stage (UX redesign R1) ───────────────────
+
+_TASK_PREFIX = "apps.strategies.tasks.daily_pipeline."
+
+
+def _signals_since(handle, source: str) -> int | None:
+    from apps.strategies.models import Signal
+
+    if handle.receipt is None:
+        return None
+    return Signal.objects.filter(source=source, signal_time__gte=handle.receipt.started_at).count()
+
+
+def _check_swing_scan(handle, result) -> None:
+    from apps.system.services import run_checks as rc
+
+    n = _signals_since(handle, "OK_SCANNER")
+    handle.output(signals=n)
+    handle.check(rc.broker_live(required=True))
+    handle.check(rc.candle_freshness("1d"))
+    handle.link("Swing scanner", "/swing-scanner")
+
+
+def _check_basket(handle, result) -> None:
+    from apps.system.services import run_checks as rc
+
+    handle.check(rc.broker_live(required=True))
+    handle.link("Basket", "/basket")
+
+
+def _check_screener(handle, result) -> None:
+    from apps.system.services import run_checks as rc
+
+    handle.check(rc.broker_live(required=True))
+    handle.check(rc.rows_written("bars processed", (result or {}).get("bars_processed")))
+    handle.check(rc.candle_freshness("1m"))
+
+
+def _check_eod(handle, result) -> None:
+    from django.utils import timezone
+
+    from apps.strategies.models import Signal
+    from apps.system.services import run_checks as rc
+
+    handle.check(rc.broker_live(required=True))
+    if (result or {}).get("mode") == "today":
+        left = Signal.objects.filter(signal_date=timezone.localdate(), eod_price__isnull=True).count()
+        handle.output(unenriched_today=left)
+        handle.check(rc.make("all_enriched", rc.PASS if left == 0 else rc.WARN,
+                             "every signal from today enriched" if left == 0
+                             else f"{left} of today's signals still un-enriched"))
+    handle.link("Monthly report", "/monthly")
+
+
+def _check_derive(handle, result) -> None:
+    handle.link("Monthly report", "/monthly")
 
 
 # ─── Premarket: Oliver Kell swing scan ────────────────────────────────
 
 @shared_task(name="apps.strategies.tasks.daily_pipeline.run_swing_scan")
+@tracked_task("pipeline", "pipeline.swing_scan", task_name=_TASK_PREFIX + "run_swing_scan",
+              primary_metric="signals", max_seconds=2 * 3600, post=_check_swing_scan)
 def run_swing_scan(force: bool = False) -> dict:
     """Run the Oliver Kell daily/weekly scanner across NIFTY 100.
 
@@ -119,6 +189,9 @@ def run_swing_scan(force: bool = False) -> dict:
     time_limit=_SCREENER_HARD_LIMIT,
     soft_time_limit=_SCREENER_SOFT_LIMIT,
 )
+@tracked_task("pipeline", "pipeline.screener_session", task_name=_TASK_PREFIX + "run_screener_session",
+              primary_metric="signals_emitted", max_seconds=_SCREENER_HARD_LIMIT + 600,
+              post=_check_screener)
 def run_screener_session(force: bool = False) -> dict:
     """Run the live intraday screener until market close.
 
@@ -272,6 +345,8 @@ def _run_screener_until_close(r) -> dict:
 # ─── Premarket: morning basket scan ───────────────────────────────────
 
 @shared_task(name="apps.strategies.tasks.daily_pipeline.run_premarket_basket")
+@tracked_task("pipeline", "pipeline.premarket_basket", task_name=_TASK_PREFIX + "run_premarket_basket",
+              primary_metric="signals", max_seconds=3600, post=_check_basket)
 def run_premarket_basket(force: bool = False) -> dict:
     """Run the morning basket in scan mode and persist its signals.
 
@@ -373,6 +448,8 @@ def _persist_basket_signals(signals) -> int:
 # ─── EOD: derive intraday trades (replay the just-closed session) ──────
 
 @shared_task(name="apps.strategies.tasks.daily_pipeline.derive_intraday_trades")
+@tracked_task("pipeline", "pipeline.derive_trades", task_name=_TASK_PREFIX + "derive_intraday_trades",
+              max_seconds=2 * 3600, post=_check_derive)
 def derive_intraday_trades(force: bool = False, date: str | None = None) -> dict:
     """Derive paper trades by replaying a completed intraday session.
 
@@ -424,6 +501,8 @@ def derive_intraday_trades(force: bool = False, date: str | None = None) -> dict
 # ─── EOD: signal outcome enrichment ───────────────────────────────────
 
 @shared_task(name="apps.strategies.tasks.daily_pipeline.run_eod_enrichment")
+@tracked_task("pipeline", "pipeline.eod_enrichment", task_name=_TASK_PREFIX + "run_eod_enrichment",
+              max_seconds=2 * 3600, post=_check_eod)
 def run_eod_enrichment(
     force: bool = False,
     date: str | None = None,

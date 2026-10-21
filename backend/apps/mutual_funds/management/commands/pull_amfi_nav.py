@@ -28,18 +28,24 @@ class Command(BaseCommand):
         parser.add_argument("--dry-run", action="store_true", help="Parse only, skip DB writes")
 
     def handle(self, *args, **options):
+        # Machine-readable result for callers that pass a Command instance to
+        # call_command (the Celery task reads it into its run receipt).
+        self.stats = {"rows_parsed": 0}
         self.stdout.write("Fetching AMFI NAV file...")
         try:
             text = fetch_nav_text()
         except RuntimeError as exc:
             self.stderr.write(self.style.ERROR(str(exc)))
             log.error("amfi_nav_pull.fetch_failed", error=str(exc))
+            self.stats["error"] = f"fetch failed: {exc}"[:500]
             return
 
         rows = parse_nav_text(text)
+        self.stats["rows_parsed"] = len(rows)
         self.stdout.write(f"Parsed {len(rows)} scheme/NAV rows.")
         if not rows:
             self.stderr.write(self.style.WARNING("Zero rows parsed — AMFI likely changed format. Not writing."))
+            self.stats["error"] = "zero rows parsed (AMFI format change?)"
             return
 
         if options["dry_run"]:
@@ -84,6 +90,8 @@ class Command(BaseCommand):
                 f"({navs_skipped} already present for their date)."
             )
         )
+        self.stats.update(schemes_upserted=schemes_upserted, navs_created=navs_created,
+                          navs_skipped=navs_skipped)
         log.info(
             "amfi_nav_pull.complete",
             schemes=schemes_upserted,

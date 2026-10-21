@@ -1,4 +1,4 @@
-import { createBrowserRouter } from "react-router-dom";
+import { Navigate, createBrowserRouter, useLocation } from "react-router-dom";
 import { AppShell } from "@/components/layout/AppShell";
 import { LoginPage } from "@/features/auth/LoginPage";
 import { SignupPage } from "@/features/auth/SignupPage";
@@ -25,8 +25,16 @@ import OptionsDashboardPage from "@/features/options/OptionsDashboardPage";
 import { OpsPage } from "@/features/ops/OpsPage";
 import { PipelinePage } from "@/features/pipeline/PipelinePage";
 import { OnboardingPage } from "@/features/auth/OnboardingPage";
+import { RunsPage } from "@/features/runs/RunsPage";
+import { LabPage } from "@/features/lab/LabPage";
 import { RequireAuth } from "./guards";
 import { RouteError } from "./RouteError";
+
+/** Old/alias URL → its destination, keeping any query string (e.g. OAuth ?connected=). */
+function Redirect({ to }: { to: string }) {
+  const { search, hash } = useLocation();
+  return <Navigate to={`${to}${search}${hash}`} replace />;
+}
 
 export const router = createBrowserRouter([
   { path: "/login", element: <LoginPage /> },
@@ -80,6 +88,17 @@ export const router = createBrowserRouter([
       { path: "ops", element: <OpsPage /> },
       // Daily-pipeline debugger — status + manual triggers (owner-gated).
       { path: "pipeline", element: <PipelinePage /> },
+      // ── UX redesign R0/R1 destinations (docs/ALPHADESK_UX_REDESIGN_PLAN.md §2) ──
+      // Every page above keeps its own URL; the sidebar groups them under
+      // Today / Portfolio / Strategies / Lab / Runs / Settings.
+      { path: "runs", element: <RunsPage /> },
+      { path: "runs/:receiptId", element: <RunsPage /> },
+      { path: "lab", element: <LabPage /> },
+      { path: "today", element: <Redirect to="/" /> },
+      { path: "portfolio", element: <Redirect to="/dashboard" /> },
+      { path: "settings", element: <Redirect to="/brokers" /> },
+      // The command palette used to link /broker (singular) — keep it working.
+      { path: "broker", element: <Redirect to="/brokers" /> },
     ],
   },
 ]);

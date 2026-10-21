@@ -371,7 +371,18 @@ CELERY_BEAT_SCHEDULE = {
         "schedule": crontab(hour=21, minute=0),
         "options": {"expires": 3 * 3600},
     },
+    # Run-receipt schedule watcher (UX redesign R1) — writes a `not_run`
+    # receipt + alert for any crontab job above that missed its window, and
+    # fails receipts stuck RUNNING (hard-killed worker). Cheap DB-only.
+    "watch-run-schedule": {
+        "task": "apps.system.tasks.watch_run_schedule",
+        "schedule": 600.0,
+        "options": {"expires": 600},
+    },
 }
+
+# Run receipts: push failed / missed jobs to Telegram (UX redesign R1).
+RUN_RECEIPTS_TELEGRAM = env.bool("RUN_RECEIPTS_TELEGRAM", default=True)
 
 # Owner-approved trading rules (docs/strategies/TRADING_RULES.md). Applied to
 # automated (non-manual) origins only; RiskEngine stays the last gate.

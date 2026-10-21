@@ -1,7 +1,21 @@
 from celery import shared_task
 
+from apps.system.services.run_receipts import tracked_task
 
-@shared_task(ignore_result=True)
+TASK_NAME = "apps.trading.tasks.reconcile.reconcile_stale_intraday"
+
+
+def _describe(run, result) -> None:
+    if isinstance(result, dict):
+        run.output(**{k: v for k, v in result.items() if isinstance(v, (int, float, str))})
+        if result.get("failed"):
+            run.swallowed_error(f"{result['failed']} stale trade(s) could not be reconciled",
+                                count=int(result["failed"]))
+
+
+@shared_task(name=TASK_NAME, ignore_result=True)
+@tracked_task("job", "reconcile_stale_intraday", task_name=TASK_NAME, max_seconds=1800,
+              post=_describe)
 def reconcile_stale_intraday() -> dict:
     """Sweep INTRADAY trades left open by a dead session.
 

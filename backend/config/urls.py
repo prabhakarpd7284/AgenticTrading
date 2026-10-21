@@ -58,6 +58,8 @@ api_v1 = [
     path("ops/", include("apps.system.api.urls")),
     # /system/ — kill switch + AI pause/resume.
     path("system/", include("apps.system.api.system_urls")),
+    # /runs/ — run receipts, expected schedule, top-bar status (UX redesign R1).
+    path("runs/", include("apps.system.api.runs_urls")),
     # V2-native top-level endpoints (positions, trades, options-positions,
     # risk). The view functions still live in apps.trading.api.legacy_compat_views
     # for one more cycle while we refactor them into per-resource viewsets.

@@ -39,3 +39,6 @@ CACHES = {
 }
 CELERY_TASK_ALWAYS_EAGER = True
 CELERY_TASK_EAGER_PROPAGATES = True
+
+# Never push run-receipt alerts to a real Telegram chat from tests.
+RUN_RECEIPTS_TELEGRAM = False
