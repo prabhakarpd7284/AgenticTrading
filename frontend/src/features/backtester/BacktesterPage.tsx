@@ -2,6 +2,8 @@
  * Backtester — unified backtest hub for all strategies.
  *
  * Tabs:
+ *   Your strategies — any user strategy (rule spec or backtestable template)
+ *                     through the Studio's deterministic engine (R4)
  *   Daily Swing  — OK cycle phases on daily candles, trailing SL, walk-forward
  *   Intraday     — 3m/5m/15m grid search (TF × SL ATR × R:R), RSI momentum
  *
@@ -38,10 +40,11 @@ import { Skeleton } from "@/components/ui/Skeleton";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { DataTable, type Column } from "@/components/ui/DataTable";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/Tabs";
+import { StrategyBacktestTab } from "./StrategyBacktestTab";
 
 export function BacktesterPage() {
   return (
-    <div className="px-6 py-6 space-y-6 max-w-[1440px] mx-auto">
+    <div className="p-6 pt-2 space-y-6 max-w-[1400px]">
       <header className="flex items-end justify-between gap-4 flex-wrap">
         <div className="min-w-0">
           <p className="text-caption uppercase tracking-wider text-fg-subtle">
@@ -49,8 +52,8 @@ export function BacktesterPage() {
           </p>
           <h1 className="text-h1 text-fg">Test before you trust</h1>
           <p className="text-body-sm text-fg-muted mt-1 max-w-2xl">
-            Replay OK cycle strategies against historical candles. Same risk gates,
-            same exit management, no live capital.
+            Backtest any of your strategies on stored candles with costs and an out-of-sample
+            hold-out, or run the three legacy OK-cycle modes. No live capital.
           </p>
         </div>
         <Link to="/swing-scanner"
@@ -59,13 +62,17 @@ export function BacktesterPage() {
         </Link>
       </header>
 
-      <Tabs defaultValue="daily">
+      <Tabs defaultValue="strategy">
         <TabsList>
+          <TabsTrigger value="strategy">Your strategies</TabsTrigger>
           <TabsTrigger value="daily">Daily Swing</TabsTrigger>
           <TabsTrigger value="intraday">Intraday Multi-TF</TabsTrigger>
           <TabsTrigger value="basket">Morning Basket</TabsTrigger>
         </TabsList>
 
+        <TabsContent value="strategy">
+          <StrategyBacktestTab />
+        </TabsContent>
         <TabsContent value="daily">
           <BacktestTab mode="daily" />
         </TabsContent>
