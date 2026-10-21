@@ -4,7 +4,7 @@ import * as DialogPrim from "@radix-ui/react-dialog";
 import { useNavigate } from "react-router-dom";
 import {
   Activity, BarChart3, BookOpen, BriefcaseBusiness, Calendar, Gauge, Landmark, Layers,
-  LayoutDashboard, Link2, ListChecks, Play, Search, ShoppingBag, Sparkles,
+  LayoutDashboard, Link2, ListChecks, MoonStar, Play, Search, ShoppingBag, Sparkles,
   TestTube2, TrendingUp, Wrench,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -59,6 +59,7 @@ export function CommandPalette() {
                 <Item icon={<ListChecks/>}       onSelect={() => go("/shortlist")}>Shortlist · Tradeable names</Item>
                 <Item icon={<TrendingUp/>}       onSelect={() => go("/swing-scanner")}>Swing Scanner · OK Cycles</Item>
                 <Item icon={<ShoppingBag/>}      onSelect={() => go("/basket")}>Morning Basket</Item>
+                <Item icon={<MoonStar/>}         onSelect={() => go("/nightly-scan")}>Nightly Scan · News & sentiment filter</Item>
                 <Item icon={<LayoutDashboard/>}  onSelect={() => go("/dashboard")}>Desk overview</Item>
                 <Item icon={<Activity/>}         onSelect={() => go("/agents")}>Agent Console</Item>
                 <Item icon={<BriefcaseBusiness/>}onSelect={() => go("/positions")}>Positions</Item>

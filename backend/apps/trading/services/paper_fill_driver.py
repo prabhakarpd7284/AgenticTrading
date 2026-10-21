@@ -23,16 +23,46 @@ from django.utils import timezone
 from apps.trading.models import Order, Trade
 from apps.trading.services import trade_lifecycle
 from apps.trading.services.paper_fills import exit_for, fill_price_for
-from apps.trading.services.place_order import reference_price
+from apps.trading.services.trailing_stop import update_trailing_stop
+from apps.trading.services.place_order import _MANUAL_ORIGINS, reference_price
 
 log = structlog.get_logger(__name__)
 
 # NSE/BSE square-off. Intraday positions do not survive it.
 MARKET_CLOSE = (15, 30)
+# Automated (non-manual) intraday trades are flat by 15:14 IST —
+# docs/strategies/TRADING_RULES.md §2 (no bars 15:15–15:29 since 2026-08-03;
+# the book's "exit 15 min before close"). Override via
+# settings.TRADING_RULES["AUTO_SQUARE_OFF"] = "HH:MM".
+AUTO_SQUARE_OFF = (15, 14)
 
 
 def _is_after_close(now) -> bool:
     return (now.hour, now.minute) >= MARKET_CLOSE
+
+
+def _auto_square_off() -> tuple[int, int]:
+    from django.conf import settings
+
+    raw = getattr(settings, "TRADING_RULES", {}).get("AUTO_SQUARE_OFF")
+    if raw:
+        try:
+            hh, mm = str(raw).split(":")
+            return int(hh), int(mm)
+        except ValueError:
+            pass
+    return AUTO_SQUARE_OFF
+
+
+def is_automated(obj) -> bool:
+    return (getattr(obj, "origin", "") or "") not in _MANUAL_ORIGINS
+
+
+def _session_over_for(obj, now) -> bool:
+    """Has ``obj``'s intraday session ended? 15:14 for automated, 15:30 manual."""
+    if is_automated(obj):
+        return (now.hour, now.minute) >= _auto_square_off()
+    return _is_after_close(now)
 
 
 def _pnl(trade, exit_price: Decimal) -> Decimal:
@@ -70,15 +100,13 @@ def _fill_resting_orders(tenant_id, now, counts) -> None:
         Order.objects.filter(status=Order.Status.SENT), tenant_id,
     ).select_related("portfolio")
 
-    after_close = _is_after_close(now)
-
     for order in orders.iterator():
         try:
             # An INTRADAY order that never filled dies with its session. Left
             # resting it survives the night and fills the next morning at a
             # stale limit as though it were fresh — observed 2026-09-10, when a
             # 09-Sep PAYTM order filled at 09:16 the following day.
-            if after_close and order.product == "INTRADAY":
+            if _session_over_for(order, now) and order.product == "INTRADAY":
                 order.status = Order.Status.CANCELLED
                 order.error = "unfilled at session close"
                 order.save(update_fields=["status", "error", "updated_at"])
@@ -132,10 +160,9 @@ def _close_open_trades(tenant_id, now, counts) -> None:
         tenant_id,
     ).select_related("portfolio")
 
-    after_close = _is_after_close(now)
-
     for trade in trades.iterator():
         try:
+            after_close = _session_over_for(trade, now)
             ltp = reference_price(trade.symbol, trade.tenant_id)
 
             if ltp and ltp > 0:
@@ -149,6 +176,14 @@ def _close_open_trades(tenant_id, now, counts) -> None:
                     last_ltp=Decimal(str(ltp)),
                 )
                 trade.last_ltp = Decimal(str(ltp))
+
+            if ltp and ltp > 0 and is_automated(trade):
+                # Breakeven-then-ATR trail (TRADING_RULES.md §2); ratchets only.
+                try:
+                    update_trailing_stop(trade, float(ltp))
+                except Exception:  # noqa: BLE001 — a trail failure keeps the old stop
+                    log.warning("paper_fills.trail_failed", trade_id=str(trade.id),
+                                exc_info=True)
 
             hit = exit_for(trade, ltp) if (ltp and ltp > 0) else None
             if hit is not None:

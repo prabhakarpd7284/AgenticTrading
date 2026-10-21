@@ -85,6 +85,7 @@ LOCAL_APPS = [
     "apps.billing",
     "apps.market_data",  # absorbed the broker app in Phase 4b (BrokerLink + adapters)
     "apps.mutual_funds",  # MF scheme/NAV catalog + holdings (added 2026-10)
+    "apps.news",         # news store, sentiment, nightly scan (TRADING_RULES.md, 2026-10)
     "apps.trading",      # Phase 4c: portfolio + orders + trades merged into one
     "apps.strategies",
     "apps.agents_core",
@@ -355,6 +356,57 @@ CELERY_BEAT_SCHEDULE = {
         "task": "apps.mutual_funds.tasks.compute_mf_metrics_weekly",
         "schedule": crontab(hour=8, minute=15, day_of_week="sat"),
     },
+    # ── Trading rules (docs/strategies/TRADING_RULES.md) ──────────────
+    # Losing-streak cooldown state for the next trading day — 16:45 IST,
+    # after the 16:30 trade derivation has closed the day's paper trades.
+    "daily-cooldown-refresh": {
+        "task": "apps.trading.tasks.cooldown.refresh_cooldowns",
+        "schedule": crontab(hour=16, minute=45, day_of_week="mon-fri"),
+    },
+    # Nightly scan — 21:00 IST every evening; the task self-skips unless
+    # TOMORROW is an NSE trading day (so it runs Sun–Thu, holiday-aware).
+    # Refresh → levels → news → Claude sentiment → verdicts → Telegram.
+    "nightly-scan": {
+        "task": "apps.news.tasks.run_nightly_scan",
+        "schedule": crontab(hour=21, minute=0),
+        "options": {"expires": 3 * 3600},
+    },
+}
+
+# Owner-approved trading rules (docs/strategies/TRADING_RULES.md). Applied to
+# automated (non-manual) origins only; RiskEngine stays the last gate.
+TRADING_RULES = {
+    "COOLDOWN_LOSS_DAYS": env.int("COOLDOWN_LOSS_DAYS", default=3),
+    "COOLDOWN_TRADING_DAYS": env.int("COOLDOWN_TRADING_DAYS", default=2),
+    "REDUCED_RISK_MULTIPLIER": env.float("REDUCED_RISK_MULTIPLIER", default=0.5),
+    "COOLDOWN_LOOKBACK_DAYS": 365,
+    "DEDUCT_ESTIMATED_COSTS": True,
+    "TRAIL_BREAKEVEN_R": 1.0,
+    "TRAIL_ATR_MULT": 1.5,
+    "TRAIL_ATR_PERIOD": 14,
+    "TRAIL_ATR_TIMEFRAME_MIN": env.int("TRAIL_ATR_TIMEFRAME_MIN", default=5),
+    "AUTO_SQUARE_OFF": "15:14",
+}
+
+# Headline sentiment (Claude CLI) + per-stock rollup thresholds.
+NEWS_SENTIMENT = {
+    "STRONG_THRESHOLD": 0.5,      # |score| for strong_positive / strong_negative
+    "MILD_THRESHOLD": 0.15,       # |score| for positive / negative
+    "MIN_STRONG_WEIGHT": 0.5,     # evidence (Σ recency×materiality×confidence) for "strong"
+    "HALF_LIFE_HOURS": 24.0,
+    "BATCH_SIZE": 30,
+    "CLI_TIMEOUT_SECS": 240,
+    "MAX_BATCHES": 30,
+    "MAX_CONSECUTIVE_FAILURES": 2,
+    "MODEL": env("NEWS_SENTIMENT_MODEL", default=""),   # "" = CLI default
+    "LOOKBACK_DAYS": 3,
+}
+
+NIGHTLY_SCAN = {
+    "CPR_NARROW_PCT": 0.25,
+    "CPR_WIDE_PCT": 0.75,
+    "MAX_SCORED_PER_SYMBOL": 10,
+    "MAX_SCORED_MACRO": 40,
 }
 
 # CORS/CSRF ------------------------------------------------------------

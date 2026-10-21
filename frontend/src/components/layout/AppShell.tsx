@@ -3,7 +3,7 @@ import { NavLink, Outlet, useLocation } from "react-router-dom";
 import {
   Activity, BarChart3, Bot, Briefcase, Calendar, CandlestickChart, Gauge, HeartPulse,
   Layers, Landmark, Link2, LineChart, ListChecks, LogOut, Moon, Radio, Search, Settings,
-  ShoppingBag, Sigma, Sun, Terminal, TrendingUp, Triangle, Workflow,
+  MoonStar, ShoppingBag, Sigma, Sun, Terminal, TrendingUp, Triangle, Workflow,
 } from "lucide-react";
 import { useAuthStore } from "@/stores/auth";
 import { cn } from "@/lib/utils";
@@ -19,6 +19,7 @@ const nav = [
   { to: "/shortlist",  label: "Shortlist",    icon: ListChecks, hint: "g l" },
   { to: "/swing-scanner", label: "Swing Scanner", icon: TrendingUp, hint: "g w" },
   { to: "/basket",     label: "Basket",       icon: ShoppingBag, hint: "g x" },
+  { to: "/nightly-scan", label: "Nightly Scan", icon: MoonStar, hint: "g h" },
   { to: "/dashboard",  label: "Desk",         icon: Activity,   hint: "g d" },
   { to: "/positions",  label: "Positions",    icon: Briefcase, hint: "g p" },
   { to: "/options",    label: "Options Desk", icon: Sigma,     hint: "g e" },

@@ -38,6 +38,10 @@ api_v1 = [
     # /mutual-funds/ — MF holdings, AMFI scheme search/NAV history, advisor
     # findings and NAV freshness (Phase MF-UI).
     path("mutual-funds/", include("apps.mutual_funds.api.urls")),
+    # /nightly-scan/ — 21:00 IST news-sentiment + levels scan; /trading-rules/
+    # — losing-streak cooldown status (docs/strategies/TRADING_RULES.md).
+    path("nightly-scan/", include("apps.news.api.urls")),
+    path("trading-rules/", include("apps.trading.api.rules_urls")),
     # /journals/ is a back-compat alias — Phase 4a folded the journals app
     # into events; the viewset now reads the unified Event log.
     path("journals/", include("apps.events.api.journal_urls")),

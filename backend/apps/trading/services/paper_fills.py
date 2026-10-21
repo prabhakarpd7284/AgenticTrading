@@ -25,6 +25,7 @@ from __future__ import annotations
 # Exit reasons — mirror Trade.CloseReason.
 SL_HIT = "SL_HIT"
 TARGET_HIT = "TARGET_HIT"
+TRAIL = "TRAIL"
 
 
 def fill_price_for(order, ltp: float) -> float | None:
@@ -52,13 +53,20 @@ def exit_for(trade, ltp: float) -> tuple[float, str] | None:
         return None
 
     stop = float(trade.stop_loss) if trade.stop_loss is not None else None
+    # A trailing stop (TRADING_RULES.md §2) replaces the initial one once it
+    # has moved; a hit on it closes the trade as TRAIL rather than SL_HIT.
+    trail = getattr(trade, "trail_stop", None)
+    trail = float(trail) if trail is not None else None
+    reason = SL_HIT
+    if trail is not None and trail != stop:
+        stop, reason = trail, TRAIL
     target = float(trade.target) if trade.target is not None else None
     long_side = trade.side == "BUY"
 
     # Stop is evaluated first — see module docstring on ambiguity.
     if stop is not None:
         if (long_side and ltp <= stop) or (not long_side and ltp >= stop):
-            return stop, SL_HIT
+            return stop, reason
 
     if target is not None:
         if (long_side and ltp >= target) or (not long_side and ltp <= target):

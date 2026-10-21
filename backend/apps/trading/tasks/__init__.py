@@ -6,3 +6,4 @@ from apps.trading.tasks.outbox import process_outbox  # noqa: F401
 from apps.trading.tasks.paper_fills import process_paper_fills  # noqa: F401
 from apps.trading.tasks.reconcile import reconcile_stale_intraday  # noqa: F401
 from apps.trading.tasks.snapshots import refresh_all  # noqa: F401
+from apps.trading.tasks.cooldown import refresh_cooldowns  # noqa: F401

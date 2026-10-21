@@ -377,6 +377,14 @@ class Trade(TenantModel):
     pnl_percent    = models.DecimalField(max_digits=8, decimal_places=4, null=True, blank=True)
     last_ltp       = models.DecimalField(max_digits=14, decimal_places=4, null=True, blank=True)
 
+    # ── Trailing stop (docs/strategies/TRADING_RULES.md §2) ──
+    # ``stop_loss`` stays the immutable initial stop (it defines 1R);
+    # ``trail_stop`` is the live, ratchet-only stop the paper sweep moves.
+    trail_stop = models.DecimalField(max_digits=14, decimal_places=4, null=True, blank=True,
+                                     help_text="Current trailing stop (null = initial stop)")
+    best_price = models.DecimalField(max_digits=14, decimal_places=4, null=True, blank=True,
+                                     help_text="Most favourable price seen since entry")
+
     # ── Metadata ──
     origin     = models.CharField(max_length=16, choices=Origin.choices, default=Origin.WORKFLOW)
     trade_date = models.DateField(db_index=True)
@@ -410,3 +418,39 @@ class Trade(TenantModel):
     def risk_reward_ratio(self) -> float:
         r = self.risk_amount
         return float(self.reward_amount) / r if r > 0 else 0.0
+
+
+# ════════════════════════════════════════════════════════════════════
+# Losing-streak cooldown state (docs/strategies/TRADING_RULES.md §1)
+# ════════════════════════════════════════════════════════════════════
+
+class CooldownState(TenantModel):
+    """Persisted snapshot of a portfolio's losing-streak cooldown.
+
+    Derived deterministically from closed Trades by
+    ``apps.trading.services.cooldown`` — this row is a cache for the UI /
+    Telegram / audit; the order path re-evaluates from trades so it is
+    never stale.
+    """
+
+    class Status(models.TextChoices):
+        NORMAL = "normal"
+        COOLDOWN = "cooldown"   # no new automated entries
+        REDUCED = "reduced"     # post-cooldown, risk per trade × multiplier
+
+    id = models.BigAutoField(primary_key=True)
+    portfolio = models.OneToOneField(
+        Portfolio, on_delete=models.CASCADE, related_name="cooldown_state",
+    )
+    as_of = models.DateField(help_text="Trading day this status applies to")
+    status = models.CharField(max_length=10, choices=Status.choices, default=Status.NORMAL)
+    loss_streak = models.IntegerField(default=0)
+    trigger_date = models.DateField(null=True, blank=True)
+    cooldown_until = models.DateField(null=True, blank=True)
+    risk_multiplier = models.DecimalField(max_digits=4, decimal_places=2, default=Decimal("1"))
+    history = models.JSONField(default=list, blank=True,
+                               help_text="Recent [{date, net_pnl, kind}] trade days")
+    reason = models.CharField(max_length=255, blank=True, default="")
+
+    class Meta:
+        db_table = "trading_cooldownstate"

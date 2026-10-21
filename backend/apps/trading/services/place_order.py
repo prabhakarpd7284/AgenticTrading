@@ -60,7 +60,6 @@ def reference_price(symbol: str, tenant_id) -> float:
 class PlaceOrder:
     risk: RiskEngine = field(default_factory=RiskEngine)
 
-    @transaction.atomic
     def execute(self, tenant, user, portfolio, draft: OrderDraft,
                 idempotency_key: str = "") -> OrderResult:
         # ── Emergency halt + AI pause (operator kill switch) ───────────────
@@ -69,6 +68,36 @@ class PlaceOrder:
         if draft.origin not in _MANUAL_ORIGINS and is_ai_paused(tenant.id):
             raise RiskRejected("AI trading is paused by the operator")
 
+        # ── Owner trading rules (TRADING_RULES.md §1 cooldown, §3 sentiment)
+        # Automated origins only; manual/UI orders are exempt. Evaluated
+        # OUTSIDE the order transaction so the audit / shadow-trade event
+        # survives the rejection (a rollback would erase it).
+        rules = None
+        if draft.origin not in _MANUAL_ORIGINS:
+            if idempotency_key:
+                existing = Order.objects.filter(
+                    tenant=tenant, idempotency_key=idempotency_key,
+                ).first()
+                if existing:
+                    return OrderResult(id=str(existing.id), status=existing.status)
+            from apps.trading.services import trading_rules
+
+            rules = trading_rules.check_automated_entry(portfolio, draft)
+            if not rules.allowed:
+                trading_rules.record_block(tenant, portfolio, draft, rules, user=user)
+                raise RiskRejected(rules.reason)
+
+        result = self._execute_atomic(tenant, user, portfolio, draft, idempotency_key,
+                                      risk_multiplier=rules.risk_multiplier if rules else 1.0)
+        if rules is not None:
+            from apps.trading.services import trading_rules
+
+            trading_rules.tag_accepted(tenant, portfolio, draft, result.id, rules)
+        return result
+
+    @transaction.atomic
+    def _execute_atomic(self, tenant, user, portfolio, draft: OrderDraft,
+                        idempotency_key: str = "", *, risk_multiplier: float = 1.0) -> OrderResult:
         # ── Idempotency: a repeated key returns the existing order ─────────
         if idempotency_key:
             existing = Order.objects.filter(
@@ -102,7 +131,13 @@ class PlaceOrder:
             # the threshold silently rejected every UI order.) (#48)
             confidence=1.0 if draft.origin in _MANUAL_ORIGINS else 0.55,
         )
-        decision = self.risk.validate(trade_draft, portfolio_id=portfolio.id)
+        if risk_multiplier != 1.0:
+            # Post-cooldown reduced risk (TRADING_RULES.md §1) — tightens the
+            # RiskEngine's risk-per-trade cap; the engine is still the gate.
+            decision = self.risk.validate(trade_draft, portfolio_id=portfolio.id,
+                                          risk_multiplier=risk_multiplier)
+        else:
+            decision = self.risk.validate(trade_draft, portfolio_id=portfolio.id)
         if not decision.approved:
             raise RiskRejected(decision.reason)
 

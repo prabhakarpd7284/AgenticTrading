@@ -177,9 +177,16 @@ class RiskEngine:
         self.limits = settings.ALPHADESK
         self.regime_strict = os.getenv("RISK_REGIME_STRICT", "0") == "1"
 
-    def validate(self, draft: TradeDraft | dict, *, portfolio_id) -> RiskDecision:
+    def validate(self, draft: TradeDraft | dict, *, portfolio_id,
+                 risk_multiplier: float = 1.0) -> RiskDecision:
         """Run all 10 criteria against the draft. Returns first failure or
-        an approve if everything passes."""
+        an approve if everything passes.
+
+        ``risk_multiplier`` scales the risk-per-trade cap (criterion 4). The
+        losing-streak rule (TRADING_RULES.md §1) passes 0.5 for automated
+        orders after a cooldown; it can only tighten the cap, never loosen it.
+        """
+        risk_multiplier = min(1.0, max(0.0, float(risk_multiplier)))
         if isinstance(draft, dict):
             draft = TradeDraft(**{k: draft[k] for k in TradeDraft.__dataclass_fields__ if k in draft})
 
@@ -233,19 +240,24 @@ class RiskEngine:
         # 4. Risk per trade
         risk_per_share = abs(draft.entry_price - draft.stop_loss)
         risk_amount = risk_per_share * draft.quantity
-        max_risk = capital * (float(self.limits["MAX_RISK_PER_TRADE_PCT"]) / 100)
+        max_risk_pct = float(self.limits["MAX_RISK_PER_TRADE_PCT"]) * risk_multiplier
+        max_risk = capital * (max_risk_pct / 100)
         risk_pct = (risk_amount / capital) * 100 if capital > 0 else 0
         criteria["risk"] = {
             "amount": round(risk_amount, 2),
             "max_allowed": round(max_risk, 2),
             "pct_of_capital": round(risk_pct, 3),
         }
+        if risk_multiplier != 1.0:
+            criteria["risk"]["risk_multiplier"] = risk_multiplier
         if risk_amount > max_risk:
+            note = f" (×{risk_multiplier:g} losing-streak reduction)" if risk_multiplier != 1.0 else ""
             return RiskDecision(
                 approved=False,
                 reason=(
                     f"Risk {risk_amount:.0f} INR exceeds "
-                    f"{self.limits['MAX_RISK_PER_TRADE_PCT']}% of capital ({max_risk:.0f} INR)"
+                    f"{self.limits['MAX_RISK_PER_TRADE_PCT'] if risk_multiplier == 1.0 else f'{max_risk_pct:g}'}"
+                    f"% of capital ({max_risk:.0f} INR){note}"
                 ),
                 criteria=criteria,
             )
