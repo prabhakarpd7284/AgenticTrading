@@ -154,7 +154,7 @@ def _detail(r: RunReceipt) -> dict | None:
             b = Backtest.objects.filter(id=r.detail_id, tenant_id=r.tenant_id).first()
             return b and {"kind": "backtest", "id": str(b.id), "status": b.status,
                           "from": b.from_date.isoformat(), "to": b.to_date.isoformat(),
-                          "metrics": b.metrics, "href": "/strategies"}
+                          "metrics": b.metrics, "href": f"/strategies/{b.instance_id}?backtest={b.id}"}
     except Exception:  # noqa: BLE001
         return None
     return None

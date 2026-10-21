@@ -18,7 +18,8 @@ log = structlog.get_logger(__name__)
 
 AGENT_STATUS = {"queued": "queued", "running": "running", "succeeded": "success",
                 "failed": "failed", "cancelled": "skipped"}
-BACKTEST_STATUS = {"queued": "queued", "running": "running", "done": "success", "failed": "failed"}
+BACKTEST_STATUS = {"queued": "queued", "running": "running", "done": "success", "failed": "failed",
+                   "cancelled": "skipped"}
 
 # Agent runs live under a 30-min expiry sweep; backtests get the sweeper's 6 h.
 AGENT_MAX_SECONDS = 45 * 60
@@ -97,15 +98,34 @@ def sync_agent_run(run, *, alert: bool = True):
 def sync_backtest(bt, *, alert: bool = True):
     try:
         status = BACKTEST_STATUS.get(bt.status, "running")
-        terminal = status in ("success", "failed")
+        terminal = status in ("success", "failed", "skipped")
         metrics = bt.metrics or {}
+        prov = getattr(bt, "data_provenance", None) or {}
         checks = []
-        if status == "success":
+        if status == "success" and prov:
+            # Studio engine run (apps.strategies.services.backtest_service).
+            checks.append({"name": "real_metrics", "status": "pass",
+                           "message": "computed by the deterministic strategy_backtest engine"})
+            checks.append({"name": "data_not_synthetic", "status": "fail" if prov.get("synthetic") else "pass",
+                           "message": prov.get("data_source", "")[:200]})
+            sample = prov.get("sample") or {}
+            checks.append({"name": "sample_size", "status": "warn" if sample.get("too_few") else "pass",
+                           "message": f"{sample.get('trades', 0)} trades (threshold {sample.get('threshold')})"})
+            gaps = prov.get("gap_sessions", 0)
+            checks.append({"name": "data_gaps", "status": "warn" if gaps else "pass",
+                           "message": f"{gaps} symbol-session(s) with <90% of expected bars"})
+            if prov.get("symbols_missing"):
+                checks.append({"name": "symbols_loaded", "status": "warn",
+                               "message": f"no data for {', '.join(prov['symbols_missing'][:10])}"})
+            gate = prov.get("live_gate") or {}
+            if gate.get("passes") is False:
+                checks.append({"name": "live_risk_gate", "status": "warn", "message": gate.get("message", "")[:300]})
+        elif status == "success":
             numeric = [v for v in metrics.values() if isinstance(v, (int, float))]
             if not metrics or not any(numeric):
-                # run_backtest is still a placeholder that writes zeros (plan §1).
+                # Rows written by the pre-R4 placeholder task carry all-zero metrics.
                 checks.append({"name": "real_metrics", "status": "warn",
-                               "message": "every metric is 0 — the generic backtest task is a placeholder"})
+                               "message": "every metric is 0 — written by the old placeholder backtest task"})
             else:
                 checks.append({"name": "real_metrics", "status": "pass", "message": "metrics computed"})
         if status == "failed":
@@ -113,16 +133,25 @@ def sync_backtest(bt, *, alert: bool = True):
                            "message": (bt.error or "failed")[:300]})
         instance = getattr(bt, "instance", None)
         name = getattr(instance, "strategy_name", "") or "backtest"
+        keys = ("trades", "net_pnl", "win_rate", "avg_r", "profit_factor", "max_drawdown", "costs")
+        outputs = ({k: metrics.get(k) for k in keys if isinstance(metrics.get(k), (int, float))} if prov else
+                   {k: v for k, v in metrics.items() if isinstance(v, (int, float, str))})
+        if prov:
+            outputs.update({"timeframe": prov.get("timeframe"), "sessions": prov.get("sessions"),
+                            "symbols": len(prov.get("symbols_loaded") or []), "provenance": prov.get("label")})
+        outputs["equity_points"] = len(bt.equity_curve or [])
+        if status == "skipped":
+            outputs["cancelled"] = True
+        href = f"/strategies/{bt.instance_id}?backtest={bt.id}"
         return _upsert(
             detail_kind="backtest", detail_id=str(bt.id), tenant_id=bt.tenant_id, kind="backtest",
-            name=f"backtest.{name}", status=status, started_at=bt.created_at,
-            finished_at=bt.updated_at if terminal else None,
+            name=f"backtest.{name}", status=status,
+            started_at=getattr(bt, "started_at", None) or bt.created_at,
+            finished_at=(getattr(bt, "finished_at", None) or bt.updated_at) if terminal else None,
             error=bt.error if status == "failed" else "",
             inputs={"instance_id": str(bt.instance_id), "from": bt.from_date.isoformat(),
-                    "to": bt.to_date.isoformat()},
-            outputs={**{k: v for k, v in metrics.items() if isinstance(v, (int, float, str))},
-                     "equity_points": len(bt.equity_curve or [])},
-            checks=checks, links=[{"label": "Strategies", "href": "/strategies"}],
+                    "to": bt.to_date.isoformat(), **({"config": bt.config} if getattr(bt, "config", None) else {})},
+            outputs=outputs, checks=checks, links=[{"label": "Backtest report", "href": href}],
             max_seconds=BACKTEST_MAX_SECONDS, trigger="api", alert=alert,
         )
     except Exception as e:  # noqa: BLE001
