@@ -44,6 +44,8 @@ api_v1 = [
     # — losing-streak cooldown status (docs/strategies/TRADING_RULES.md).
     path("nightly-scan/", include("apps.news.api.urls")),
     path("trading-rules/", include("apps.trading.api.rules_urls")),
+    # /actions/ — Action Board cards for the Today page (UX redesign R3).
+    path("actions/", include("apps.trading.api.actions_urls")),
     # /journals/ is a back-compat alias — Phase 4a folded the journals app
     # into events; the viewset now reads the unified Event log.
     path("journals/", include("apps.events.api.journal_urls")),
