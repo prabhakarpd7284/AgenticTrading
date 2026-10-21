@@ -16,6 +16,7 @@ class TimeframeMode(Enum):
     """How the engine progresses through time."""
     DAILY = "daily"         # Walk-forward on daily bars
     INTRADAY = "intraday"   # Bar-by-bar replay
+    TIMELINE = "timeline"   # All symbols chronologically, next-bar-open fills
 
 
 class TradeSide(Enum):

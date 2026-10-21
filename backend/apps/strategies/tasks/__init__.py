@@ -7,3 +7,4 @@ from apps.strategies.tasks.daily_pipeline import (  # noqa: F401
     run_screener_session,
     run_swing_scan,
 )
+from apps.strategies.tasks.backtest import run_backtest  # noqa: F401,E402

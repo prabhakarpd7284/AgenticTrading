@@ -1,19 +1,13 @@
+"""Studio backtest task (queue ``backtests``).
+
+Replaces the old placeholder that wrote all-zero metrics. The work is done by
+``apps.strategies.services.backtest_service.run_backtest_job``; the Backtest
+row's post_save keeps its RunReceipt in sync (apps.system.detail_receipts).
+"""
 from celery import shared_task
 
-from apps.strategies.models import Backtest
 
-
-@shared_task(queue="backtests")
-def run_backtest(backtest_id: str) -> None:
-    bt = Backtest.objects.get(id=backtest_id)
-    bt.status = Backtest.Status.RUNNING
-    bt.save(update_fields=["status"])
-    try:
-        # Placeholder metrics — real impl drives the backtester engine.
-        bt.metrics = {"sharpe": 0.0, "maxdd": 0.0, "cagr": 0.0, "trades": 0}
-        bt.equity_curve = []
-        bt.status = Backtest.Status.DONE
-    except Exception as e:  # noqa: BLE001
-        bt.status = Backtest.Status.FAILED
-        bt.error = str(e)
-    bt.save()
+@shared_task(queue="backtests", acks_late=False)
+def run_backtest(backtest_id: str) -> str:
+    from apps.strategies.services.backtest_service import run_backtest_job
+    return run_backtest_job(backtest_id)

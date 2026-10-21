@@ -137,15 +137,28 @@ class PartialExit(ExitCheck):
 # ──────────────────────────────────────────────
 
 class StoplossExit(ExitCheck):
-    """Check if current stoploss (possibly moved by breakeven/trail) is hit."""
+    """Check if current stoploss (possibly moved by breakeven/trail) is hit.
+
+    ``gap_aware=True``: a bar that OPENS beyond the stop fills at the open
+    (the stop can't be honoured through a gap). Default False keeps the
+    legacy behaviour (fill at the stop price) for existing backtests.
+    """
+
+    def __init__(self, gap_aware: bool = False):
+        self.gap_aware = gap_aware
 
     def check(self, trade, bar: Bar) -> Optional[ExitSignal]:
+        reason = "Trail SL" if trade.trail_active else ("BE stop" if trade.breakeven_done else "SL hit")
         if trade.side == TradeSide.BUY and bar.low <= trade.stoploss:
-            reason = "Trail SL" if trade.trail_active else ("BE stop" if trade.breakeven_done else "SL hit")
-            return ExitSignal(price=trade.stoploss, reason=reason)
+            price = trade.stoploss
+            if self.gap_aware and bar.open < trade.stoploss:
+                price = bar.open
+            return ExitSignal(price=price, reason=reason)
         if trade.side == TradeSide.SHORT and bar.high >= trade.stoploss:
-            reason = "Trail SL" if trade.trail_active else ("BE stop" if trade.breakeven_done else "SL hit")
-            return ExitSignal(price=trade.stoploss, reason=reason)
+            price = trade.stoploss
+            if self.gap_aware and bar.open > trade.stoploss:
+                price = bar.open
+            return ExitSignal(price=price, reason=reason)
         return None
 
 

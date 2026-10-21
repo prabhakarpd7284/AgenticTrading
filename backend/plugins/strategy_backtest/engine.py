@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from logzero import logger
 
@@ -44,6 +44,25 @@ class EngineConfig:
     entry_from: Optional[str] = None
     entry_to: Optional[str] = None
 
+    # ── TIMELINE mode only ──────────────────────────────────────────────
+    # Signals are detected on a bar's CLOSE and filled at the NEXT bar's open
+    # of the same symbol (no same-bar look-ahead). Signal levels are either
+    # "relative" (stop/target distances re-anchored to the fill) or "absolute"
+    # (structural prices; a fill that opens beyond either level is rejected) —
+    # set per signal in ``EntrySignal.metadata["levels"]`` (default relative).
+    session_flat: bool = False       # intraday: flat by the last bar of each session
+    eod_minute: Optional[int] = None  # IST minutes; exit at the close of the bar ENDING at/after it
+    bar_minutes: int = 0             # bar length (for the eod check); 0 = daily
+    last_entry_minute: Optional[int] = None  # no fills on a bar starting after this (IST minutes)
+    max_trades_per_day: int = 0      # 0 = unlimited
+    exit_slippage_pct: Optional[float] = None  # None → same as slippage_pct
+    # Round-trip costs for a closed trade (₹). Deducted from trade.pnl; the
+    # gross figure is kept in trade.metadata["gross_pnl"].
+    cost_fn: Optional[Callable[[Any], float]] = None
+    # Optional owner-rule gate (duck-typed): ``status(day) -> (state, mult)``
+    # before entries, ``close_day(day, net_pnl)`` after a day with trades.
+    day_gate: Optional[Any] = None
+
 
 class BacktestEngine:
     """Strategy-agnostic backtester with composable entry/exit management.
@@ -84,6 +103,7 @@ class BacktestEngine:
         self._skipped = 0
         self._daily_pnl = 0.0
         self._last_exit_bar: Dict[str, int] = {}  # symbol → last exit bar index
+        self.rejections: Dict[str, int] = {}       # TIMELINE: skipped signals by reason
 
     def run(
         self,
@@ -100,6 +120,8 @@ class BacktestEngine:
 
         if self.config.mode == TimeframeMode.DAILY:
             self._walk_forward(data, context)
+        elif self.config.mode == TimeframeMode.TIMELINE:
+            self._timeline(data, context)
         else:
             self._replay(data, context)
 
@@ -233,6 +255,180 @@ class BacktestEngine:
                     self.sizer.update_capital(trade.pnl)
 
     # ──────────────────────────────────────────
+    # Mode 3: Timeline (all symbols chronologically)
+    # ──────────────────────────────────────────
+
+    def _timeline(self, data: Dict[str, List[Bar]], context: dict):
+        """Every bar of every symbol in time order. Per bar:
+        1. fill a pending entry for this symbol at the bar's OPEN,
+        2. run exits for this symbol's open trades (incl. the one just filled),
+        3. detect new signals on the bar's CLOSE → pending for the next bar.
+
+        Portfolio limits (max_positions, daily loss, trades/day, owner gate)
+        apply across symbols, which bar-by-bar ``_replay`` cannot do.
+        """
+        cfg = self.config
+        events = sorted(
+            ((b.timestamp, sym, i) for sym, bars in data.items() for i, b in enumerate(bars)),
+            key=lambda e: (e[0], e[1]),
+        )
+        pending: Dict[str, tuple] = {}
+        last_exit: Dict[str, int] = {}
+        loss_limit = cfg.capital * cfg.daily_loss_limit_pct / 100
+        self.rejections: Dict[str, int] = {}
+        day = None
+        day_net = 0.0
+        day_trades = 0
+        day_closed = 0
+
+        def reject(reason: str):
+            self._skipped += 1
+            self.rejections[reason] = self.rejections.get(reason, 0) + 1
+
+        for ts, sym, i in events:
+            d = ts[:10]
+            if d != day:
+                if day is not None and day_closed and cfg.day_gate is not None:
+                    cfg.day_gate.close_day(day, day_net)
+                day, day_net, day_trades, day_closed = d, 0.0, 0, 0
+            bars = data[sym]
+            bar = bars[i]
+            last_of_session = i + 1 >= len(bars) or bars[i + 1].timestamp[:10] != d
+
+            # 1. fill pending
+            p = pending.pop(sym, None)
+            if p is not None:
+                sig, mult = p
+                if cfg.session_flat and sig.timestamp[:10] != d:
+                    reject("no_next_bar_in_session")
+                else:
+                    trade = self._fill(sig, bar, mult, reject)
+                    if trade is not None:
+                        self._open.append(trade)
+                        day_trades += 1
+
+            # 2. exits
+            for trade in [t for t in self._open if t.symbol == sym]:
+                trade.on_bar(bar)
+                ex = self.exit_manager.process(trade, bar)
+                if ex is None and cfg.session_flat and (last_of_session or self._past_eod(bar)):
+                    from plugins.strategy_backtest.types import ExitSignal
+                    ex = ExitSignal(price=bar.close, reason="EOD close")
+                if ex is not None and ex.partial:
+                    trade.on_partial(ex.price, ex.partial_fraction, ex.reason)
+                elif ex is not None:
+                    self._close(trade, ex.price, bar.timestamp, ex.reason)
+                    last_exit[sym] = i
+                    day_net += trade.pnl
+                    day_closed += 1
+
+            # 3. entries (decided on this bar's close, filled next bar)
+            if not self._in_entry_window(d) or i + 1 >= len(bars):
+                continue
+            if cfg.session_flat and last_of_session:
+                continue
+            nxt = bars[i + 1]
+            if cfg.last_entry_minute is not None and _minute(nxt.timestamp) > cfg.last_entry_minute:
+                continue
+            if cfg.session_flat and self._past_eod(nxt):
+                continue
+            if sym in pending or self._count_open(sym) >= cfg.max_concurrent_per_symbol:
+                continue
+            if i - last_exit.get(sym, -10**9) < cfg.cooldown_bars:
+                continue
+            signals = self.entry.detect(sym, bars, i, context)
+            if not signals:
+                continue
+            sig = signals[0]
+            self._total_signals += 1
+            if len(self._open) + len(pending) >= cfg.max_positions:
+                reject("max_positions"); continue
+            if day_net < -loss_limit:
+                reject("daily_loss_limit"); continue
+            if cfg.max_trades_per_day and day_trades + sum(
+                    1 for s, _ in pending.values() if s.timestamp[:10] == d) >= cfg.max_trades_per_day:
+                reject("max_trades_per_day"); continue
+            mult = 1.0
+            if cfg.day_gate is not None:
+                _state, mult = cfg.day_gate.status(d)
+                if mult <= 0:
+                    reject("owner_cooldown"); continue
+            pending[sym] = (sig, mult)
+
+        if day is not None and day_closed and cfg.day_gate is not None:
+            cfg.day_gate.close_day(day, day_net)
+
+    def _past_eod(self, bar: Bar) -> bool:
+        cfg = self.config
+        if cfg.eod_minute is None:
+            return False
+        return _minute(bar.timestamp) + cfg.bar_minutes >= cfg.eod_minute + 1 \
+            if cfg.bar_minutes else _minute(bar.timestamp) >= cfg.eod_minute
+
+    def _fill(self, sig: EntrySignal, bar: Bar, mult: float, reject) -> Optional[Trade]:
+        """Open a trade at ``bar.open`` from a signal decided on the previous bar."""
+        cfg = self.config
+        fill = bar.open
+        absolute = sig.metadata.get("levels") == "absolute"
+        long = sig.side == TradeSide.BUY
+        if absolute:
+            stop, target = sig.stoploss, sig.target
+            if (long and (fill <= stop or (target and fill >= target))) or \
+                    (not long and (fill >= stop or (target and fill <= target))):
+                reject("opened_beyond_levels")
+                return None
+        else:
+            shift = fill - sig.entry_price
+            stop = sig.stoploss + shift
+            target = sig.target + shift if sig.target else 0.0
+        slip = cfg.slippage_pct / 100
+        exp_fill = fill * (1 + slip) if long else fill * (1 - slip)
+        risk = (exp_fill - stop) if long else (stop - exp_fill)
+        if risk <= 0:
+            reject("non_positive_risk")
+            return None
+        size = self.sizer.compute(exp_fill, risk)
+        qty = int(size.quantity * mult)
+        if qty <= 0:
+            reject("size_zero")
+            return None
+        meta = dict(sig.metadata)
+        meta.update(signal_time=sig.timestamp, signal_price=sig.entry_price,
+                    initial_stop=round(stop, 4), risk_mult=mult)
+        filled = EntrySignal(symbol=sig.symbol, timestamp=bar.timestamp, side=sig.side,
+                             entry_price=fill, stoploss=round(stop, 2),
+                             target=round(target, 2) if target else 0.0,
+                             risk_points=risk, atr=sig.atr, metadata=meta)
+        trade = Trade()
+        trade.on_entry(filled, qty, cfg.slippage_pct, cfg.pnl_mode)
+        trade.risk_points = abs(trade.entry_price - trade.stoploss)
+        if not trade.target:
+            # No target: park it where TargetExit can never trigger.
+            trade.target = float("inf") if long else float("-inf")
+        trade.metadata["initial_risk"] = round(trade.risk_points, 4)
+        return trade
+
+    def _close(self, trade: Trade, price: float, ts: str, reason: str):
+        cfg = self.config
+        pct = cfg.slippage_pct if cfg.exit_slippage_pct is None else cfg.exit_slippage_pct
+        slip = pct / 100
+        # exiting a long sells (price down); exiting a short buys (price up)
+        fill = price * (1 - slip) if trade.side == TradeSide.BUY else price * (1 + slip)
+        trade.on_exit(fill, ts, reason)
+        gross = trade.pnl
+        costs = float(cfg.cost_fn(trade)) if cfg.cost_fn else 0.0
+        trade.metadata["gross_pnl"] = gross
+        trade.metadata["costs"] = round(costs, 2)
+        trade.pnl = round(gross - costs, 2)
+        risk = trade.metadata.get("initial_risk") or trade.risk_points
+        if risk and trade.quantity:
+            trade.rr_achieved = round(trade.pnl / (risk * trade.quantity), 4)
+        if trade in self._open:
+            self._open.remove(trade)
+        self._closed.append(trade)
+        self.sizer.update_capital(trade.pnl)
+
+    # ──────────────────────────────────────────
     # Helpers
     # ──────────────────────────────────────────
 
@@ -265,6 +461,13 @@ class BacktestEngine:
 
     def _close_remaining(self, data: Dict[str, List[Bar]]):
         """Close all open trades at last available price."""
+        if self.config.mode == TimeframeMode.TIMELINE:
+            for trade in list(self._open):
+                bars = data.get(trade.symbol, [])
+                last = bars[-1] if bars else None
+                self._close(trade, last.close if last else trade.entry_price,
+                            last.timestamp if last else trade.entry_time, "End of test")
+            return
         for trade in list(self._open):
             bars = data.get(trade.symbol, [])
             if bars:
@@ -287,3 +490,11 @@ class BacktestEngine:
             if b.timestamp[:10] == day:
                 return i
         return -1
+
+
+def _minute(ts: str) -> int:
+    """IST minute-of-day from an ISO timestamp ('YYYY-MM-DDTHH:MM…'); 0 for dates."""
+    try:
+        return int(ts[11:13]) * 60 + int(ts[14:16])
+    except (ValueError, IndexError):
+        return 0
