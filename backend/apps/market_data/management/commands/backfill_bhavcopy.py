@@ -101,33 +101,52 @@ class Command(BaseCommand):
 
     @staticmethod
     def _day_ts(d: date) -> datetime:
-        # Same stamp Angel's ONE_DAY rows carry: midnight IST of the session.
-        return datetime(d.year, d.month, d.day, tzinfo=IST)
+        return day_ts(d)
 
     def _has_day(self, d: date) -> bool:
-        from apps.market_data.models import Candle
-        return Candle.objects.filter(interval="1d", t=self._day_ts(d)).exists()
+        return has_day(d)
 
     def _write(self, d: date, rows: list[dict]) -> int:
-        from apps.market_data.models import Candle, Symbol
+        return write_day(d, rows)
 
-        by_token = {r["FinInstrmId"]: r for r in rows if r.get("FinInstrmId")}
+
+# ─── Shared with the after-close capture job (apps.market_data.services.session_capture) ──
+
+def day_ts(d: date) -> datetime:
+    # Same stamp Angel's ONE_DAY rows carry: midnight IST of the session.
+    return datetime(d.year, d.month, d.day, tzinfo=IST)
+
+
+def has_day(d: date) -> bool:
+    from apps.market_data.models import Candle
+    return Candle.objects.filter(interval="1d", t=day_ts(d)).exists()
+
+
+def day_row_count(d: date) -> int:
+    from apps.market_data.models import Candle
+    return Candle.objects.filter(interval="1d", t=day_ts(d)).count()
+
+
+def write_day(d: date, rows: list[dict]) -> int:
+    from apps.market_data.models import Candle, Symbol
+
+    by_token = {r["FinInstrmId"]: r for r in rows if r.get("FinInstrmId")}
+    existing = dict(Symbol.objects.filter(exchange="NSE", token__in=list(by_token))
+                    .values_list("token", "id"))
+    new = [Symbol(exchange="NSE", token=tok, tradingsymbol=r["TckrSymb"],
+                  name=r.get("FinInstrmNm") or r["TckrSymb"], segment="EQ")
+           for tok, r in by_token.items() if tok not in existing]
+    if new:
+        Symbol.objects.bulk_create(new, ignore_conflicts=True)
         existing = dict(Symbol.objects.filter(exchange="NSE", token__in=list(by_token))
                         .values_list("token", "id"))
-        new = [Symbol(exchange="NSE", token=tok, tradingsymbol=r["TckrSymb"],
-                      name=r.get("FinInstrmNm") or r["TckrSymb"], segment="EQ")
-               for tok, r in by_token.items() if tok not in existing]
-        if new:
-            Symbol.objects.bulk_create(new, ignore_conflicts=True)
-            existing = dict(Symbol.objects.filter(exchange="NSE", token__in=list(by_token))
-                            .values_list("token", "id"))
 
-        t = self._day_ts(d)
-        objs = [
-            Candle(symbol_id=existing[tok], interval="1d", t=t,
-                   o=r["OpnPric"], h=r["HghPric"], l=r["LwPric"], c=r["ClsPric"],
-                   v=int(float(r.get("TtlTradgVol") or 0)))
-            for tok, r in by_token.items() if tok in existing
-        ]
-        Candle.objects.bulk_create(objs, batch_size=5000, ignore_conflicts=True)
-        return len(objs)
+    t = day_ts(d)
+    objs = [
+        Candle(symbol_id=existing[tok], interval="1d", t=t,
+               o=r["OpnPric"], h=r["HghPric"], l=r["LwPric"], c=r["ClsPric"],
+               v=int(float(r.get("TtlTradgVol") or 0)))
+        for tok, r in by_token.items() if tok in existing
+    ]
+    Candle.objects.bulk_create(objs, batch_size=5000, ignore_conflicts=True)
+    return len(objs)

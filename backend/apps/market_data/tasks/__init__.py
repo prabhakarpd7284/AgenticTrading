@@ -6,3 +6,7 @@ from apps.market_data.tasks.broker_refresh import (  # noqa: F401
     refresh_broker_positions,
     refresh_link_snapshot,
 )
+from apps.market_data.tasks.eod_capture import (  # noqa: F401
+    capture_bhavcopy,
+    capture_session_candles,
+)

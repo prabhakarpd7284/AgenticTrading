@@ -105,7 +105,7 @@ def reconcile_positions():
     # Imports moved below the paper-mode short-circuit — the workflow runs
     # this on every start, so a missing legacy module here used to crash
     # every paper-mode run before it ever reached the planner.
-    from apps.trading.models import PortfolioSnapshot, Trade
+    from apps.trading.models import Trade
 
     logger.info("=== Position Reconciliation ===")
 
@@ -153,7 +153,9 @@ def reconcile_positions():
         # has `open_positions` only (the legacy duplicate `open_positions_count`
         # field is gone).
         try:
-            snap = PortfolioSnapshot.objects.order_by("-captured_at").first()
+            from apps.trading.services.portfolio_roles import latest_trading_snapshot
+
+            snap = latest_trading_snapshot()
             if snap is not None:
                 snap.open_positions = len(broker_symbols) if broker_data else len(db_symbols)
                 snap.save(update_fields=["open_positions"])
@@ -336,8 +338,12 @@ def risk_node(state: TradingState) -> dict:
     # any error so the workflow keeps producing a planner + risk verdict
     # even in a fresh setup where snapshots don't exist yet.
     try:
-        from apps.trading.models import PortfolioSnapshot, Trade
-        snap = PortfolioSnapshot.objects.order_by("-captured_at").first()
+        from apps.trading.models import Trade
+        from apps.trading.services.portfolio_roles import latest_trading_snapshot
+
+        # Trading portfolio only: the Mutual Funds book's snapshot has
+        # equity 0, which would read as "capital 0" and reject every plan.
+        snap = latest_trading_snapshot()
         if snap is None:
             raise RuntimeError("no PortfolioSnapshot rows yet")
         capital = float(snap.equity)

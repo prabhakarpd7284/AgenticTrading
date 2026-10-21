@@ -128,7 +128,6 @@ class Command(BaseCommand):
 
     def handle(self, *args, **opts):
         from trading.services.data_service import BrokerClient, DataService
-        from trading.services.ticker_service import TickerService
 
         interval = opts["interval"]
         angel_interval = _ANGEL_INTERVAL[interval]
@@ -137,25 +136,10 @@ class Command(BaseCommand):
         span = DataService._INTERVAL_MAX_DAYS.get(angel_interval, 30)
         wins = windows(start, end, span)
 
-        ts = TickerService()
-        ts._ensure_loaded()
-        targets: list[tuple[str, str, str]] = []   # (tradingsymbol, exchange, token)
-        if opts["universe"] != "none":
-            targets += [(name, ex, tok) for name, (ex, tok) in INDICES.items()]
-        if opts["universe"] == "fno":
-            stocks = fno_stock_names(ts._instruments or [])
-        elif opts["universe"] == "nifty50":
-            from apps.market_data.constants import NIFTY_50_SYMBOLS
-            stocks = list(NIFTY_50_SYMBOLS)
-        else:
-            stocks = []
-        stocks += [s.strip().upper() for s in opts["symbols"].split(",") if s.strip()]
-        for name in dict.fromkeys(stocks):
-            tok = ts.get_token(name)
-            if tok:
-                targets.append((name, "NSE", tok))
-            else:
-                self.stderr.write(f"  skip {name}: no NSE token in the scrip master")
+        targets, missing = resolve_targets(
+            opts["universe"], [s.strip().upper() for s in opts["symbols"].split(",") if s.strip()])
+        for name in missing:
+            self.stderr.write(f"  skip {name}: no NSE token in the scrip master")
         if not targets:
             raise CommandError("Nothing to backfill — check --universe / --symbols.")
 
@@ -201,15 +185,7 @@ class Command(BaseCommand):
                 self.stdout.write(f"    {e}")
 
     def _symbol(self, name: str, exchange: str, token: str):
-        from apps.market_data.models import Symbol
-        from apps.market_data.services.candle_ingestor import _ensure_symbol
-
-        if name in INDICES:
-            row, _ = Symbol.objects.get_or_create(
-                exchange=exchange, token=token,
-                defaults={"tradingsymbol": name, "name": name, "segment": "INDEX"})
-            return row
-        return _ensure_symbol(Symbol, name)
+        return ensure_symbol_row(name, exchange, token)
 
     @staticmethod
     def _stored_span(sym, interval: str) -> tuple[date | None, date | None]:
@@ -223,8 +199,56 @@ class Command(BaseCommand):
 
     @staticmethod
     def _write(sym, interval: str, rows: list[tuple]) -> int:
-        from apps.market_data.models import Candle
-        objs = [Candle(symbol=sym, interval=interval, t=t, o=o, h=h, l=l, c=c, v=v)
-                for t, o, h, l, c, v in rows]
-        Candle.objects.bulk_create(objs, batch_size=5000, ignore_conflicts=True)
-        return len(objs)
+        return write_rows(sym, interval, rows)
+
+
+# ─── Shared with the after-close capture job (apps.market_data.services.session_capture) ──
+
+def resolve_targets(universe: str, extra_symbols: list[str] | None = None
+                    ) -> tuple[list[tuple[str, str, str]], list[str]]:
+    """``(targets, missing)``: targets are ``(tradingsymbol, exchange, token)``
+    for the universe's indices + stocks; missing are stocks with no NSE token."""
+    from trading.services.ticker_service import TickerService
+
+    ts = TickerService()
+    ts._ensure_loaded()
+    targets: list[tuple[str, str, str]] = []
+    if universe != "none":
+        targets += [(name, ex, tok) for name, (ex, tok) in INDICES.items()]
+    if universe == "fno":
+        stocks = fno_stock_names(ts._instruments or [])
+    elif universe == "nifty50":
+        from apps.market_data.constants import NIFTY_50_SYMBOLS
+        stocks = list(NIFTY_50_SYMBOLS)
+    else:
+        stocks = []
+    stocks += list(extra_symbols or [])
+    missing = []
+    for name in dict.fromkeys(stocks):
+        tok = ts.get_token(name)
+        if tok:
+            targets.append((name, "NSE", tok))
+        else:
+            missing.append(name)
+    return targets, missing
+
+
+def ensure_symbol_row(name: str, exchange: str, token: str):
+    from apps.market_data.models import Symbol
+    from apps.market_data.services.candle_ingestor import _ensure_symbol
+
+    if name in INDICES:
+        row, _ = Symbol.objects.get_or_create(
+            exchange=exchange, token=token,
+            defaults={"tradingsymbol": name, "name": name, "segment": "INDEX"})
+        return row
+    return _ensure_symbol(Symbol, name)
+
+
+def write_rows(sym, interval: str, rows: list[tuple]) -> int:
+    """Insert parsed rows (duplicates ignored); returns the rows offered."""
+    from apps.market_data.models import Candle
+    objs = [Candle(symbol=sym, interval=interval, t=t, o=o, h=h, l=lo, c=c, v=v)
+            for t, o, h, lo, c, v in rows]
+    Candle.objects.bulk_create(objs, batch_size=5000, ignore_conflicts=True)
+    return len(objs)

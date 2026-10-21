@@ -59,7 +59,9 @@ def test_detail_isolation(two_tenants, receipts):
     ok = c.get(f"/api/v1/runs/receipts/{receipts['a'].id}/")
     assert ok.status_code == 200
     body = ok.json()
-    assert body["status"] == "failed" and "checks" in body and body["previous"] is None
+    assert body["status"] == "failed"
+    assert "checks" in body
+    assert body["previous"] is None
 
 
 @pytest.mark.django_db
@@ -88,7 +90,8 @@ def test_schedule_and_status_shapes(auth_client):
     data = st.json()
     assert data["mode"]["mode"] == "PAPER"
     assert data["data"]["state"] == "synthetic"   # no real broker link in the test DB
-    assert "label" in data["jobs"] and "problems" in data["jobs"]
+    assert "label" in data["jobs"]
+    assert "problems" in data["jobs"]
 
 
 @pytest.mark.django_db

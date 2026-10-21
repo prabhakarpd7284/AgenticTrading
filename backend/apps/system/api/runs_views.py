@@ -142,6 +142,19 @@ def _detail(r: RunReceipt) -> dict | None:
             s = NightlyScan.objects.filter(id=int(r.detail_id)).first()
             return s and {"kind": "nightly_scan", "id": s.id, "for_date": s.for_date.isoformat(),
                           "status": s.status, "href": "/nightly-scan"}
+        if r.detail_kind == "agent_run" and r.detail_id:
+            from apps.agents_core.models import AgentRun
+
+            a = AgentRun.objects.filter(id=r.detail_id, tenant_id=r.tenant_id).first()
+            return a and {"kind": "agent_run", "id": str(a.id), "strategy": a.strategy_name,
+                          "status": a.status, "error": (a.error or "")[:500], "href": f"/agents/{a.id}"}
+        if r.detail_kind == "backtest" and r.detail_id:
+            from apps.strategies.models import Backtest
+
+            b = Backtest.objects.filter(id=r.detail_id, tenant_id=r.tenant_id).first()
+            return b and {"kind": "backtest", "id": str(b.id), "status": b.status,
+                          "from": b.from_date.isoformat(), "to": b.to_date.isoformat(),
+                          "metrics": b.metrics, "href": "/strategies"}
     except Exception:  # noqa: BLE001
         return None
     return None

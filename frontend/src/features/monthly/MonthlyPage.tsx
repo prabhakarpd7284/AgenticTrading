@@ -33,7 +33,7 @@ import {
 
 import {
   useMonthlyView,
-  getMonthlySource, setMonthlySource,
+  getMonthlySource, setMonthlySource, MONTHLY_MOCK_ALLOWED,
   ASSET_CLASS_LABEL,
   type Analytics, type AssetClass, type BenchmarkComparison,
   type EquityCurve, type MonthGroup, type MonthlyPayload, type PositionLeg,
@@ -246,7 +246,16 @@ export function MonthlyPage() {
 
   if (isLoading) return <MonthlyLoading />;
   if (isError) return <MonthlyError error={error as Error} onRetry={() => refetch()} />;
-  if (!data || !month) return null;
+  if (!data || !month) {
+    return (
+      <div className="px-6 py-6 max-w-[1200px] mx-auto">
+        <EmptyState
+          title="No monthly data yet"
+          description="The monthly report fills in once signals fire and paper or live trades close. Nothing is shown until then — there is no sample data."
+        />
+      </div>
+    );
+  }
 
   return (
     <MonthlyRefreshContext.Provider value={ctxValue}>
@@ -261,6 +270,19 @@ export function MonthlyPage() {
           monthKey={monthKey}
           onOpFinished={() => queryClient.invalidateQueries({ queryKey: ["monthly-view"] })}
         />
+
+        {source === "mock" && (
+          <div role="note" className="rounded-sm border border-warn/50 bg-warn/10 px-3 py-2 text-body-sm text-fg">
+            Showing <strong>mock data</strong> (dev toggle). None of these numbers are real.
+          </div>
+        )}
+        {source === "live" && data.ytd.trade_count === 0 && (
+          <div role="note" data-testid="monthly-no-trades"
+               className="rounded-sm border border-border bg-surface-2 px-3 py-2 text-body-sm text-fg-muted">
+            No closed trades yet this financial year — trade-based sections (P&amp;L, equity curve,
+            analytics) stay empty until paper or live trades close. Signal sections show real signals.
+          </div>
+        )}
 
         <PipelineStatusStrip data={data} month={month} />
 
@@ -338,8 +360,8 @@ function Header({
         </p>
       </div>
       <div className="flex items-center gap-2">
-        {/* Data source toggle */}
-        <button
+        {/* Data source toggle — dev builds with VITE_MONTHLY_MOCK=1 only */}
+        {MONTHLY_MOCK_ALLOWED && <button
           type="button"
           onClick={onToggleSource}
           className={cn(
@@ -358,7 +380,7 @@ function Header({
             source === "live" ? "bg-pnl-up animate-pulse" : "bg-fg-subtle",
           )} />
           {source === "live" ? "Live" : "Mock"}
-        </button>
+        </button>}
 
         {data.paper_mode && (
           <Badge tone="warning" dot title="All figures are from paper trades">
@@ -602,7 +624,7 @@ function YtdStrip({
           <YtdStat label="YTD P&L"      value={fmtInr(ytd.total_pnl)}      tone={ytd.total_pnl} suffix={fmtPct(pctOnCapital, 2)} />
           <YtdStat label="Trades"       value={fmtNum(ytd.trade_count)} />
           <YtdStat label="Win rate"     value={`${(ytd.win_rate * 100).toFixed(0)}%`} />
-          <YtdStat label="Best · Worst" value={`${ytd.best_month.slice(5)} · ${ytd.worst_month.slice(5)}`} mono />
+          <YtdStat label="Best · Worst" value={ytd.trade_count === 0 ? "—" : `${ytd.best_month.slice(5)} · ${ytd.worst_month.slice(5)}`} mono />
         </div>
 
         <BarChart months={ytd.months} selected={selected} onSelect={onSelect} />

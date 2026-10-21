@@ -61,16 +61,16 @@ class Command(BaseCommand):
             for row in rows:
                 _, created_scheme = MFScheme.objects.update_or_create(
                     scheme_code=row.scheme_code,
-                    defaults=dict(
-                        isin_growth=row.isin_growth,
-                        isin_div_reinvestment=row.isin_div_reinvestment,
-                        amc_name=row.amc_name,
-                        scheme_name=row.scheme_name,
-                        plan=row.plan,
-                        option=row.option,
-                        category=row.category,
-                        is_direct="direct" in row.plan.lower(),
-                    ),
+                    defaults={
+                        "isin_growth": row.isin_growth,
+                        "isin_div_reinvestment": row.isin_div_reinvestment,
+                        "amc_name": row.amc_name,
+                        "scheme_name": row.scheme_name,
+                        "plan": row.plan,
+                        "option": row.option,
+                        "category": row.category,
+                        "is_direct": "direct" in row.plan.lower(),
+                    },
                 )
                 schemes_upserted += 1
 

@@ -51,7 +51,7 @@ export interface RunReceiptDetail extends RunReceipt {
   checks: RunCheck[];
   data_provenance: Record<string, unknown>;
   previous: RunReceipt | null;
-  detail: { kind: string; id: number; status: string; href: string; [k: string]: unknown } | null;
+  detail: { kind: string; id: number | string; status: string; href: string; [k: string]: unknown } | null;
   rerun_note?: string | null;
 }
 

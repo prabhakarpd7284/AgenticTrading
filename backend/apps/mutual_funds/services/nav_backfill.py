@@ -58,17 +58,26 @@ class BackfillStats:
     failures: list[str] = field(default_factory=list)
 
 
-def catalog_date() -> date | None:
-    """The date most schemes are priced at (liquid funds forward-date
-    weekend NAVs, so MAX(nav_date) can sit in the future)."""
-    mx = MFNav.objects.aggregate(m=Max("nav_date"))["m"]
+def catalog_date(max_nav_date: date | None = None) -> date | None:
+    """The newest date the bulk of schemes is priced at.
+
+    MAX(nav_date) can sit in the future (liquid funds forward-date weekend
+    NAVs), and the single busiest date is wrong too: history backfills add
+    rows to older dates, so an old day can out-count today's full pull.
+    Take the newest date in the last 10 days with at least half the
+    busiest day's rows — forward-dated weekend NAVs (a few hundred) fall
+    below that, a full daily pull (thousands) does not."""
+    mx = max_nav_date or MFNav.objects.aggregate(m=Max("nav_date"))["m"]
     if mx is None:
         return None
-    row = (
+    counts = list(
         MFNav.objects.filter(nav_date__gte=mx - timedelta(days=10))
-        .values("nav_date").annotate(n=Count("id")).order_by("-n", "-nav_date").first()
+        .values("nav_date").annotate(n=Count("id"))
     )
-    return row["nav_date"] if row else mx
+    if not counts:
+        return mx
+    floor = max(c["n"] for c in counts) / 2
+    return max(c["nav_date"] for c in counts if c["n"] >= floor)
 
 
 def refresh_active_flags(as_of: date | None = None) -> tuple[int, int]:

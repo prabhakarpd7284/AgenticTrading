@@ -39,11 +39,12 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from apps.events.models import Event
-from apps.trading.models import Portfolio, PortfolioSnapshot
+from apps.trading.models import Portfolio
 from apps.rag.models import KnowledgeDoc
 from apps.strategies.models import Signal, WatchlistEntry
 from apps.system.models import SystemControl
 from apps.trading.models import OptionsLeg, OptionsPosition, Trade
+from apps.trading.services.portfolio_roles import latest_trading_snapshot, trading_portfolio
 
 logger = logging.getLogger(__name__)
 
@@ -145,10 +146,11 @@ def portfolio(request):
     tenant = request.tenant
     today = date.today()
 
-    snap = (
-        PortfolioSnapshot.objects.filter(tenant=tenant).order_by("-captured_at").first()
-    )
-    portfolio_row = Portfolio.objects.filter(tenant=tenant).order_by("created_at").first()
+    # Scope the snapshot to the trading portfolio: with an MF book alongside,
+    # the tenant's newest snapshot may be the MF one (equity 0), which made
+    # `invested` back-compute to the full capital (UX redesign R0 bug).
+    portfolio_row = trading_portfolio(tenant)
+    snap = latest_trading_snapshot(tenant)
     capital = float(portfolio_row.capital) if portfolio_row else DEFAULT_CAPITAL
 
     if snap:
@@ -453,9 +455,8 @@ def audit(request):
 # ── Risk utilization + alerts ─────────────────────────────────────────
 
 def _risk_utilization(tenant) -> dict:
-    snap = (PortfolioSnapshot.objects.filter(tenant=tenant)
-            .order_by("-captured_at").first())
-    portfolio_row = Portfolio.objects.filter(tenant=tenant).order_by("created_at").first()
+    portfolio_row = trading_portfolio(tenant)
+    snap = latest_trading_snapshot(tenant)
     capital = float(portfolio_row.capital) if portfolio_row else DEFAULT_CAPITAL
 
     if snap:

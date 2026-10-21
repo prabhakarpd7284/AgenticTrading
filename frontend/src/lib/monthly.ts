@@ -1,22 +1,17 @@
 /**
- * Monthly performance tracking — mock-first data layer.
+ * Monthly performance tracking — data layer (live; mock only behind a dev toggle).
  *
  * The monthly view is the *post-trade feedback loop* complement to The Cascade
  * (pre-trade stages).  It groups every position by month → asset class → underlying
  * so the trader can see "what did I earn / risk / deploy this month?" at a glance
  * and drill into individual legs only when a roll-up number looks off.
  *
- * Why mock-first
- * ───────────────
- * The UI needs to be designed and iterated on before the aggregation service is
- * even spec'd.  Rather than push premature schema into the Django side, we drive
- * the whole page from realistic mock data that matches the exact shape we'd
- * expect from a future `/api/v1/monthly/` endpoint.
- *
- * Toggling to live data later is a one-line flip: change `USE_MOCK` to false
- * (or wire to `import.meta.env.VITE_MONTHLY_LIVE`) and the hook hits the real
- * endpoint via the shared `api` client.  No component touches mock data
- * directly — the hook is the seam.
+ * Data source
+ * ───────────
+ * Live `/api/v1/portfolios/monthly/` by default. The mock payload below is
+ * kept only as a dev aid behind `MONTHLY_MOCK_ALLOWED` (Vite dev build +
+ * VITE_MONTHLY_MOCK=1); production builds can never show it. The hook is the
+ * seam — no component touches mock data directly.
  *
  * Paper-mode
  * ──────────
@@ -234,11 +229,14 @@ export interface MonthlyPayload {
 /* ================================================================== */
 
 /**
- * Mock vs. live toggle.  Set VITE_MONTHLY_LIVE=1 in .env.local once the
- * backend is running and serving /api/v1/portfolios/monthly/.
- * Defaults to mock so the page always works without a backend.
+ * Live data by default (UX redesign R2): the page used to default to mock
+ * data, the only page that showed fabricated numbers without being asked.
+ * Mock data is a dev-only aid now — it is available only in a Vite dev build
+ * with VITE_MONTHLY_MOCK=1, and even then only when picked with the toggle.
  */
-const USE_MOCK = import.meta.env.VITE_MONTHLY_LIVE !== "1";
+export const MONTHLY_MOCK_ALLOWED =
+  import.meta.env.DEV === true && import.meta.env.VITE_MONTHLY_MOCK === "1";
+const USE_MOCK = false;
 
 const LIVE_ENDPOINT = "portfolios/monthly/";
 
@@ -759,10 +757,13 @@ function buildMockPayload(): MonthlyPayload {
 const LS_KEY = "monthly_data_source";
 
 function readSource(): "mock" | "live" {
-  if (typeof window === "undefined") return USE_MOCK ? "mock" : "live";
-  const stored = localStorage.getItem(LS_KEY);
-  if (stored === "mock" || stored === "live") return stored;
-  return USE_MOCK ? "mock" : "live";
+  // A "mock" choice stored by an older build is ignored unless the dev toggle is on.
+  if (!MONTHLY_MOCK_ALLOWED || typeof window === "undefined") return "live";
+  try {
+    return localStorage.getItem(LS_KEY) === "mock" ? "mock" : "live";
+  } catch {
+    return "live";
+  }
 }
 
 let _source: "mock" | "live" = readSource();
@@ -770,8 +771,12 @@ let _source: "mock" | "live" = readSource();
 export function getMonthlySource(): "mock" | "live" { return _source; }
 
 export function setMonthlySource(s: "mock" | "live") {
-  _source = s;
-  localStorage.setItem(LS_KEY, s);
+  _source = MONTHLY_MOCK_ALLOWED ? s : "live";
+  try {
+    localStorage.setItem(LS_KEY, _source);
+  } catch {
+    /* storage unavailable — the choice just isn't remembered */
+  }
 }
 
 /**
@@ -800,5 +805,5 @@ export function useMonthlyView(month?: string | null) {
   });
 }
 
-/** Exported for tests & the prominent "paper mode" badge. */
+/** Exported for tests & the prominent "paper mode" badge. Always false outside the dev toggle. */
 export const MONTHLY_USE_MOCK = USE_MOCK;

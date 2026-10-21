@@ -28,5 +28,7 @@ describe("navigation", () => {
     expect(locate("/lab").destination?.key).toBe("lab");
     expect(locate("/setup/INFY").destination?.key).toBe("today");
     expect(locate("/brokers").destination?.key).toBe("settings");
+    expect(locate("/portfolio").item?.label).toBe("Overview");
+    expect(locate("/portfolio/attribution").destination?.key).toBe("portfolio");
   });
 });

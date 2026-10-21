@@ -15,6 +15,14 @@ guard for ad-hoc testing.
 Every actual execution writes an ``apps.system.PipelineRun`` row so the
 /pipeline page can show what ran, when, and what it produced.
 
+Candles: the screener session is the only *live* writer of 1-minute candles
+(its tick aggregator persists bars while it runs). By design it does nothing
+when the worker is not up at 09:15 or is started after 15:30 ("market
+already closed") — on 2026-10-21 the machine was off 07:46–17:03 IST, so no
+bars were stored until 21:00. The after-close capture job
+(``apps.market_data.tasks.eod_capture``, 15:50 / 18:30 / 20:15 IST) now fills
+the session from Angel + the NSE bhavcopy whether or not the session ran.
+
 These deliberately do NOT auto-execute trades — the premarket *basket*
 executor and the agentic planner stay manual. The pipeline produces
 *data* (signals + outcomes) that feed the watchlists, the Now feed, and
@@ -69,7 +77,6 @@ def _record_run(task_key: str, force: bool):
     from django.utils import timezone
 
     from apps.system.models import PipelineRun
-
     from apps.system.services.run_receipts import current_run
 
     run = PipelineRun.objects.create(

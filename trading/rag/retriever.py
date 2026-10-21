@@ -104,13 +104,16 @@ def retrieve_portfolio_context() -> str:
     """Portfolio-level context — capital, today's PnL, open positions."""
     from datetime import date
 
-    from apps.trading.models import PortfolioSnapshot, Trade
+    from apps.trading.models import Trade
 
     sections: list[str] = []
 
     # Latest snapshot. The v2 PortfolioSnapshot has a leaner shape than
     # the legacy version — derive the missing fields where possible.
-    snap = PortfolioSnapshot.objects.order_by("-captured_at").first()
+    # Trading portfolio only — never the Mutual Funds book's snapshot.
+    from apps.trading.services.portfolio_roles import latest_trading_snapshot
+
+    snap = latest_trading_snapshot()
     if snap is not None:
         equity = float(snap.equity)
         day_pnl = float(snap.day_pnl)

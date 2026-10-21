@@ -338,6 +338,29 @@ CELERY_BEAT_SCHEDULE = {
         "task": "apps.strategies.tasks.daily_pipeline.derive_intraday_trades",
         "schedule": crontab(hour=16, minute=30, day_of_week="mon-fri"),
     },
+    # ── After-close market-data capture (UX redesign R2) ──────────────
+    # The screener session only stores 1m candles while it runs during market
+    # hours; a machine that was off (or restarted after 15:30) left the day
+    # empty until the 21:00 nightly scan. These capture the session right
+    # after close. Mon–Fri; each task skips NSE holidays (is_trading_day).
+    "eod-candle-capture": {
+        "task": "apps.market_data.tasks.eod_capture.capture_session_candles",
+        "schedule": crontab(hour=15, minute=50, day_of_week="mon-fri"),
+        "options": {"expires": 4 * 3600},
+    },
+    # NSE usually publishes the CM bhavcopy by ~18:00; 20:15 retries once.
+    "eod-bhavcopy-capture": {
+        "task": "apps.market_data.tasks.eod_capture.capture_bhavcopy",
+        "schedule": crontab(hour=18, minute=30, day_of_week="mon-fri"),
+        "kwargs": {"attempt": 1},
+        "options": {"expires": 90 * 60},
+    },
+    "eod-bhavcopy-capture-retry": {
+        "task": "apps.market_data.tasks.eod_capture.capture_bhavcopy",
+        "schedule": crontab(hour=20, minute=15, day_of_week="mon-fri"),
+        "kwargs": {"attempt": 2},
+        "options": {"expires": 2 * 3600},
+    },
     # ── Mutual fund NAVs ──────────────────────────────────────────────
     # AMFI publishes the day's NAVs by ~23:00 IST; the 23:45 run takes them,
     # the 07:30 run catches any late publication. Idempotent, every day

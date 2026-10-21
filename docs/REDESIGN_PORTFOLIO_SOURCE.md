@@ -49,12 +49,17 @@ The tenant is `istpduckymomo`. I queried the tables on this machine on 2026-10-2
 
 There is no competing populated store to migrate from.
 
-## Bug found while checking (fix in R2, not now)
+## Bug found while checking (fixed in R2)
 
 `legacy_compat_views.portfolio` reads `PortfolioSnapshot.objects.filter(tenant=tenant).order_by("-captured_at").first()`.
 It does **not** filter by portfolio. Now that the tenant has two portfolios, the newest snapshot can belong to `Mutual Funds`, whose equity is 0. The view
 then back-computes `invested = capital - equity + day_pnl = 500,000`, so the Desk can show the full capital as invested and 0
 available. The R2 overview must read snapshots per portfolio.
+
+**Fixed in R2:** `apps/trading/services/portfolio_roles.py` (`trading_portfolio`, `latest_trading_snapshot`,
+`book_portfolios`, `mf_portfolio_ids`). The summary and risk views, the legacy planner/RAG/intraday-agent reads in
+`trading/`, and the new `GET /api/v1/portfolio/overview/` all read the trading portfolio's snapshots only. Regression
+tests: `backend/tests/integration/test_portfolio_overview.py`.
 
 ## Rules for R2 that follow from this
 

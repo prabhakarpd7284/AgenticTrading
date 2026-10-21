@@ -16,6 +16,16 @@ from apps.system.services.run_receipts import current_run, tracked_run, tracked_
 IST = ZoneInfo("Asia/Kolkata")
 
 
+@pytest.fixture(autouse=True)
+def _no_leaked_receipts(request):
+    """Async WS tests (test_scalp_sim_ws) create AgentRuns on a separate
+    connection that commits, so their mirrored receipts outlive the test.
+    Start every receipt test from an empty table (rolled back afterwards)."""
+    if "django_db" in request.keywords or "db" in request.fixturenames:
+        request.getfixturevalue("db")
+        RunReceipt.objects.all().delete()
+
+
 # ─── tracked_run ─────────────────────────────────────────────────────────
 
 @pytest.mark.django_db
@@ -30,7 +40,8 @@ def test_success_receipt_records_outputs_checks_and_links():
     assert r.inputs == {"x": 1}
     assert r.outputs["rows"] == 5
     assert r.outputs["links"] == [{"label": "Somewhere", "href": "/somewhere"}]
-    assert r.finished_at and r.duration_seconds is not None
+    assert r.finished_at
+    assert r.duration_seconds is not None
     assert {c["name"] for c in r.checks} >= {"rows_written", "duration_anomaly"}
     assert r.tenant_id is None
 
@@ -65,7 +76,8 @@ def test_units_failed_gives_partial_and_counts_swallowed_errors():
     r = RunReceipt.objects.get()
     assert r.status == "partial"
     sw = next(c for c in r.checks if c["name"] == "swallowed_errors")
-    assert sw["status"] == "warn" and sw["count"] == 1
+    assert sw["status"] == "warn"
+    assert sw["count"] == 1
 
 
 @pytest.mark.django_db
@@ -95,9 +107,11 @@ def test_tracked_task_decorator_skipped_and_trigger():
     assert task() == {"skipped": "not a trading day"}
     assert task(force=True) == {"ok": True}
     skipped, ran = RunReceipt.objects.order_by("started_at")
-    assert skipped.status == "skipped" and skipped.trigger == "beat"
+    assert skipped.status == "skipped"
+    assert skipped.trigger == "beat"
     assert skipped.outputs["skipped"] == "not a trading day"
-    assert ran.status == "success" and ran.trigger == "manual"
+    assert ran.status == "success"
+    assert ran.trigger == "manual"
 
 
 @pytest.mark.django_db
@@ -109,7 +123,8 @@ def test_zero_output_anomaly_against_history():
         run.output(signals=0)
     last = RunReceipt.objects.order_by("-started_at").first()
     chk = next(c for c in last.checks if c["name"] == "zero_output_anomaly")
-    assert chk["status"] == "warn" and chk["median"] == 4
+    assert chk["status"] == "warn"
+    assert chk["median"] == 4
     assert last.status == "success"   # an anomaly warns; it doesn't fail the run
 
 
@@ -193,7 +208,8 @@ def test_schedule_states_ok_missed_pending_and_untracked():
     assert slots["mf-nav-pull-night"]["state"] == "pending"
     assert slots["mf-nav-pull-morning"]["state"] == "untracked"   # 07:30 predates tracking
     summary = run_schedule.summarize(list(slots.values()))
-    assert summary["health"] == "red" and summary["missed"] >= 1
+    assert summary["health"] == "red"
+    assert summary["missed"] >= 1
 
 
 @pytest.mark.django_db
@@ -208,10 +224,13 @@ def test_watcher_writes_not_run_once_and_fails_stuck_runs():
     with mock.patch("apps.system.services.run_alerts._send_telegram", return_value=False):
         first = run_schedule.watch(now=now)
         second = run_schedule.watch(now=now)
-    assert first["not_run_created"] >= 1 and first["stuck_failed"] == 1
-    assert second == {"not_run_created": 0, "stuck_failed": 0}
+    assert first["not_run_created"] >= 1
+    assert first["stuck_failed"] == 1
+    assert second == {"not_run_created": 0, "stuck_failed": 0, "pipeline_runs_failed": 0,
+                      "backtests_failed": 0, "detail_receipts_created": 0}
     nr = RunReceipt.objects.get(status="not_run", schedule_key="daily-swing-scan")
-    assert nr.trigger == "watcher" and nr.alerted_at is not None
+    assert nr.trigger == "watcher"
+    assert nr.alerted_at is not None
     stuck.refresh_from_db()
     assert stuck.status == "failed"
     slots = {s["key"]: s for s in run_schedule.schedule_for_day(now.date(), now=now)}
@@ -253,7 +272,8 @@ def test_nightly_scan_skip_writes_skipped_receipt(monkeypatch):
     monkeypatch.setattr("apps.market_data.services.market_calendar.is_trading_day", lambda d=None: False)
     assert tasks.run_nightly_scan() == {"skipped": "next day is not a trading day"}
     r = RunReceipt.objects.get(name="nightly_scan")
-    assert r.status == "skipped" and r.task_name == tasks.TASK_NAME
+    assert r.status == "skipped"
+    assert r.task_name == tasks.TASK_NAME
 
 
 @pytest.mark.django_db
@@ -265,8 +285,10 @@ def test_pipeline_task_links_pipeline_run(monkeypatch):
     daily_pipeline.run_eod_enrichment(force=True)
     r = RunReceipt.objects.get(name="pipeline.eod_enrichment")
     pr = PipelineRun.objects.get()
-    assert r.detail_kind == "pipeline_run" and r.detail_id == str(pr.id)
-    assert r.trigger == "manual" and r.outputs["mode"] == "today"
+    assert r.detail_kind == "pipeline_run"
+    assert r.detail_id == str(pr.id)
+    assert r.trigger == "manual"
+    assert r.outputs["mode"] == "today"
     # No real broker link in the test DB → the broker check fails the receipt.
     assert any(c["name"] == "broker_live" and c["status"] == "fail" for c in r.checks)
     assert r.status == "failed"

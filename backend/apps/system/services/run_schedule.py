@@ -41,12 +41,21 @@ TRACKED_TASKS: dict[str, str] = {
     "apps.mutual_funds.tasks.compute_mf_metrics_weekly": "compute_mf_metrics_weekly",
     "apps.trading.tasks.cooldown.refresh_cooldowns": "cooldown_refresh",
     "apps.trading.tasks.reconcile.reconcile_stale_intraday": "reconcile_stale_intraday",
+    "apps.market_data.tasks.eod_capture.capture_session_candles": "eod_candle_capture",
+    "apps.market_data.tasks.eod_capture.capture_bhavcopy": "eod_bhavcopy_capture",
+    # Swing v2 (config/celery.py): one Celery task serves three tiers, so
+    # receipts carry a per-tier task_name (see swing_v2_receipt_task).
+    "config.celery.run_swing_v2[small]": "swing_v2.small",
+    "config.celery.run_swing_v2[medium]": "swing_v2.medium",
+    "config.celery.run_swing_v2[long]": "swing_v2.long",
+    "config.celery.enrich_swing_v2": "swing_v2.enrich",
 }
 
 # config/celery.py merges the swing-v2 periodic tasks into the same dict at
-# app finalize time (add_periodic_task), so they appear only in processes
-# where Celery finalized. Leave them out so the registry is the declared
-# CELERY_BEAT_SCHEDULE everywhere; wrapping them is follow-up work.
+# app finalize time (add_periodic_task), so they appear in CELERY_BEAT_SCHEDULE
+# only in processes where Celery finalized. Skip those runtime copies and add
+# the entries from the module-level ``SWING_V2_BEAT`` declaration instead, so
+# every process sees the same registry.
 RUNTIME_ADDED_PREFIX = "config.celery."
 
 # Per-entry presentation + window. Anything not listed gets the defaults.
@@ -64,6 +73,16 @@ ENTRY_META: dict[str, dict] = {
     "mf-metrics-weekly": {"label": "MF metrics (weekly)", "grace_min": 60},
     "daily-cooldown-refresh": {"label": "Cooldown refresh"},
     "nightly-scan": {"label": "Nightly scan", "grace_min": 45},
+    # "since": the day an entry started writing receipts. Earlier slots are
+    # "untracked", not "missed" — the job did not exist / was not wrapped yet.
+    "eod-candle-capture": {"label": "After-close 1m candle capture", "grace_min": 40, "since": "2026-10-22"},
+    "eod-bhavcopy-capture": {"label": "Bhavcopy capture", "grace_min": 60, "since": "2026-10-22"},
+    "eod-bhavcopy-capture-retry": {"label": "Bhavcopy capture (retry)", "grace_min": 40,
+                                   "since": "2026-10-22"},
+    "swing_v2_small": {"label": "Swing v2 scan (small tier)", "grace_min": 20, "since": "2026-10-22"},
+    "swing_v2_medium": {"label": "Swing v2 scan (medium tier)", "since": "2026-10-22"},
+    "swing_v2_long": {"label": "Swing v2 scan (long tier)", "since": "2026-10-22"},
+    "enrich_swing_v2": {"label": "Swing v2 enrichment", "since": "2026-10-22"},
 }
 
 # Jobs the Runs page may re-trigger. Only idempotent, bounded, paper-safe
@@ -85,6 +104,12 @@ RERUNNABLE: dict[str, dict] = {
                                   "note": "Heavy: several minutes of CPU/RAM."},
     "cooldown_refresh": {"task": "apps.trading.tasks.cooldown.refresh_cooldowns",
                          "kwargs": {"trigger": "manual"}, "note": "Cheap DB recompute."},
+    "eod_candle_capture": {"task": "apps.market_data.tasks.eod_capture.capture_session_candles",
+                           "kwargs": {"trigger": "manual"},
+                           "note": "Latest closed session's 1m candles, NIFTY 50 + indices (~58 Angel calls)."},
+    "eod_bhavcopy_capture": {"task": "apps.market_data.tasks.eod_capture.capture_bhavcopy",
+                             "kwargs": {"trigger": "manual", "attempt": 2},
+                             "note": "Latest closed session's NSE bhavcopy (one download)."},
 }
 
 
@@ -96,6 +121,12 @@ class ScheduleEntry:
     schedule: object        # celery crontab
     grace: timedelta
     receipt_name: str | None
+    receipt_task: str = ""  # RunReceipt.task_name to match (defaults to task)
+    since: date | None = None   # first day this entry writes receipts
+
+    @property
+    def match_task(self) -> str:
+        return self.receipt_task or self.task
 
     @property
     def tracked(self) -> bool:
@@ -131,6 +162,32 @@ class ScheduleEntry:
                       for h in s.hour for m in s.minute)
 
 
+def _entry(key: str, task: str, sched, receipt_task: str = "") -> ScheduleEntry:
+    meta = ENTRY_META.get(key, {})
+    match = receipt_task or task
+    return ScheduleEntry(
+        key=key, task=task, label=meta.get("label", key.replace("-", " ").replace("_", " ").capitalize()),
+        schedule=sched, grace=timedelta(minutes=meta.get("grace_min", DEFAULT_GRACE_MIN)),
+        receipt_name=TRACKED_TASKS.get(match), receipt_task=receipt_task,
+        since=date.fromisoformat(meta["since"]) if meta.get("since") else None,
+    )
+
+
+def _swing_v2_entries() -> list[ScheduleEntry]:
+    from celery.schedules import crontab
+
+    try:
+        from config.celery import SWING_V2_BEAT, swing_v2_receipt_task
+    except Exception as e:  # noqa: BLE001
+        log.warning("run_schedule.swing_v2_unavailable", error=str(e))
+        return []
+    out = []
+    for key, (cron, task, args) in SWING_V2_BEAT.items():
+        rt = swing_v2_receipt_task(args[0]) if task.endswith("run_swing_v2") and args else ""
+        out.append(_entry(key, task, crontab(**cron), rt))
+    return out
+
+
 def registry() -> list[ScheduleEntry]:
     from celery.schedules import crontab
     from django.conf import settings
@@ -142,23 +199,23 @@ def registry() -> list[ScheduleEntry]:
             continue
         if entry.get("task", "").startswith(RUNTIME_ADDED_PREFIX):
             continue
-        meta = ENTRY_META.get(key, {})
-        task = entry.get("task", "")
-        out.append(ScheduleEntry(
-            key=key, task=task, label=meta.get("label", key.replace("-", " ").capitalize()),
-            schedule=sched, grace=timedelta(minutes=meta.get("grace_min", DEFAULT_GRACE_MIN)),
-            receipt_name=TRACKED_TASKS.get(task),
-        ))
+        out.append(_entry(key, entry.get("task", ""), sched))
+    out.extend(_swing_v2_entries())
     return out
 
 
 def _tracking_since():
+    """When scheduled-job receipts started. Only receipts that can match a
+    schedule slot count (they carry a Celery ``task_name``): receipts mirrored
+    from AgentRun / Backtest rows are backdated to when those runs happened
+    and would otherwise pull this back to the oldest agent run, turning every
+    earlier slot into a false "missed" (which happened once, 2026-10-21)."""
     from django.db.models import Min
 
     from apps.system.models import RunReceipt
 
-    return RunReceipt.objects.exclude(status=RunReceipt.Status.NOT_RUN).aggregate(
-        m=Min("started_at"))["m"]
+    return (RunReceipt.objects.exclude(status=RunReceipt.Status.NOT_RUN).exclude(task_name="")
+            .aggregate(m=Min("started_at"))["m"])
 
 
 def _receipt_brief(r) -> dict:
@@ -207,6 +264,8 @@ def slot_state(entry: ScheduleEntry, due: datetime, *, now: datetime, tracking_s
         return {**base, "state": "pending", "reason": "due — waiting for the run"}
     if tracking_since is None or due < tracking_since:
         return {**base, "state": "untracked", "reason": "before run receipts were enabled"}
+    if entry.since is not None and due.astimezone(IST).date() < entry.since:
+        return {**base, "state": "untracked", "reason": f"job tracked from {entry.since.isoformat()}"}
     return {**base, "state": "missed", "reason": "no run recorded in its window"}
 
 
@@ -220,7 +279,7 @@ def schedule_for_day(day: date | None = None, *, now: datetime | None = None) ->
     entries = registry()
     start = datetime.combine(day, time(0), tzinfo=IST) - timedelta(minutes=5)
     end = datetime.combine(day + timedelta(days=1), time(0), tzinfo=IST) + timedelta(hours=2)
-    tasks = [e.task for e in entries if e.tracked]
+    tasks = [e.match_task for e in entries if e.tracked]
     receipts = list(RunReceipt.objects.filter(task_name__in=tasks, tenant__isnull=True)
                     .filter(started_at__gte=start, started_at__lte=end)) + \
         list(RunReceipt.objects.filter(status=RunReceipt.Status.NOT_RUN,
@@ -233,7 +292,7 @@ def schedule_for_day(day: date | None = None, *, now: datetime | None = None) ->
     for e in entries:
         for due in e.due_times(day):
             slots.append(slot_state(e, due, now=now, tracking_since=since,
-                                    receipts=by_task.get(e.task, [])))
+                                    receipts=by_task.get(e.match_task, [])))
     slots.sort(key=lambda s: s["due_at"])
     return slots
 
@@ -277,16 +336,16 @@ def watch(now: datetime | None = None) -> dict:
                 with transaction.atomic():
                     r, was_created = RunReceipt.objects.get_or_create(
                         schedule_key=e.key, expected_at=due, status=RunReceipt.Status.NOT_RUN,
-                        defaults=dict(
-                            kind="job", name=e.receipt_name or e.key, task_name=e.task,
-                            trigger=RunReceipt.Trigger.WATCHER, started_at=due,
-                            finished_at=now, duration_seconds=0,
-                            error=f"Scheduled {due.astimezone(IST):%H:%M} IST; nothing ran by "
-                                  f"{(due + e.grace).astimezone(IST):%H:%M}.",
-                            checks=[{"name": "ran_in_window", "status": "fail",
-                                     "message": f"no run of {e.task} between {due.isoformat()} and "
-                                                f"{(due + e.grace).isoformat()}"}],
-                        ))
+                        defaults={
+                            "kind": "job", "name": e.receipt_name or e.key, "task_name": e.match_task,
+                            "trigger": RunReceipt.Trigger.WATCHER, "started_at": due,
+                            "finished_at": now, "duration_seconds": 0,
+                            "error": f"Scheduled {due.astimezone(IST):%H:%M} IST; nothing ran by "
+                                     f"{(due + e.grace).astimezone(IST):%H:%M}.",
+                            "checks": [{"name": "ran_in_window", "status": "fail",
+                                        "message": f"no run of {e.task} between {due.isoformat()} and "
+                                                   f"{(due + e.grace).isoformat()}"}],
+                        })
             except IntegrityError:
                 continue
             if was_created:
@@ -305,6 +364,72 @@ def watch(now: datetime | None = None) -> dict:
             r.save(update_fields=["status", "finished_at", "duration_seconds", "error", "checks"])
             stuck += 1
             alert_receipt(r)
-    if created or stuck:
-        log.info("run_schedule.watch", not_run_created=created, stuck_failed=stuck)
-    return {"not_run_created": created, "stuck_failed": stuck}
+    swept = sweep_stuck_details(now)
+    try:
+        from apps.system.services.detail_receipts import ensure_detail_receipts
+
+        swept["detail_receipts_created"] = ensure_detail_receipts()
+    except Exception as e:  # noqa: BLE001
+        log.warning("run_schedule.ensure_detail_receipts_failed", error=str(e))
+    if created or stuck or any(swept.values()):
+        log.info("run_schedule.watch", not_run_created=created, stuck_failed=stuck, **swept)
+    return {"not_run_created": created, "stuck_failed": stuck, **swept}
+
+
+# ─── Stuck detail rows (PipelineRun / Backtest) ─────────────────────────
+# Expected worst-case durations. A row still open long after this was left
+# behind by a worker that died mid-run (the laptop shut down, dev_down, OOM):
+# nothing will ever finish it, and the /pipeline page shows it "running"
+# forever. Generous margins: these only catch rows that are certainly dead.
+PIPELINE_MAX_RUNTIME = {
+    "screener_session": timedelta(hours=7, minutes=30),   # task hard limit is 7 h
+}
+PIPELINE_DEFAULT_MAX_RUNTIME = timedelta(hours=3)          # receipts allow 2 h
+BACKTEST_MAX_RUNTIME = timedelta(hours=6)
+
+STUCK_REASON = ("Never finished: still '{status}' {age} after it started (expected at most {limit}). "
+                "The worker running it stopped mid-run (machine shut down / worker restarted) and "
+                "nothing can resume it. Marked failed by the run sweeper.")
+
+
+def _fmt_td(td: timedelta) -> str:
+    hours = td.total_seconds() / 3600
+    return f"{hours:.1f} h" if hours < 48 else f"{hours / 24:.1f} days"
+
+
+def sweep_stuck_details(now: datetime | None = None) -> dict:
+    """Mark PipelineRun / strategies.Backtest rows stuck far past their
+    expected duration as failed, with the reason. Never raises."""
+    from django.utils import timezone
+
+    now = now or timezone.now()
+    out = {"pipeline_runs_failed": 0, "backtests_failed": 0}
+    try:
+        from apps.system.models import PipelineRun
+
+        for run in PipelineRun.objects.filter(status=PipelineRun.Status.RUNNING):
+            limit = PIPELINE_MAX_RUNTIME.get(run.task, PIPELINE_DEFAULT_MAX_RUNTIME)
+            age = now - run.started_at
+            if age <= limit:
+                continue
+            run.status = PipelineRun.Status.FAILED
+            run.finished_at = now
+            run.error = STUCK_REASON.format(status="running", age=_fmt_td(age), limit=_fmt_td(limit))
+            run.save(update_fields=["status", "finished_at", "error"])
+            out["pipeline_runs_failed"] += 1
+    except Exception as e:  # noqa: BLE001
+        log.warning("run_schedule.sweep_pipeline_failed", error=str(e))
+    try:
+        from apps.strategies.models import Backtest
+
+        cutoff = now - BACKTEST_MAX_RUNTIME
+        for bt in Backtest.objects.filter(status__in=[Backtest.Status.QUEUED, Backtest.Status.RUNNING],
+                                          updated_at__lt=cutoff):
+            age = now - bt.created_at
+            bt.error = STUCK_REASON.format(status=bt.status, age=_fmt_td(age), limit=_fmt_td(BACKTEST_MAX_RUNTIME))
+            bt.status = Backtest.Status.FAILED
+            bt.save(update_fields=["status", "error", "updated_at"])
+            out["backtests_failed"] += 1
+    except Exception as e:  # noqa: BLE001
+        log.warning("run_schedule.sweep_backtests_failed", error=str(e))
+    return out

@@ -400,8 +400,9 @@ def run_intraday_agent(
             logger.info(f"Loaded capital from broker margin: {state.capital:,.0f} INR")
         else:
             # Fallback to v2 portfolio snapshot (paper mode or margin not available)
-            from apps.trading.models import PortfolioSnapshot
-            snap = PortfolioSnapshot.objects.order_by("-captured_at").first()
+            # Trading portfolio only — the Mutual Funds book's snapshot has equity 0.
+            from apps.trading.services.portfolio_roles import latest_trading_snapshot
+            snap = latest_trading_snapshot()
             if snap:
                 state.capital = float(snap.equity)
                 logger.info(f"Loaded capital from portfolio: {state.capital:,.0f} INR")

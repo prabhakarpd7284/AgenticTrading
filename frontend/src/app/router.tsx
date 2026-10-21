@@ -27,6 +27,7 @@ import { PipelinePage } from "@/features/pipeline/PipelinePage";
 import { OnboardingPage } from "@/features/auth/OnboardingPage";
 import { RunsPage } from "@/features/runs/RunsPage";
 import { LabPage } from "@/features/lab/LabPage";
+import { PortfolioPage } from "@/features/portfolio/PortfolioPage";
 import { RequireAuth } from "./guards";
 import { RouteError } from "./RouteError";
 
@@ -95,7 +96,10 @@ export const router = createBrowserRouter([
       { path: "runs/:receiptId", element: <RunsPage /> },
       { path: "lab", element: <LabPage /> },
       { path: "today", element: <Redirect to="/" /> },
-      { path: "portfolio", element: <Redirect to="/dashboard" /> },
+      // R2: the Portfolio destination — Overview · Positions · Options ·
+      // Mutual Funds · Performance · Attribution (tabs embed the old pages).
+      { path: "portfolio", element: <PortfolioPage /> },
+      { path: "portfolio/:tab", element: <PortfolioPage /> },
       { path: "settings", element: <Redirect to="/brokers" /> },
       // The command palette used to link /broker (singular) — keep it working.
       { path: "broker", element: <Redirect to="/brokers" /> },

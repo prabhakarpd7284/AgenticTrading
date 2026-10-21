@@ -57,12 +57,52 @@ def debug_task(self) -> None:
 # Tier cadence: small=15m (intraday-ish), medium=1h, long=daily; enrichment
 # walks each open swing across its time-stop window once a day after close.
 # ──────────────────────────────────────────────────────────────────────────
+# Beat entries merged in by ``_register_swing_v2_beat`` below. Declared at
+# module level so the run-receipt schedule registry
+# (``apps.system.services.run_schedule``) can list them in every process,
+# not only where Celery finalized. name -> (crontab kwargs, task, args).
+# Times are IST (Celery uses settings.TIME_ZONE). NSE session 09:15–15:30.
+# No day_of_week: they fire every day, weekends included (unchanged).
+SWING_V2_BEAT = {
+    "swing_v2_small": ({"minute": "*/30", "hour": "9-15"}, "config.celery.run_swing_v2", ("small",)),
+    "swing_v2_medium": ({"minute": 5, "hour": "10,12,14"}, "config.celery.run_swing_v2", ("medium",)),
+    "swing_v2_long": ({"minute": 45, "hour": 15}, "config.celery.run_swing_v2", ("long",)),
+    "enrich_swing_v2": ({"minute": 0, "hour": 16}, "config.celery.enrich_swing_v2", ()),
+}
+
+
+def swing_v2_receipt_task(tier: str) -> str:
+    """RunReceipt.task_name per tier — three beat entries share one Celery
+    task, so the schedule registry matches slots on this instead."""
+    return f"config.celery.run_swing_v2[{tier}]"
+
+
 # soft_time_limit (raises inside the task → clean exit + lock release) and a
 # hard time_limit bound a scan that would otherwise run for hours. With the
 # day-range fetch fix a full scan is well under a minute, so 25m/30m is huge
 # headroom — purely a backstop against another runaway like 2026-06-24.
 @app.task(ignore_result=True, soft_time_limit=1500, time_limit=1800)
 def run_swing_v2(tier: str = "medium") -> None:
+    from apps.system.services.run_receipts import tracked_run
+
+    with tracked_run("scan", f"swing_v2.{tier}", {"tier": tier}, task_name=swing_v2_receipt_task(tier),
+                     primary_metric="signals", max_seconds=1800 + 300) as receipt:
+        _run_swing_v2(tier, receipt)
+
+
+def _swing_v2_signals_since(receipt) -> int | None:
+    try:
+        from apps.strategies.models import Signal
+
+        if receipt.receipt is None:
+            return None
+        return Signal.objects.filter(source="OK_SCANNER", strategy__startswith="swing_v2",
+                                     created_at__gte=receipt.receipt.started_at).count()
+    except Exception:  # noqa: BLE001 — receipts never break the scan
+        return None
+
+
+def _run_swing_v2(tier: str, receipt) -> None:
     from django.core.management import call_command
 
     # Redis advisory lock (NX + TTL) keyed by tier: with CELERY_TASK_ACKS_LATE
@@ -81,11 +121,14 @@ def run_swing_v2(tier: str = "medium") -> None:
         try:
             if not r.set(lock_key, "1", nx=True, ex=1800):
                 logger.info("run_swing_v2(%s) skipped — already running", tier)
+                receipt.skip(f"{tier} scan already running (Redis lock held)")
                 return
         except Exception:
             r = None  # lock unavailable → run without it rather than skip silently
     try:
         call_command("run_ok_scanner_v2", tier=tier, actionable_only=True)
+        receipt.output(tier=tier, signals=_swing_v2_signals_since(receipt))
+        receipt.link("Swing scanner", "/swing-scanner")
     finally:
         if r is not None:
             try:
@@ -97,26 +140,19 @@ def run_swing_v2(tier: str = "medium") -> None:
 @app.task(ignore_result=True, soft_time_limit=900, time_limit=1200)
 def enrich_swing_v2() -> None:
     from django.core.management import call_command
-    call_command("enrich_signals_v2")
+
+    from apps.system.services.run_receipts import tracked_run
+
+    with tracked_run("job", "swing_v2.enrich", {}, task_name="config.celery.enrich_swing_v2",
+                     max_seconds=1200 + 300) as receipt:
+        call_command("enrich_signals_v2")
+        receipt.link("Swing scanner", "/swing-scanner")
 
 
 @app.on_after_finalize.connect
 def _register_swing_v2_beat(sender, **_kwargs) -> None:
     from celery.schedules import crontab
-    # Times are IST (Celery uses settings.TIME_ZONE). NSE session 09:15–15:30.
-    sender.add_periodic_task(
-        crontab(minute="*/30", hour="9-15"),
-        run_swing_v2.s("small"), name="swing_v2_small",
-    )
-    sender.add_periodic_task(
-        crontab(minute=5, hour="10,12,14"),
-        run_swing_v2.s("medium"), name="swing_v2_medium",
-    )
-    sender.add_periodic_task(
-        crontab(minute=45, hour=15),
-        run_swing_v2.s("long"), name="swing_v2_long",
-    )
-    sender.add_periodic_task(
-        crontab(minute=0, hour=16),
-        enrich_swing_v2.s(), name="enrich_swing_v2",
-    )
+
+    tasks = {"config.celery.run_swing_v2": run_swing_v2, "config.celery.enrich_swing_v2": enrich_swing_v2}
+    for name, (cron, task, args) in SWING_V2_BEAT.items():
+        sender.add_periodic_task(crontab(**cron), tasks[task].s(*args), name=name)

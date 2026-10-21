@@ -31,6 +31,8 @@ api_v1 = [
     # merged into a single `trading` app in Phase 4c; their REST surfaces
     # stay split so frontend routes don't change.
     path("portfolios/", include("apps.trading.api.portfolio_urls")),
+    # Portfolio destination read model (UX redesign R2): overview + attribution.
+    path("portfolio/", include("apps.trading.api.overview_urls")),
     path("orders/", include("apps.trading.api.orders_urls")),
     path("strategies/", include("apps.strategies.api.urls")),
     path("agents/", include("apps.agents_core.api.urls")),

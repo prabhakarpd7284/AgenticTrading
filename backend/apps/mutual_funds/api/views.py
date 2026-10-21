@@ -402,15 +402,12 @@ def catalog_nav_date(max_nav_date):
     """The NAV date most schemes are priced at. AMFI's file has liquid /
     overnight funds publish NAVs for upcoming non-business days (e.g. a
     Saturday/Sunday NAV on Friday night), so a plain MAX(nav_date) can sit
-    in the future — the busiest date of the last 10 days is the honest
-    "catalog as of" date."""
+    in the future; see ``nav_backfill.catalog_date`` for the rule."""
+    from apps.mutual_funds.services.nav_backfill import catalog_date
+
     if max_nav_date is None:
         return None
-    row = (
-        MFNav.objects.filter(nav_date__gte=max_nav_date - timedelta(days=10))
-        .values("nav_date").annotate(n=Count("id")).order_by("-n", "-nav_date").first()
-    )
-    return row["nav_date"] if row else max_nav_date
+    return catalog_date(max_nav_date)
 
 
 class StatusView(APIView):

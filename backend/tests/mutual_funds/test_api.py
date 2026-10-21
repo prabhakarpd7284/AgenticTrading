@@ -243,6 +243,22 @@ def test_status_catalog_date_ignores_forward_dated_liquid_navs(world):
     assert body["max_nav_date"] == (timezone.localdate() + timedelta(days=2)).isoformat()
 
 
+def test_catalog_date_not_pulled_back_by_backfilled_history(world):
+    """A history backfill can give an older day more rows than today's full
+    pull; the catalog date must still be today."""
+    from apps.mutual_funds.services.nav_backfill import catalog_date
+
+    today = timezone.localdate()
+    older = today - timedelta(days=3)
+    for i in range(10):
+        s = _scheme(f"2000{i:02d}", f"Backfilled Fund {i}")
+        _nav(s, older, 10 + i)
+        if i < 6:
+            _nav(s, today, 11 + i)
+    _nav(MFScheme.objects.get(scheme_code="100002"), today + timedelta(days=2), 2001)
+    assert catalog_date() == today
+
+
 def test_status_empty_db(two_tenants):
     body = _client_for(two_tenants.owner_a).get(f"{BASE}/status/").json()
     assert body["latest_nav_date"] is None

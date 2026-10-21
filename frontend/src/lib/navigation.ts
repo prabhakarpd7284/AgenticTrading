@@ -9,7 +9,7 @@ import type { LucideIcon } from "lucide-react";
 import {
   Activity, BarChart3, Bot, Briefcase, Calendar, CandlestickChart, FlaskConical, Gauge,
   HeartPulse, Home, Landmark, Layers, LineChart, Link2, ListChecks, MoonStar, PieChart, Radio,
-  Settings, ShoppingBag, Sigma, Terminal, TrendingUp, Triangle, Workflow, History,
+  Settings, ShoppingBag, Sigma, Terminal, TrendingUp, Triangle, Wallet, Workflow, History,
 } from "lucide-react";
 
 export interface NavItem {
@@ -45,9 +45,10 @@ export const DESTINATIONS: Destination[] = [
     ],
   },
   {
-    key: "portfolio", label: "Portfolio", to: "/dashboard", icon: PieChart,
+    key: "portfolio", label: "Portfolio", to: "/portfolio", icon: PieChart,
     description: "Everything you hold — equity, options, mutual funds, performance",
     items: [
+      { to: "/portfolio", label: "Overview", icon: Wallet, keywords: "total value allocation risk attribution net worth" },
       { to: "/dashboard", label: "Desk", icon: Activity, hint: "g d", keywords: "overview capital" },
       { to: "/positions", label: "Positions", icon: Briefcase, hint: "g p" },
       { to: "/options", label: "Options Desk", icon: Sigma, hint: "g e", keywords: "chain straddle" },
