@@ -437,6 +437,16 @@ class BacktestViewSet(viewsets.ViewSet):
         bt = self._get(pk)
         if bt.status not in (Backtest.Status.QUEUED, Backtest.Status.RUNNING):
             return Response({"detail": f"backtest is already {bt.status}"}, status=status.HTTP_409_CONFLICT)
-        Backtest.objects.filter(pk=bt.pk).update(cancel_requested=True)
+        if bt.status == Backtest.Status.QUEUED and bt.started_at is None:
+            # Not picked up by a worker yet: cancel now (the task, if it ever
+            # runs, sees a terminal status and exits). Saved so the receipt follows.
+            from django.utils import timezone
+            bt.cancel_requested = True
+            bt.status = Backtest.Status.CANCELLED
+            bt.error = "cancelled before it started"
+            bt.finished_at = timezone.now()
+            bt.save()
+        else:
+            Backtest.objects.filter(pk=bt.pk).update(cancel_requested=True)
         bt.refresh_from_db()
         return Response(backtest_dict(bt), status=status.HTTP_202_ACCEPTED)

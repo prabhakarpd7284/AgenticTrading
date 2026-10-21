@@ -204,10 +204,30 @@ def test_cancel_queued_backtest(pair):
     bt = Backtest.objects.create(tenant=obj.tenant, instance=obj, version=obj.versions.first(),
                                  from_date="2026-05-04", to_date="2026-05-08")
     r = ca.post(f"{BASE}/backtests/{bt.id}/cancel/")
-    assert r.status_code == 202 and r.json()["cancel_requested"] is True
+    assert r.status_code == 202 and r.json()["status"] == "cancelled"      # never started → cancelled at once
     from apps.strategies.services.backtest_service import run_backtest_job
     assert run_backtest_job(str(bt.id), loader=FakeLoader()) == "cancelled"
+    assert BacktestTrade.objects.filter(backtest=bt).count() == 0
+    assert RunReceipt.objects.get(detail_kind="backtest", detail_id=str(bt.id)).status == "skipped"
     assert ca.post(f"{BASE}/backtests/{bt.id}/cancel/").status_code == 409
+
+
+def test_cancel_running_backtest_stops_between_symbols(pair):
+    t, ca, _ = pair
+    inst = _create_spec(ca)
+    obj = StrategyInstance.objects.get(id=inst["id"])
+    bt = Backtest.objects.create(tenant=obj.tenant, instance=obj, version=obj.versions.first(),
+                                 from_date="2026-05-04", to_date="2026-05-08")
+
+    class CancellingLoader(FakeLoader):
+        def load(self, *a, **k):
+            Backtest.objects.filter(pk=bt.pk).update(cancel_requested=True)   # user clicks cancel mid-run
+            return super().load(*a, **k)
+
+    from apps.strategies.services.backtest_service import run_backtest_job
+    assert run_backtest_job(str(bt.id), loader=CancellingLoader()) == "cancelled"
+    bt.refresh_from_db()
+    assert bt.status == "cancelled" and bt.error == "cancelled by the user"
 
 
 # ── tenant isolation on every endpoint ──────────────────────────────────────
