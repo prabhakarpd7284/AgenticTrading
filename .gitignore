@@ -67,3 +67,6 @@ dumps/
 
 # ── Research outputs (pivot_research CSVs etc.) ──
 backend/research_output/
+
+# day-trader skill pack working files (.claude/skills/trader-*)
+/trader/
